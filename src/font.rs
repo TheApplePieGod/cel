@@ -2,7 +2,7 @@ use rust_fontconfig::{FcFontCache, FcPattern};
 //use msdf::{GlyphLoader, Projection, SDFTrait};
 use ttf_parser::Face;
 use msdfgen::{FontExt, Bitmap, Range, MsdfGeneratorConfig, FillRule, Bound};
-use std::{fs::File, io::{BufReader, Read}, collections::{HashMap, hash_map::Entry}, ops::Bound};
+use std::{fs::File, io::{BufReader, Read}, collections::{HashMap, hash_map::Entry}};
 use std::num::NonZeroUsize;
 use lru::LruCache;
 use crate::texture::Texture;
@@ -12,14 +12,16 @@ const MSDF_SIZE: u32 = 32;
 const MSDF_RANGE: f32 = 4.0;
 
 pub struct FaceMetrics {
-    pub height: f32
+    pub height: f32,
+    pub space_size: f32
 }
 
 #[derive(Clone, Copy)]
 pub struct GlyphMetrics {
     pub atlas_index: u32,
     pub advance: [f32; 2],
-    pub bound: Bound<f32>
+    pub glyph_bound: Bound<f32>,
+    pub atlas_bound: Bound<f32>
 }
 
 pub struct GlyphData {
@@ -29,17 +31,12 @@ pub struct GlyphData {
 
 pub struct Font {
     name: String,
+    tab_width: f32,
     font_data: Vec<u8>,
     glyph_cache: HashMap<char, GlyphData>,
     glyph_lru: LruCache<char, GlyphMetrics>,
     atlas_free_list: u32,
     atlas_tex: Texture<f32>
-}
-
-impl GlyphData {
-    pub fn get_pixels(&self) -> &[f32] {
-        &self.pixels
-    }
 }
 
 impl Font {
@@ -71,6 +68,7 @@ impl Font {
 
         Ok(Self {
             name: name.to_string(),
+            tab_width: 4.0,
             font_data,
             glyph_cache: Default::default(),
             glyph_lru: LruCache::new(NonZeroUsize::new(max_glyphs as usize).unwrap()),
@@ -81,6 +79,10 @@ impl Font {
 
     pub fn get_name(&self) -> &str {
         &self.name
+    }
+
+    pub fn get_tab_width(&self) -> f32 {
+        self.tab_width
     }
 
     pub fn get_atlas_tex(&self) -> &Texture<f32> {
@@ -102,8 +104,10 @@ impl Font {
     pub fn get_face_metrics(&self) -> FaceMetrics {
         let face = Face::parse(self.font_data.as_slice(), 0).unwrap();
         let scale = face.units_per_em() as f32;
+        let space_glyph = face.glyph_index(' ').unwrap();
         FaceMetrics {
-            height: face.height() as f32 / scale
+            height: face.height() as f32 / scale,
+            space_size: face.glyph_hor_advance(space_glyph).unwrap() as f32 / scale
         }
     }
 
@@ -156,11 +160,7 @@ impl Font {
 
             shape.correct_sign(&mut bitmap, &framing, fill_rule);
             shape.correct_msdf_error(&mut bitmap, &framing, &config);
-
-            // TODO: mid
-            bitmap.flip_y();
             
-            //let pixels: Vec<u8> = msdf.image().into_iter().map(|&x| (x * 255.0) as u8).collect();
             let bmp_pixels = bitmap.pixels();
             let mut pixels: Vec<f32> = vec![0.0; (MSDF_SIZE * MSDF_SIZE * 4) as usize];
             for i in 0..bmp_pixels.len() {
@@ -176,14 +176,20 @@ impl Font {
                 metrics: GlyphMetrics {
                     atlas_index: 0,
                     advance: [
-                        face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32 / scale,
-                        face.glyph_ver_advance(glyph_index).unwrap_or(0) as f32 / scale
+                        face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32 / scale as f32,
+                        face.glyph_ver_advance(glyph_index).unwrap_or(0) as f32 / scale as f32
                     ],
-                    bound: Bound::new(
+                    glyph_bound: Bound::new(
                         bound.left as f32 / scale,
                         bound.bottom as f32 / scale,
                         bound.right as f32 / scale,
                         bound.top as f32 / scale
+                    ),
+                    atlas_bound: Bound::new(
+                        ((bound.left + framing.translate.x) * framing.scale.x) as f32,
+                        ((bound.bottom + framing.translate.y) * framing.scale.y) as f32,
+                        ((bound.right + framing.translate.x) * framing.scale.x) as f32,
+                        ((bound.top + framing.translate.y) * framing.scale.y) as f32
                     )
                 }
             }

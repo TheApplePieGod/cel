@@ -3,19 +3,18 @@ use crate::font::Font;
 
 const MAX_CHARACTERS: u32 = 20000;
 
-type Vec2 = [f32; 2];
-type Vec3 = [f32; 3];
-
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Vertex {
-    position: Vec3,
-    tex_coord: Vec2
+    position: u32,
+    tex_coord: u32
 }
 
 #[repr(C)]
 pub struct Offset {
     position: u32,
     scale: u32,
+    tex_coord_ki: u32,
     tex_coord: u32
 }
 
@@ -23,33 +22,15 @@ pub struct Renderer {
     shader_program: u32,
     quad_vao: u32,
     quad_vbo: u32,
-    quad_ibo: u32,
-    pos_buf: u32,
-    pos_tex: u32,
     width: u32,
     height: u32
 }
 
 impl Renderer {
     pub fn new() -> Self {
-        // Static quad data
-        let uv_max = 1.0 - 0.05; // Account for atlas oversample
-        let quad_vertices: [Vertex; 4] = [
-            Vertex { position: [1.0, 1.0, 0.0], tex_coord: [uv_max, 0.0] }, // TR
-            Vertex { position: [1.0, 0.0, 0.0], tex_coord: [uv_max, uv_max] }, // BR
-            Vertex { position: [0.0, 0.0, 0.0], tex_coord: [0.0, uv_max] }, // BL
-            Vertex { position: [0.0, 1.0, 0.0], tex_coord: [0.0, 0.0] } // TL
-        ];
-        let quad_indices: [u32; 6] = [
-            3, 1, 0, 3, 2, 1
-        ];
-
         // Generate buffers
         let mut quad_vao: u32 = 0;
         let mut quad_vbo: u32 = 0;
-        let mut quad_ibo: u32 = 0;
-        let mut pos_buf: u32 = 0;
-        let mut pos_tex: u32 = 0;
         unsafe {
             // VAO
             gl::GenVertexArrays(1, &mut quad_vao);
@@ -60,52 +41,29 @@ impl Renderer {
             gl::BindBuffer(gl::ARRAY_BUFFER, quad_vbo);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
-                (size_of::<Vertex>() * quad_vertices.len()) as isize,
-                quad_vertices.as_ptr() as *const c_void,
-                gl::STATIC_DRAW
-            );
-
-            // IBO
-            gl::GenBuffers(1, &mut quad_ibo);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, quad_ibo);
-            gl::BufferData(
-                gl::ELEMENT_ARRAY_BUFFER,
-                (size_of::<u32>() * quad_indices.len()) as isize,
-                quad_indices.as_ptr() as *const c_void,
-                gl::STATIC_DRAW
+                (size_of::<Vertex>() * MAX_CHARACTERS as usize * 6) as isize,
+                null(),
+                gl::DYNAMIC_DRAW
             );
 
             // VAO attributes
             let vert_stride = size_of::<Vertex>() as i32;
-            let pos_stride = (size_of::<f32>() * 3) as i32;
-            gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, vert_stride, null());
-            gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vert_stride, pos_stride as *const c_void);
+            let pos_stride = size_of::<u32>() as i32;
+            gl::VertexAttribPointer(0, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, null());
+            gl::VertexAttribPointer(1, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, pos_stride as *const c_void);
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
-
-            // Position buffer
-            gl::GenBuffers(1, &mut pos_buf);
-            gl::BindBuffer(gl::TEXTURE_BUFFER, pos_buf);
-            gl::BufferData(
-                gl::TEXTURE_BUFFER,
-                (size_of::<Offset>() * (MAX_CHARACTERS as usize)) as isize,
-                null(),
-                gl::DYNAMIC_DRAW
-            );
-            gl::GenTextures(1, &mut pos_tex);
         }
 
         let vert_shader_source = b"
             #version 400 core
 
-            layout (location = 0) in vec3 inPos;
-            layout (location = 1) in vec2 inTexCoord;
+            layout (location = 0) in uint inPos;
+            layout (location = 1) in uint inTexCoord;
 
             out vec2 texCoord;
 
-            uniform usamplerBuffer offsetTex;
             uniform mat4 model;
-            uniform vec2 texCoordScale;
 
             uint half2float(uint h) {
                 return ((h & uint(0x8000)) << uint(16)) | ((( h & uint(0x7c00)) + uint(0x1c000)) << uint(13)) | ((h & uint(0x03ff)) << uint(13));
@@ -118,15 +76,12 @@ impl Renderer {
 
             void main()
             {
-                uvec4 offset = texelFetch(offsetTex, gl_InstanceID);
-                vec2 pos = unpackHalf2x16(offset.x);
-                vec2 scale = unpackHalf2x16(offset.y);
-                vec2 coord = unpackHalf2x16(offset.z);
+                vec2 pos = unpackHalf2x16(inPos);
+                vec2 coord = unpackHalf2x16(inTexCoord);
 
-                gl_Position = model * (vec4(inPos * vec3(scale, 1.0), 1.0)
-                    + vec4(pos, 0.f, 0.f)) // Add character-space offset
-                    + vec4(-1.f, 0.f, 0.f, 0.f); // Move origin to top left 
-                texCoord = inTexCoord * texCoordScale + coord;
+                gl_Position = model * vec4(pos, 0.0, 1.0)
+                    + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
+                texCoord = coord;
             }
         \0";
 
@@ -151,11 +106,14 @@ impl Renderer {
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
                 
-                //fragColor = mix(vec4(0.f), vec4(1.f), opacity);
+                //fragColor = mix(vec4(1.f, 0.f, 0.f, 1.f), vec4(1.f), opacity);
+                fragColor = mix(vec4(0.f), vec4(1.f), opacity);
 
+                /*
                 if (opacity < 0.05)
                     discard;
                 fragColor = vec4(1.f, 1.f, 1.f, opacity);
+                */
 
                 //fragColor = msd;
                 //fragColor = vec4(opacity, opacity, opacity, 1.f);
@@ -187,9 +145,6 @@ impl Renderer {
             shader_program: program,
             quad_vao,
             quad_vbo,
-            quad_ibo,
-            pos_buf,
-            pos_tex,
             width: 0,
             height: 0
         }
@@ -211,29 +166,75 @@ impl Renderer {
         let char_size = 2.0 / chars_per_line as f32;
         let char_size_px = self.width as f32 / chars_per_line as f32;
         let aspect_ratio = self.width as f32 / self.height as f32;
+        let coord_scale = 1.0 / font.get_atlas_size() as f32;
 
         let face_metrics = font.get_face_metrics();
-        let mut offsets: Vec<Offset> = vec!();
-        let mut x = 0.0;
-        let mut y = face_metrics.height;
+        let base_x = 0.25;
+        let mut vertices: Vec<Vertex> = vec!();
+        let mut x = base_x;
+        let mut y = -face_metrics.height;
         for c in 0..text.len() {
             let c_val = text.as_bytes()[c] as char;
             if c_val.is_whitespace() {
+                match c_val {
+                    ' ' => x += face_metrics.space_size,
+                    '\t' => x += face_metrics.space_size * font.get_tab_width(),
+                    '\n' => {
+                        x = base_x;
+                        y -= face_metrics.height;
+                    }
+                    _ => {}
+                }
+
                 continue;
             }
-            //x = (c % (chars_per_line as usize)) as f32;
-            //y = (c / (chars_per_line as usize)) as f32;
-            let glyph_metrics = font.get_glyph_data(c_val);
-            let texcoord = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
-            offsets.push(Offset {
-                position: Self::pack_floats(x, y),
-                // TODO: scale should depend on glyph size versus actual width
-                scale: Self::pack_floats(glyph_metrics.width, glyph_metrics.height),
-                tex_coord: Self::pack_floats(texcoord[0], texcoord[1])
-            });
-            log::warn!("{}", glyph_metrics.advance[0]);
+
+            //TODO: precompute in metrics
+            // UV.y is flipped since the underlying atlas bitmaps have flipped y
+            let glyph_metrics = &font.get_glyph_data(c_val);
+            let glyph_bound = &glyph_metrics.glyph_bound;
+            let atlas_bound = &glyph_metrics.atlas_bound;
+            let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
+            let uv_min = [
+                uv[0] + atlas_bound.left * coord_scale,
+                uv[1] + atlas_bound.top * coord_scale
+            ];
+            let uv_max = [
+                uv_min[0] + atlas_bound.width() * coord_scale,
+                uv_min[1] - atlas_bound.height() * coord_scale
+            ];
+
+            let scale = [
+                glyph_bound.width(),
+                glyph_bound.height()
+            ];
+            log::warn!("{}, {}", scale[0], scale[1]);
+
+            let tr = Vertex {
+                position: Self::pack_floats(x + scale[0], y + scale[1]),
+                tex_coord: Self::pack_floats(uv_max[0], uv_min[1])
+            };
+            let br = Vertex {
+                position: Self::pack_floats(x + scale[0], y + 0.0),
+                tex_coord: Self::pack_floats(uv_max[0], uv_max[1])
+            };
+            let bl = Vertex {
+                position: Self::pack_floats(x + 0.0, y + 0.0),
+                tex_coord: Self::pack_floats(uv_min[0], uv_max[1])
+            };
+            let tl = Vertex {
+                position: Self::pack_floats(x + 0.0, y + scale[1]),
+                tex_coord: Self::pack_floats(uv_min[0], uv_min[1])
+            };
+
+            vertices.push(tl);
+            vertices.push(br);
+            vertices.push(tr);
+            vertices.push(tl);
+            vertices.push(bl);
+            vertices.push(br);
+
             x += glyph_metrics.advance[0];
-            //y = (c / (chars_per_line as usize)) as f32;
         }
 
         unsafe {
@@ -243,33 +244,23 @@ impl Renderer {
             // Bind program data
             gl::UseProgram(self.shader_program);
             gl::BindVertexArray(self.quad_vao);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.quad_ibo);
 
-            // Update offset data
-            gl::BindBuffer(gl::TEXTURE_BUFFER, self.pos_buf);
+            // Update vertex data
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
             gl::BufferSubData(
-                gl::TEXTURE_BUFFER,
+                gl::ARRAY_BUFFER,
                 0,
-                (size_of::<Offset>() * offsets.len()) as isize,
-                offsets.as_ptr() as *const c_void
+                (size_of::<Vertex>() * vertices.len()) as isize,
+                vertices.as_ptr() as _
             );
 
-            // Bind position data
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_BUFFER, self.pos_tex);
-            gl::TexBuffer(gl::TEXTURE_BUFFER, gl::RGB32F, self.pos_buf);
-            gl::Uniform1i(gl::GetUniformLocation(
-                self.shader_program,
-                b"offsetTex\0".as_ptr() as _
-            ), 0);
-
             // Bind atlas tex
-            gl::ActiveTexture(gl::TEXTURE1);
+            gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
             gl::Uniform1i(gl::GetUniformLocation(
                 self.shader_program,
                 b"atlasTex\0".as_ptr() as _
-            ), 1);
+            ), 0);
 
             // Set pixel range
             let pixel_range = char_size_px / font.get_glyph_size() as f32 * font.get_pixel_range();
@@ -277,13 +268,6 @@ impl Renderer {
                 self.shader_program,
                 b"pixelRange\0".as_ptr() as _
             ), pixel_range);
-
-            // Set texcoord scale
-            let coord_scale = font.get_glyph_size() as f32 / font.get_atlas_size() as f32;
-            gl::Uniform2fv(gl::GetUniformLocation(
-                self.shader_program,
-                b"texCoordScale\0".as_ptr() as _
-            ), 1, [coord_scale, coord_scale].as_ptr());
 
             // Set global model matrix (column major)
             let model_mat: [f32; 16] = [
@@ -297,14 +281,7 @@ impl Renderer {
                 "model".as_ptr() as *const i8
             ), 1, gl::FALSE, model_mat.as_ptr());
 
-            gl::DrawElementsInstanced(
-                gl::TRIANGLES,
-                6,
-                gl::UNSIGNED_INT,
-                null(),
-                offsets.len() as i32
-            );
-
+            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
             gl::BindVertexArray(0);
         }
     }
@@ -354,11 +331,9 @@ impl Renderer {
 impl Drop for Renderer {
     fn drop(&mut self) {
         let del_vao: [u32; 1] = [self.quad_vao];
-        let del_tex: [u32; 1] = [self.pos_tex];
-        let del_buf: [u32; 3] = [self.quad_vbo, self.quad_ibo, self.pos_buf];
+        let del_buf: [u32; 1] = [self.quad_vbo];
         unsafe {
             gl::DeleteVertexArrays(del_vao.len() as i32, del_vao.as_ptr());
-            gl::DeleteTextures(del_tex.len() as i32, del_tex.as_ptr());
             gl::DeleteBuffers(del_buf.len() as i32, del_buf.as_ptr());
             gl::DeleteProgram(self.shader_program);
         }

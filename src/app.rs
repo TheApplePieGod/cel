@@ -48,7 +48,7 @@ impl App {
                 self.window.get_pixel_width(),
                 self.window.get_pixel_height()
             );
-            self.renderer.render(&mut self.primary_font, "Hello World!", 64);
+            self.renderer.render(&mut self.primary_font, "Hmello World!\nBased;)", 64);
 
             // End frame
             self.window.end_frame();
