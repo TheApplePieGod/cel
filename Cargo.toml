@@ -1,0 +1,16 @@
+[package]
+name = "cel"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chrono = "0.4"
+glfw = "0.54"
+gl = "0.10"
+log = "0.4"
+lru = "0.12"
+msdf = { git = "https://github.com/TheApplePieGod/msdf-rs.git" }
+rust-fontconfig = { git = "https://github.com/TheApplePieGod/rust-fontconfig.git" }
+ttf-parser = "0.20"
