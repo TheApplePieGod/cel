@@ -1,25 +1,37 @@
 use rust_fontconfig::{FcFontCache, FcPattern};
-use msdf::{GlyphLoader, Projection, SDFTrait};
+//use msdf::{GlyphLoader, Projection, SDFTrait};
 use ttf_parser::Face;
-use std::{fs::File, io::{BufReader, Read}, collections::{HashMap, hash_map::Entry}};
+use msdfgen::{FontExt, Bitmap, Range, MsdfGeneratorConfig, FillRule, Bound};
+use std::{fs::File, io::{BufReader, Read}, collections::{HashMap, hash_map::Entry}, ops::Bound};
 use std::num::NonZeroUsize;
 use lru::LruCache;
 use crate::texture::Texture;
 
 const ATLAS_SIZE: u32 = 2048;
 const MSDF_SIZE: u32 = 32;
-const MSDF_RANGE: f32 = 2.0;
+const MSDF_RANGE: f32 = 4.0;
+
+pub struct FaceMetrics {
+    pub height: f32
+}
+
+#[derive(Clone, Copy)]
+pub struct GlyphMetrics {
+    pub atlas_index: u32,
+    pub advance: [f32; 2],
+    pub bound: Bound<f32>
+}
 
 pub struct GlyphData {
     pixels: Vec<f32>,
-    atlas_index: u32
+    metrics: GlyphMetrics
 }
 
 pub struct Font {
     name: String,
     font_data: Vec<u8>,
     glyph_cache: HashMap<char, GlyphData>,
-    glyph_lru: LruCache<char, u32>,
+    glyph_lru: LruCache<char, GlyphMetrics>,
     atlas_free_list: u32,
     atlas_tex: Texture<f32>
 }
@@ -87,28 +99,36 @@ impl Font {
         MSDF_RANGE
     }
 
-    pub fn get_glyph_texcoord(&mut self, key: char) -> [f32; 2] {
-        let atlas_index: u32;
+    pub fn get_face_metrics(&self) -> FaceMetrics {
+        let face = Face::parse(self.font_data.as_slice(), 0).unwrap();
+        let scale = face.units_per_em() as f32;
+        FaceMetrics {
+            height: face.height() as f32 / scale
+        }
+    }
 
+    pub fn get_atlas_texcoord(atlas_index: u32) -> [f32; 2] {
+        let offset = Self::convert_atlas_index_to_offset(atlas_index);
+        return Self::convert_atlas_offset_to_texcoord(offset);
+    }
+
+    pub fn get_glyph_data(&mut self, key: char) -> GlyphMetrics {
+        let atlas_index: u32;
         match self.glyph_lru.get(&key) {
             Some(v) => {
                 // Already present, return immediately
-                let offset = Self::convert_atlas_index_to_offset(*v);
-                return Self::convert_atlas_offset_to_texcoord(offset);
+                return *v;
             },
             None => {
                 // Pull from free list first
                 if self.atlas_free_list < self.glyph_lru.cap().get() as u32 {
                     atlas_index = self.atlas_free_list;
                     self.atlas_free_list += 1;
-                    self.glyph_lru.push(key, atlas_index);
                 } else {
                     // LRU Will always be full here since the LRU is the same
                     // size as the free list, so we can safely evict
                     let lru = self.glyph_lru.pop_lru().unwrap();
-                    atlas_index = lru.1;
-
-                    self.glyph_lru.put(key, atlas_index);
+                    atlas_index = lru.1.atlas_index;
                 }
             }
         }
@@ -119,31 +139,53 @@ impl Font {
             // TODO: handle invalid glyphs
             let face = Face::parse(self.font_data.as_slice(), 0).unwrap();
             let glyph_index = face.glyph_index(key).unwrap();
-            let shape = face.load_shape(glyph_index).unwrap();
-            let colored_shape = shape.color_edges_ink_trap(3.0);
-            let global_bb = face.global_bounding_box();
+            let mut shape = face.glyph_shape(glyph_index).unwrap();
+            let bound = shape.get_bound();
+            let framing = bound.autoframe(
+                MSDF_SIZE,
+                MSDF_SIZE,
+                Range::Px(MSDF_RANGE as f64),
+                None
+            ).unwrap();
 
-            let projection = Projection {
-                scale: [
-                    MSDF_SIZE as f64 / global_bb.width() as f64,
-                    MSDF_SIZE as f64 / global_bb.height() as f64
-                ].into(),
-                //scale: [1.0, 1.0].into(),
-                translation: [0.0, 0.0].into()
-            };
+            let config = MsdfGeneratorConfig::default();
+            let fill_rule = FillRule::default();
+            let mut bitmap = Bitmap::new(MSDF_SIZE, MSDF_SIZE);
+            shape.edge_coloring_simple(3.0, 0);
+            shape.generate_mtsdf(&mut bitmap, &framing, &config);
 
-            let msdf_config = Default::default();
-            let msdf = colored_shape.generate_mtsdf(
-                MSDF_SIZE, MSDF_SIZE,
-                MSDF_RANGE.into(),
-                &projection,
-                &msdf_config
-            );
+            shape.correct_sign(&mut bitmap, &framing, fill_rule);
+            shape.correct_msdf_error(&mut bitmap, &framing, &config);
+
+            // TODO: mid
+            bitmap.flip_y();
             
             //let pixels: Vec<u8> = msdf.image().into_iter().map(|&x| (x * 255.0) as u8).collect();
+            let bmp_pixels = bitmap.pixels();
+            let mut pixels: Vec<f32> = vec![0.0; (MSDF_SIZE * MSDF_SIZE * 4) as usize];
+            for i in 0..bmp_pixels.len() {
+                pixels[i * 4 + 0] = bmp_pixels[i].r;
+                pixels[i * 4 + 1] = bmp_pixels[i].g;
+                pixels[i * 4 + 2] = bmp_pixels[i].b;
+                pixels[i * 4 + 3] = bmp_pixels[i].a;
+            }
+
+            let scale = face.units_per_em() as f32;
             GlyphData {
-                pixels: msdf.image().to_vec(),
-                atlas_index: 0
+                pixels,
+                metrics: GlyphMetrics {
+                    atlas_index: 0,
+                    advance: [
+                        face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32 / scale,
+                        face.glyph_ver_advance(glyph_index).unwrap_or(0) as f32 / scale
+                    ],
+                    bound: Bound::new(
+                        bound.left as f32 / scale,
+                        bound.bottom as f32 / scale,
+                        bound.right as f32 / scale,
+                        bound.top as f32 / scale
+                    )
+                }
             }
         });
 
@@ -154,7 +196,10 @@ impl Font {
             &glyph_data.pixels
         );
 
-        Self::convert_atlas_offset_to_texcoord(offset)
+        glyph_data.metrics.atlas_index = atlas_index;
+        self.glyph_lru.put(key, glyph_data.metrics);
+
+        glyph_data.metrics
     }
 
     fn convert_atlas_index_to_offset(index: u32) -> [u32; 2] {

@@ -1,34 +1,4 @@
 use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}};
-
-
-#[macro_export]
-macro_rules! glchk {
-    ($($s:stmt;)*) => {
-        $(
-            $s;
-            if cfg!(debug_assertions) {
-                let err = gl::GetError();
-                if err != gl::NO_ERROR {
-                    let err_str = match err {
-                        gl::INVALID_ENUM => "GL_INVALID_ENUM",
-                        gl::INVALID_VALUE => "GL_INVALID_VALUE",
-                        gl::INVALID_OPERATION => "GL_INVALID_OPERATION",
-                        gl::INVALID_FRAMEBUFFER_OPERATION => "GL_INVALID_FRAMEBUFFER_OPERATION",
-                        gl::OUT_OF_MEMORY => "GL_OUT_OF_MEMORY",
-                        gl::STACK_UNDERFLOW => "GL_STACK_UNDERFLOW",
-                        gl::STACK_OVERFLOW => "GL_STACK_OVERFLOW",
-                        _ => "unknown error"
-                    };
-                    println!("{}:{} - {} caused {}",
-                             file!(),
-                             line!(),
-                             stringify!($s),
-                             err_str);
-                }
-            }
-        )*
-    }
-}
 use crate::font::Font;
 
 const MAX_CHARACTERS: u32 = 20000;
@@ -44,8 +14,9 @@ pub struct Vertex {
 
 #[repr(C)]
 pub struct Offset {
-    position: Vec2,
-    tex_coord: Vec2
+    position: u32,
+    scale: u32,
+    tex_coord: u32
 }
 
 pub struct Renderer {
@@ -62,11 +33,12 @@ pub struct Renderer {
 impl Renderer {
     pub fn new() -> Self {
         // Static quad data
+        let uv_max = 1.0 - 0.05; // Account for atlas oversample
         let quad_vertices: [Vertex; 4] = [
-            Vertex { position: [1.0, 0.0, 0.0], tex_coord: [1.0, 0.0] }, // TR
-            Vertex { position: [1.0, -1.0, 0.0], tex_coord: [1.0, 1.0] }, // BR
-            Vertex { position: [0.0, -1.0, 0.0], tex_coord: [0.0, 1.0] }, // BL
-            Vertex { position: [0.0, 0.0, 0.0], tex_coord: [0.0, 0.0] } // TL
+            Vertex { position: [1.0, 1.0, 0.0], tex_coord: [uv_max, 0.0] }, // TR
+            Vertex { position: [1.0, 0.0, 0.0], tex_coord: [uv_max, uv_max] }, // BR
+            Vertex { position: [0.0, 0.0, 0.0], tex_coord: [0.0, uv_max] }, // BL
+            Vertex { position: [0.0, 1.0, 0.0], tex_coord: [0.0, 0.0] } // TL
         ];
         let quad_indices: [u32; 6] = [
             3, 1, 0, 3, 2, 1
@@ -131,17 +103,30 @@ impl Renderer {
 
             out vec2 texCoord;
 
-            uniform samplerBuffer offsetTex;
+            uniform usamplerBuffer offsetTex;
             uniform mat4 model;
             uniform vec2 texCoordScale;
 
+            uint half2float(uint h) {
+                return ((h & uint(0x8000)) << uint(16)) | ((( h & uint(0x7c00)) + uint(0x1c000)) << uint(13)) | ((h & uint(0x03ff)) << uint(13));
+            }
+
+            vec2 unpackHalf2x16(uint v) {	
+                return vec2(uintBitsToFloat(half2float(v & uint(0xffff))),
+                        uintBitsToFloat(half2float(v >> uint(16))));
+            }
+
             void main()
             {
-                vec4 offset = texelFetch(offsetTex, gl_InstanceID).rgba;
-                gl_Position = model * (vec4(inPos, 1.0)
-                    + vec4(offset.xy, 0.f, 0.f)) // Add character-space offset
+                uvec4 offset = texelFetch(offsetTex, gl_InstanceID);
+                vec2 pos = unpackHalf2x16(offset.x);
+                vec2 scale = unpackHalf2x16(offset.y);
+                vec2 coord = unpackHalf2x16(offset.z);
+
+                gl_Position = model * (vec4(inPos * vec3(scale, 1.0), 1.0)
+                    + vec4(pos, 0.f, 0.f)) // Add character-space offset
                     + vec4(-1.f, 0.f, 0.f, 0.f); // Move origin to top left 
-                texCoord = inTexCoord * texCoordScale + offset.zw;
+                texCoord = inTexCoord * texCoordScale + coord;
             }
         \0";
 
@@ -165,13 +150,14 @@ impl Renderer {
                 float sd = Median(msd.r, msd.g, msd.b, msd.a);
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-                if (opacity < 0.05)
-                    discard;
                 
                 //fragColor = mix(vec4(0.f), vec4(1.f), opacity);
 
+                if (opacity < 0.05)
+                    discard;
+                fragColor = vec4(1.f, 1.f, 1.f, opacity);
+
                 //fragColor = msd;
-                fragColor = vec4(1.f);
                 //fragColor = vec4(opacity, opacity, opacity, 1.f);
                 //fragColor = vec4(texCoord.r, texCoord.g, 0.f, 1.f);
             }
@@ -215,10 +201,41 @@ impl Renderer {
         self.height = height as u32;
     }
 
+    pub fn pack_floats(a: f32, b: f32) -> u32 {
+        let ha = half::f16::from_f32(a);
+        let hb = half::f16::from_f32(b);
+        ((hb.to_bits() as u32) << 16) | (ha.to_bits() as u32)
+    }
+
     pub fn render(&self, font: &mut Font, text: &str, chars_per_line: u32) {
         let char_size = 2.0 / chars_per_line as f32;
-        let char_size_px = self.width as f32 / char_size;
+        let char_size_px = self.width as f32 / chars_per_line as f32;
         let aspect_ratio = self.width as f32 / self.height as f32;
+
+        let face_metrics = font.get_face_metrics();
+        let mut offsets: Vec<Offset> = vec!();
+        let mut x = 0.0;
+        let mut y = face_metrics.height;
+        for c in 0..text.len() {
+            let c_val = text.as_bytes()[c] as char;
+            if c_val.is_whitespace() {
+                continue;
+            }
+            //x = (c % (chars_per_line as usize)) as f32;
+            //y = (c / (chars_per_line as usize)) as f32;
+            let glyph_metrics = font.get_glyph_data(c_val);
+            let texcoord = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
+            offsets.push(Offset {
+                position: Self::pack_floats(x, y),
+                // TODO: scale should depend on glyph size versus actual width
+                scale: Self::pack_floats(glyph_metrics.width, glyph_metrics.height),
+                tex_coord: Self::pack_floats(texcoord[0], texcoord[1])
+            });
+            log::warn!("{}", glyph_metrics.advance[0]);
+            x += glyph_metrics.advance[0];
+            //y = (c / (chars_per_line as usize)) as f32;
+        }
+
         unsafe {
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
@@ -229,20 +246,6 @@ impl Renderer {
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.quad_ibo);
 
             // Update offset data
-            let mut offsets: Vec<Offset> = vec!();
-            for c in 0..text.len() {
-                let c_val = text.as_bytes()[c] as char;
-                if c_val.is_whitespace() {
-                    continue;
-                }
-                let x = (c % (chars_per_line as usize)) as f32;
-                let y = (c / (chars_per_line as usize)) as f32;
-                let coord_offset = font.get_glyph_texcoord(c_val);
-                offsets.push(Offset {
-                    position: [x, y],
-                    tex_coord: coord_offset
-                });
-            }
             gl::BindBuffer(gl::TEXTURE_BUFFER, self.pos_buf);
             gl::BufferSubData(
                 gl::TEXTURE_BUFFER,
@@ -254,7 +257,7 @@ impl Renderer {
             // Bind position data
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_BUFFER, self.pos_tex);
-            gl::TexBuffer(gl::TEXTURE_BUFFER, gl::RGBA32F, self.pos_buf);
+            gl::TexBuffer(gl::TEXTURE_BUFFER, gl::RGB32F, self.pos_buf);
             gl::Uniform1i(gl::GetUniformLocation(
                 self.shader_program,
                 b"offsetTex\0".as_ptr() as _

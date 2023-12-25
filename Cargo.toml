@@ -13,4 +13,6 @@ log = "0.4"
 lru = "0.12"
 msdf = { git = "https://github.com/TheApplePieGod/msdf-rs.git" }
 rust-fontconfig = { git = "https://github.com/TheApplePieGod/rust-fontconfig.git" }
-ttf-parser = "0.20"
+ttf-parser = "0.18"
+msdfgen = { version = "0.2.1", default-features = false, features = ["ttf-parser"] }
+half = "2.3.1"
