@@ -3,7 +3,8 @@ use glfw::{Action, Context, Key, fail_on_errors};
 pub struct Window {
     glfw_instance: glfw::Glfw,
     window: glfw::PWindow,
-    event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>
+    event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
+    key_states: [bool; 512]
 }
 
 impl Window {
@@ -29,7 +30,8 @@ impl Window {
         Self {
             glfw_instance,
             window,
-            event_receiver
+            event_receiver,
+            key_states: [false; 512]
         }
     }
 
@@ -37,8 +39,11 @@ impl Window {
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             match event {
-                glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
-                    self.window.set_should_close(true)
+                glfw::WindowEvent::Key(key, _, action, _) => {
+                    self.key_states[key as usize] = match action {
+                        Action::Press | Action::Repeat => true,
+                        Action::Release => false
+                    };
                 },
                 _ => {},
             }
@@ -61,4 +66,5 @@ impl Window {
     pub fn get_height(&self) -> i32 { self.window.get_size().1 }
     pub fn get_pixel_width(&self) -> i32 { self.window.get_framebuffer_size().0 }
     pub fn get_pixel_height(&self) -> i32 { self.window.get_framebuffer_size().1 }
+    pub fn get_key_pressed(&self, key: Key) -> bool { self.key_states[key as usize] }
 }

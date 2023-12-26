@@ -1,5 +1,6 @@
 mod app;
 mod app_state;
+mod commands;
 mod font;
 mod logging;
 mod renderer;

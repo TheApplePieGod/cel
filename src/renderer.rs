@@ -1,5 +1,5 @@
 use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}};
-use crate::font::Font;
+use crate::font::{Font, RenderType};
 
 const MAX_CHARACTERS: u32 = 20000;
 
@@ -10,16 +10,9 @@ pub struct Vertex {
     tex_coord: u32
 }
 
-#[repr(C)]
-pub struct Offset {
-    position: u32,
-    scale: u32,
-    tex_coord_ki: u32,
-    tex_coord: u32
-}
-
 pub struct Renderer {
-    shader_program: u32,
+    msdf_program: u32,
+    raster_program: u32,
     quad_vao: u32,
     quad_vbo: u32,
     width: u32,
@@ -85,7 +78,7 @@ impl Renderer {
             }
         \0";
 
-        let frag_shader_source = b"
+        let msdf_frag_shader_source = b"
             #version 400 core
 
             in vec2 texCoord;
@@ -110,7 +103,7 @@ impl Renderer {
                 fragColor = mix(vec4(0.f), vec4(1.f), opacity);
 
                 /*
-                if (opacity < 0.05)
+                if (opacity < 0.005)
                     discard;
                 fragColor = vec4(1.f, 1.f, 1.f, opacity);
                 */
@@ -121,28 +114,54 @@ impl Renderer {
             }
         \0";
 
+        let raster_frag_shader_source = b"
+            #version 400 core
+
+            in vec2 texCoord;
+
+            out vec4 fragColor;
+
+            uniform sampler2D atlasTex;
+
+            void main()
+            {
+                vec4 color = texture(atlasTex, texCoord);
+                fragColor = mix(vec4(0.f), color, color.a);
+            }
+        \0";
+
         // Compile shaders & generate program
         let vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, vert_shader_source) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile vertex shader: {}", msg)
         };
-        let frag_shader = match Self::compile_shader(gl::FRAGMENT_SHADER, frag_shader_source) {
+        let msdf_frag_shader = match Self::compile_shader(gl::FRAGMENT_SHADER, msdf_frag_shader_source) {
             Ok(id) => id,
-            Err(msg) => panic!("Failed to compile frag shader: {}", msg)
+            Err(msg) => panic!("Failed to compile msdf frag shader: {}", msg)
         };
-        let program = match Self::link_program(vert_shader, frag_shader) {
+        let raster_frag_shader = match Self::compile_shader(gl::FRAGMENT_SHADER, raster_frag_shader_source) {
             Ok(id) => id,
-            Err(msg) => panic!("Failed to link program: {}", msg)
+            Err(msg) => panic!("Failed to compile raster frag shader: {}", msg)
+        };
+        let msdf_program = match Self::link_program(vert_shader, msdf_frag_shader) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to link msdf program: {}", msg)
+        };
+        let raster_program = match Self::link_program(vert_shader, raster_frag_shader) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to link raster program: {}", msg)
         };
 
         // Free shaders
         unsafe {
             gl::DeleteShader(vert_shader);
-            gl::DeleteShader(frag_shader);
+            gl::DeleteShader(msdf_frag_shader);
+            gl::DeleteShader(raster_frag_shader);
         }
 
         Self {
-            shader_program: program,
+            msdf_program,
+            raster_program,
             quad_vao,
             quad_vbo,
             width: 0,
@@ -162,7 +181,14 @@ impl Renderer {
         ((hb.to_bits() as u32) << 16) | (ha.to_bits() as u32)
     }
 
-    pub fn render(&self, font: &mut Font, text: &str, chars_per_line: u32) {
+    pub fn render(
+        &self,
+        font: &mut Font,
+        text: &Vec<String>,
+        chars_per_line: u32,
+        line_offset: f32,
+        wrap: bool
+    ) {
         let char_size = 2.0 / chars_per_line as f32;
         let char_size_px = self.width as f32 / chars_per_line as f32;
         let aspect_ratio = self.width as f32 / self.height as f32;
@@ -170,79 +196,97 @@ impl Renderer {
 
         let face_metrics = font.get_face_metrics();
         let base_x = 0.25;
-        let mut vertices: Vec<Vertex> = vec!();
+        let mut msdf_vertices: Vec<Vertex> = vec!();
+        let mut raster_vertices: Vec<Vertex> = vec!();
         let mut x = base_x;
-        let mut y = -face_metrics.height;
-        for c in 0..text.len() {
-            let c_val = text.as_bytes()[c] as char;
-            if c_val.is_whitespace() {
-                match c_val {
-                    ' ' => x += face_metrics.space_size,
-                    '\t' => x += face_metrics.space_size * font.get_tab_width(),
-                    '\n' => {
-                        x = base_x;
-                        y -= face_metrics.height;
+        let mut y = -(face_metrics.height * (-line_offset + 1.0));
+        for batch in text {
+            for c in batch.chars() {
+                if c.is_whitespace() {
+                    match c {
+                        ' ' => x += face_metrics.space_size,
+                        '\t' => x += face_metrics.space_size * font.get_tab_width(),
+                        '\n' => {
+                            x = base_x;
+                            y -= face_metrics.height;
+                        }
+                        _ => {}
                     }
-                    _ => {}
+
+                    continue;
+                } else if c.is_control() {
+                    continue;
                 }
 
-                continue;
+                if wrap && x >= chars_per_line as f32 - 1.0 {
+                    x = base_x;
+                    y -= face_metrics.height;
+                }
+
+                //TODO: precompute in metrics
+                // UV.y is flipped since the underlying atlas bitmaps have flipped y
+                let glyph_metrics = &font.get_glyph_data(c);
+                let glyph_bound = &glyph_metrics.glyph_bound;
+                let atlas_bound = &glyph_metrics.atlas_bound;
+                let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
+                let uv_min = [
+                    uv[0] + atlas_bound.left * coord_scale,
+                    uv[1] + atlas_bound.top * coord_scale
+                ];
+                let uv_max = [
+                    uv_min[0] + atlas_bound.width() * coord_scale,
+                    uv_min[1] - atlas_bound.height() * coord_scale
+                ];
+
+                let tr = Vertex {
+                    position: Self::pack_floats(x + glyph_bound.right, y + glyph_bound.top),
+                    tex_coord: Self::pack_floats(uv_max[0], uv_min[1])
+                };
+                let br = Vertex {
+                    position: Self::pack_floats(x + glyph_bound.right, y + glyph_bound.bottom),
+                    tex_coord: Self::pack_floats(uv_max[0], uv_max[1])
+                };
+                let bl = Vertex {
+                    position: Self::pack_floats(x + glyph_bound.left, y + glyph_bound.bottom),
+                    tex_coord: Self::pack_floats(uv_min[0], uv_max[1])
+                };
+                let tl = Vertex {
+                    position: Self::pack_floats(x + glyph_bound.left, y + glyph_bound.top),
+                    tex_coord: Self::pack_floats(uv_min[0], uv_min[1])
+                };
+
+                let push_vec = match glyph_metrics.render_type {
+                    RenderType::MSDF => &mut msdf_vertices,
+                    RenderType::RASTER => &mut raster_vertices
+                };
+
+                push_vec.push(tl);
+                push_vec.push(br);
+                push_vec.push(tr);
+                push_vec.push(tl);
+                push_vec.push(bl);
+                push_vec.push(br);
+
+                x += glyph_metrics.advance;
             }
-
-            //TODO: precompute in metrics
-            // UV.y is flipped since the underlying atlas bitmaps have flipped y
-            let glyph_metrics = &font.get_glyph_data(c_val);
-            let glyph_bound = &glyph_metrics.glyph_bound;
-            let atlas_bound = &glyph_metrics.atlas_bound;
-            let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
-            let uv_min = [
-                uv[0] + atlas_bound.left * coord_scale,
-                uv[1] + atlas_bound.top * coord_scale
-            ];
-            let uv_max = [
-                uv_min[0] + atlas_bound.width() * coord_scale,
-                uv_min[1] - atlas_bound.height() * coord_scale
-            ];
-
-            let scale = [
-                glyph_bound.width(),
-                glyph_bound.height()
-            ];
-            log::warn!("{}, {}", scale[0], scale[1]);
-
-            let tr = Vertex {
-                position: Self::pack_floats(x + scale[0], y + scale[1]),
-                tex_coord: Self::pack_floats(uv_max[0], uv_min[1])
-            };
-            let br = Vertex {
-                position: Self::pack_floats(x + scale[0], y + 0.0),
-                tex_coord: Self::pack_floats(uv_max[0], uv_max[1])
-            };
-            let bl = Vertex {
-                position: Self::pack_floats(x + 0.0, y + 0.0),
-                tex_coord: Self::pack_floats(uv_min[0], uv_max[1])
-            };
-            let tl = Vertex {
-                position: Self::pack_floats(x + 0.0, y + scale[1]),
-                tex_coord: Self::pack_floats(uv_min[0], uv_min[1])
-            };
-
-            vertices.push(tl);
-            vertices.push(br);
-            vertices.push(tr);
-            vertices.push(tl);
-            vertices.push(bl);
-            vertices.push(br);
-
-            x += glyph_metrics.advance[0];
         }
+
+        let model_mat: [f32; 16] = [
+            char_size, 0.0, 0.0, 0.0,
+            0.0, char_size * aspect_ratio, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0
+        ];
 
         unsafe {
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
+        }
 
+        // Render MSDF
+        unsafe {
             // Bind program data
-            gl::UseProgram(self.shader_program);
+            gl::UseProgram(self.msdf_program);
             gl::BindVertexArray(self.quad_vao);
 
             // Update vertex data
@@ -250,39 +294,64 @@ impl Renderer {
             gl::BufferSubData(
                 gl::ARRAY_BUFFER,
                 0,
-                (size_of::<Vertex>() * vertices.len()) as isize,
-                vertices.as_ptr() as _
+                (size_of::<Vertex>() * msdf_vertices.len()) as isize,
+                msdf_vertices.as_ptr() as _
             );
 
             // Bind atlas tex
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
             gl::Uniform1i(gl::GetUniformLocation(
-                self.shader_program,
+                self.msdf_program,
                 b"atlasTex\0".as_ptr() as _
             ), 0);
 
             // Set pixel range
             let pixel_range = char_size_px / font.get_glyph_size() as f32 * font.get_pixel_range();
             gl::Uniform1f(gl::GetUniformLocation(
-                self.shader_program,
+                self.msdf_program,
                 b"pixelRange\0".as_ptr() as _
             ), pixel_range);
 
             // Set global model matrix (column major)
-            let model_mat: [f32; 16] = [
-                char_size, 0.0, 0.0, 0.0,
-                0.0, char_size * aspect_ratio, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, 0.0, 0.0, 1.0
-            ];
             gl::UniformMatrix4fv(gl::GetUniformLocation(
-                self.shader_program,
+                self.msdf_program,
                 "model".as_ptr() as *const i8
             ), 1, gl::FALSE, model_mat.as_ptr());
 
-            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
-            gl::BindVertexArray(0);
+            gl::DrawArrays(gl::TRIANGLES, 0, msdf_vertices.len() as i32);
+        }
+
+        // Render 
+        unsafe {
+            // Bind program data
+            gl::UseProgram(self.raster_program);
+            gl::BindVertexArray(self.quad_vao);
+
+            // Update vertex data
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
+            gl::BufferSubData(
+                gl::ARRAY_BUFFER,
+                0,
+                (size_of::<Vertex>() * raster_vertices.len()) as isize,
+                raster_vertices.as_ptr() as _
+            );
+
+            // Bind atlas tex
+            gl::ActiveTexture(gl::TEXTURE0);
+            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
+            gl::Uniform1i(gl::GetUniformLocation(
+                self.raster_program,
+                b"atlasTex\0".as_ptr() as _
+            ), 0);
+
+            // Set global model matrix (column major)
+            gl::UniformMatrix4fv(gl::GetUniformLocation(
+                self.raster_program,
+                "model".as_ptr() as *const i8
+            ), 1, gl::FALSE, model_mat.as_ptr());
+
+            gl::DrawArrays(gl::TRIANGLES, 0, raster_vertices.len() as i32);
         }
     }
 
@@ -335,7 +404,8 @@ impl Drop for Renderer {
         unsafe {
             gl::DeleteVertexArrays(del_vao.len() as i32, del_vao.as_ptr());
             gl::DeleteBuffers(del_buf.len() as i32, del_buf.as_ptr());
-            gl::DeleteProgram(self.shader_program);
+            gl::DeleteProgram(self.msdf_program);
+            gl::DeleteProgram(self.raster_program);
         }
     }
 }
