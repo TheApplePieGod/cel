@@ -1,5 +1,7 @@
 use log::*;
 use rust_fontconfig::FcFontCache;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time;
 
 use crate::app_state::AppState;
@@ -12,7 +14,7 @@ pub struct App {
     window: Window,
     renderer: Renderer,
     commands: Commands,
-    primary_font: Font
+    primary_font: Rc<RefCell<Font>>
 }
 
 impl App {
@@ -49,11 +51,12 @@ impl App {
             window,
             commands: Commands::new(),
             renderer: Renderer::new(),
-            primary_font
+            primary_font: Rc::new(RefCell::new(primary_font))
         }
     }
 
     pub fn run(&mut self) {
+        let chars_per_row = 64;
         let mut line_offset: f32 = 0.0; // todo: move
         let mut delta_time = time::Duration::new(0, 0);
         while AppState::current().borrow().running && !self.window.get_handle().should_close() {
@@ -61,6 +64,7 @@ impl App {
 
             // Begin frame
             self.commands.poll_io();
+            self.commands.resize(100, chars_per_row);
             self.window.poll_events();
             self.window.begin_frame();
 
@@ -81,8 +85,8 @@ impl App {
             self.renderer.render(
                 &mut self.primary_font,
                 self.commands.get_output(),
-                //&vec![String::from(text)],
-                64,
+                //&vec![String::from("\x1b[32;44mNerd\nNerd2")],
+                chars_per_row,
                 line_offset,
                 true
             );

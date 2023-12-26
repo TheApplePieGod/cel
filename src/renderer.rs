@@ -1,13 +1,30 @@
-use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}};
-use crate::font::{Font, RenderType};
+use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
+use crate::{font::{Font, FaceMetrics}, ansi::AnsiHandler};
 
 const MAX_CHARACTERS: u32 = 20000;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Vertex {
-    position: u32,
-    tex_coord: u32
+    pub position: u32,   // x, y
+    pub tex_coord: u32,  // u, v
+    pub color: [u32; 3]  // r, g, b (fg, bg)
+}
+
+#[derive(Default)]
+pub struct RenderState {
+    pub font: Option<Rc<RefCell<Font>>>,
+    pub wrap: bool,
+    pub chars_per_line: u32,
+    pub char_size: f32,
+    pub char_size_px: f32,
+    pub aspect_ratio: f32,
+    pub coord_scale: f32,
+    pub face_metrics: FaceMetrics,
+    pub base_x: f32,
+    pub base_y: f32,
+    pub msdf_vertices: Vec<Vertex>,
+    pub raster_vertices: Vec<Vertex>
 }
 
 pub struct Renderer {
@@ -16,7 +33,8 @@ pub struct Renderer {
     quad_vao: u32,
     quad_vbo: u32,
     width: u32,
-    height: u32
+    height: u32,
+    ansi_handler: AnsiHandler
 }
 
 impl Renderer {
@@ -42,10 +60,13 @@ impl Renderer {
             // VAO attributes
             let vert_stride = size_of::<Vertex>() as i32;
             let pos_stride = size_of::<u32>() as i32;
+            let coord_stride = size_of::<u32>() as i32 + pos_stride;
             gl::VertexAttribPointer(0, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, null());
-            gl::VertexAttribPointer(1, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, pos_stride as *const c_void);
+            gl::VertexAttribPointer(1, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, pos_stride as _);
+            gl::VertexAttribPointer(2, 3, gl::UNSIGNED_INT, gl::FALSE, vert_stride, coord_stride as _);
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
+            gl::EnableVertexAttribArray(2);
         }
 
         let vert_shader_source = b"
@@ -53,8 +74,11 @@ impl Renderer {
 
             layout (location = 0) in uint inPos;
             layout (location = 1) in uint inTexCoord;
+            layout (location = 2) in uvec3 inColor;
 
             out vec2 texCoord;
+            out vec3 fgColor;
+            out vec3 bgColor;
 
             uniform mat4 model;
 
@@ -71,10 +95,15 @@ impl Renderer {
             {
                 vec2 pos = unpackHalf2x16(inPos);
                 vec2 coord = unpackHalf2x16(inTexCoord);
+                vec2 r = unpackHalf2x16(inColor.r);
+                vec2 g = unpackHalf2x16(inColor.g);
+                vec2 b = unpackHalf2x16(inColor.b);
 
                 gl_Position = model * vec4(pos, 0.0, 1.0)
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
+                fgColor = vec3(r.x, g.x, b.x);
+                bgColor = vec3(r.y, g.y, b.y);
             }
         \0";
 
@@ -82,6 +111,8 @@ impl Renderer {
             #version 400 core
 
             in vec2 texCoord;
+            in vec3 fgColor;
+            in vec3 bgColor;
 
             out vec4 fragColor;
 
@@ -99,18 +130,7 @@ impl Renderer {
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
                 
-                //fragColor = mix(vec4(1.f, 0.f, 0.f, 1.f), vec4(1.f), opacity);
-                fragColor = mix(vec4(0.f), vec4(1.f), opacity);
-
-                /*
-                if (opacity < 0.005)
-                    discard;
-                fragColor = vec4(1.f, 1.f, 1.f, opacity);
-                */
-
-                //fragColor = msd;
-                //fragColor = vec4(opacity, opacity, opacity, 1.f);
-                //fragColor = vec4(texCoord.r, texCoord.g, 0.f, 1.f);
+                fragColor = vec4(mix(bgColor, fgColor, opacity), 1.f);
             }
         \0";
 
@@ -118,6 +138,8 @@ impl Renderer {
             #version 400 core
 
             in vec2 texCoord;
+            in vec3 fgColor;
+            in vec3 bgColor;
 
             out vec4 fragColor;
 
@@ -126,7 +148,7 @@ impl Renderer {
             void main()
             {
                 vec4 color = texture(atlasTex, texCoord);
-                fragColor = mix(vec4(0.f), color, color.a);
+                fragColor = vec4(mix(bgColor, color.rgb, color.a), 1.f);
             }
         \0";
 
@@ -165,7 +187,8 @@ impl Renderer {
             quad_vao,
             quad_vbo,
             width: 0,
-            height: 0
+            height: 0,
+            ansi_handler: AnsiHandler::new()
         }
     }
 
@@ -175,105 +198,38 @@ impl Renderer {
         self.height = height as u32;
     }
 
-    pub fn pack_floats(a: f32, b: f32) -> u32 {
-        let ha = half::f16::from_f32(a);
-        let hb = half::f16::from_f32(b);
-        ((hb.to_bits() as u32) << 16) | (ha.to_bits() as u32)
-    }
-
     pub fn render(
-        &self,
-        font: &mut Font,
+        &mut self,
+        font: &Rc<RefCell<Font>>,
         text: &Vec<String>,
         chars_per_line: u32,
         line_offset: f32,
         wrap: bool
     ) {
-        let char_size = 2.0 / chars_per_line as f32;
-        let char_size_px = self.width as f32 / chars_per_line as f32;
-        let aspect_ratio = self.width as f32 / self.height as f32;
-        let coord_scale = 1.0 / font.get_atlas_size() as f32;
-
-        let face_metrics = font.get_face_metrics();
-        let base_x = 0.25;
-        let mut msdf_vertices: Vec<Vertex> = vec!();
-        let mut raster_vertices: Vec<Vertex> = vec!();
-        let mut x = base_x;
-        let mut y = -(face_metrics.height * (-line_offset + 1.0));
-        for batch in text {
-            for c in batch.chars() {
-                if c.is_whitespace() {
-                    match c {
-                        ' ' => x += face_metrics.space_size,
-                        '\t' => x += face_metrics.space_size * font.get_tab_width(),
-                        '\n' => {
-                            x = base_x;
-                            y -= face_metrics.height;
-                        }
-                        _ => {}
-                    }
-
-                    continue;
-                } else if c.is_control() {
-                    continue;
-                }
-
-                if wrap && x >= chars_per_line as f32 - 1.0 {
-                    x = base_x;
-                    y -= face_metrics.height;
-                }
-
-                //TODO: precompute in metrics
-                // UV.y is flipped since the underlying atlas bitmaps have flipped y
-                let glyph_metrics = &font.get_glyph_data(c);
-                let glyph_bound = &glyph_metrics.glyph_bound;
-                let atlas_bound = &glyph_metrics.atlas_bound;
-                let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
-                let uv_min = [
-                    uv[0] + atlas_bound.left * coord_scale,
-                    uv[1] + atlas_bound.top * coord_scale
-                ];
-                let uv_max = [
-                    uv_min[0] + atlas_bound.width() * coord_scale,
-                    uv_min[1] - atlas_bound.height() * coord_scale
-                ];
-
-                let tr = Vertex {
-                    position: Self::pack_floats(x + glyph_bound.right, y + glyph_bound.top),
-                    tex_coord: Self::pack_floats(uv_max[0], uv_min[1])
-                };
-                let br = Vertex {
-                    position: Self::pack_floats(x + glyph_bound.right, y + glyph_bound.bottom),
-                    tex_coord: Self::pack_floats(uv_max[0], uv_max[1])
-                };
-                let bl = Vertex {
-                    position: Self::pack_floats(x + glyph_bound.left, y + glyph_bound.bottom),
-                    tex_coord: Self::pack_floats(uv_min[0], uv_max[1])
-                };
-                let tl = Vertex {
-                    position: Self::pack_floats(x + glyph_bound.left, y + glyph_bound.top),
-                    tex_coord: Self::pack_floats(uv_min[0], uv_min[1])
-                };
-
-                let push_vec = match glyph_metrics.render_type {
-                    RenderType::MSDF => &mut msdf_vertices,
-                    RenderType::RASTER => &mut raster_vertices
-                };
-
-                push_vec.push(tl);
-                push_vec.push(br);
-                push_vec.push(tr);
-                push_vec.push(tl);
-                push_vec.push(bl);
-                push_vec.push(br);
-
-                x += glyph_metrics.advance;
-            }
+        // Setup render state
+        {
+            let render_state = self.ansi_handler.get_render_state_mut();
+            render_state.font = Some(font.clone());
+            render_state.wrap = wrap;
+            render_state.chars_per_line = chars_per_line;
+            render_state.char_size = 2.0 / chars_per_line as f32;
+            render_state.char_size_px = self.width as f32 / chars_per_line as f32;
+            render_state.aspect_ratio = self.width as f32 / self.height as f32;
+            render_state.coord_scale = 1.0 / font.borrow().get_atlas_size() as f32;
+            render_state.face_metrics = font.borrow().get_face_metrics();
+            render_state.base_x = 0.25;
+            render_state.base_y = -(render_state.face_metrics.height * (-line_offset + 1.0));
+            render_state.msdf_vertices.clear();
+            render_state.raster_vertices.clear();
         }
 
+        // Parse the input sequence and populate the final render state 
+        self.ansi_handler.handle_sequence(&text);
+
+        let render_state = self.ansi_handler.get_render_state();
         let model_mat: [f32; 16] = [
-            char_size, 0.0, 0.0, 0.0,
-            0.0, char_size * aspect_ratio, 0.0, 0.0,
+            render_state.char_size, 0.0, 0.0, 0.0,
+            0.0, render_state.char_size * render_state.aspect_ratio, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0
         ];
@@ -285,6 +241,8 @@ impl Renderer {
 
         // Render MSDF
         unsafe {
+            let vertices = &render_state.msdf_vertices;
+
             // Bind program data
             gl::UseProgram(self.msdf_program);
             gl::BindVertexArray(self.quad_vao);
@@ -294,20 +252,20 @@ impl Renderer {
             gl::BufferSubData(
                 gl::ARRAY_BUFFER,
                 0,
-                (size_of::<Vertex>() * msdf_vertices.len()) as isize,
-                msdf_vertices.as_ptr() as _
+                (size_of::<Vertex>() * vertices.len()) as isize,
+                vertices.as_ptr() as _
             );
 
             // Bind atlas tex
             gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
+            gl::BindTexture(gl::TEXTURE_2D, font.borrow().get_atlas_tex().get_id());
             gl::Uniform1i(gl::GetUniformLocation(
                 self.msdf_program,
                 b"atlasTex\0".as_ptr() as _
             ), 0);
 
             // Set pixel range
-            let pixel_range = char_size_px / font.get_glyph_size() as f32 * font.get_pixel_range();
+            let pixel_range = render_state.char_size_px / font.borrow().get_glyph_size() as f32 * font.borrow().get_pixel_range();
             gl::Uniform1f(gl::GetUniformLocation(
                 self.msdf_program,
                 b"pixelRange\0".as_ptr() as _
@@ -319,11 +277,13 @@ impl Renderer {
                 "model".as_ptr() as *const i8
             ), 1, gl::FALSE, model_mat.as_ptr());
 
-            gl::DrawArrays(gl::TRIANGLES, 0, msdf_vertices.len() as i32);
+            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
 
         // Render 
         unsafe {
+            let vertices = &render_state.raster_vertices;
+
             // Bind program data
             gl::UseProgram(self.raster_program);
             gl::BindVertexArray(self.quad_vao);
@@ -333,13 +293,13 @@ impl Renderer {
             gl::BufferSubData(
                 gl::ARRAY_BUFFER,
                 0,
-                (size_of::<Vertex>() * raster_vertices.len()) as isize,
-                raster_vertices.as_ptr() as _
+                (size_of::<Vertex>() * vertices.len()) as isize,
+                vertices.as_ptr() as _
             );
 
             // Bind atlas tex
             gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
+            gl::BindTexture(gl::TEXTURE_2D, font.borrow().get_atlas_tex().get_id());
             gl::Uniform1i(gl::GetUniformLocation(
                 self.raster_program,
                 b"atlasTex\0".as_ptr() as _
@@ -351,7 +311,7 @@ impl Renderer {
                 "model".as_ptr() as *const i8
             ), 1, gl::FALSE, model_mat.as_ptr());
 
-            gl::DrawArrays(gl::TRIANGLES, 0, raster_vertices.len() as i32);
+            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
     }
 

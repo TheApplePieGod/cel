@@ -16,5 +16,5 @@ ttf-parser = "0.18"
 msdfgen = { version = "0.2.1", default-features = false, features = ["ttf-parser"] }
 half = "2.3.1"
 portable-pty = "0.8.1"
-anstyle-parse = "0.2.3"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
+vte = "0.13.0"

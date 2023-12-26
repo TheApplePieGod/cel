@@ -90,19 +90,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "anstyle-parse"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c75ac65da39e5fe5ab759307499ddad880d724eed2f6ce5b5e8a26f4f387928c"
-dependencies = [
- "utf8parse",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59d2a3357dde987206219e78ecfbbb6e8dad06cbb65292758d3270e6254f7355"
+
+[[package]]
+name = "arrayvec"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 
 [[package]]
 name = "autocfg"
@@ -167,7 +164,6 @@ dependencies = [
 name = "cel"
 version = "0.1.0"
 dependencies = [
- "anstyle-parse",
  "chrono",
  "gl",
  "glfw",
@@ -179,6 +175,7 @@ dependencies = [
  "portable-pty",
  "rust-fontconfig",
  "ttf-parser",
+ "vte",
 ]
 
 [[package]]
@@ -946,6 +943,27 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vte"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40eb22ae96f050e0c0d6f7ce43feeae26c348fc4dea56928ca81537cfaa6188b"
+dependencies = [
+ "arrayvec",
+ "utf8parse",
+ "vte_generate_state_changes",
+]
+
+[[package]]
+name = "vte_generate_state_changes"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d257817081c7dffcdbab24b9e62d2def62e2ff7d00b1c20062551e6cccc145ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
 
 [[package]]
 name = "wasm-bindgen"

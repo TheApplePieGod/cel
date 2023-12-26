@@ -1,9 +1,10 @@
-use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtySystem, Child};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtySystem, Child, PtyPair};
 use std::{sync::mpsc, thread};
 
 pub struct Commands {
     io_rx: mpsc::Receiver<String>,
     //reader: Box<dyn std::io::Read + Send>,
+    pty_pair: PtyPair,
     writer: Box<dyn std::io::Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     output: Vec<String>
@@ -14,7 +15,7 @@ impl Commands {
         let pty_system = native_pty_system();
 
         // Create a new pty
-        let mut pair = pty_system.openpty(PtySize {
+        let pair = pty_system.openpty(PtySize {
             rows: 24,
             cols: 80,
             // Not all systems support pixel_width, pixel_height,
@@ -53,6 +54,7 @@ impl Commands {
         Self {
             io_rx: rx,
             //reader,
+            pty_pair: pair,
             writer,
             child,
             output: vec![String::from("abcdefghijklmnopqrstuvwxyz")]
@@ -63,6 +65,15 @@ impl Commands {
         while let Ok(v) = self.io_rx.try_recv() {
             self.output.push(v);
         }
+    }
+
+    pub fn resize(&mut self, rows: u32, cols: u32) {
+        let _ = self.pty_pair.master.resize(PtySize {
+            rows: rows as u16,
+            cols: cols as u16,
+            pixel_width: 0,
+            pixel_height: 0
+        });
     }
 
     pub fn send_input(&mut self, input: &str) {

@@ -10,6 +10,7 @@ const ATLAS_SIZE: u32 = 2048;
 const MSDF_SIZE: u32 = 32;
 const MSDF_RANGE: f32 = 4.0;
 
+#[derive(Default)]
 pub struct FaceMetrics {
     pub height: f32,
     pub space_size: f32
