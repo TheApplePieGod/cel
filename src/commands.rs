@@ -28,7 +28,7 @@ impl Commands {
         }).unwrap();
 
         // Spawn a shell into the pty (TODO: find the default shell)
-        let cmd = CommandBuilder::new("zsh");
+        let cmd = CommandBuilder::new("bash");
         let child = pair.slave.spawn_command(cmd).unwrap();
 
         let mut reader = pair.master.try_clone_reader().unwrap();
@@ -76,8 +76,8 @@ impl Commands {
         });
     }
 
-    pub fn send_input(&mut self, input: &str) {
-        let _ = self.writer.write_all(input.as_bytes());
+    pub fn send_input(&mut self, input: &Vec<u8>) {
+        let _ = self.writer.write_all(input);
     }
 
     pub fn get_output(&self) -> &Vec<String> {

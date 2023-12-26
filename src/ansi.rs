@@ -16,7 +16,8 @@ struct PerformState {
     color_state: ColorState,
     x_pos: f32,
     y_pos: f32,
-    line_char_count: u32
+    line_char_count: u32,
+    line_count: u32
 }
 
 #[derive(Default)]
@@ -55,6 +56,9 @@ impl AnsiHandler {
         &mut self.performer.render_state
     }
 
+    pub fn get_line_count(&self) -> u32 {
+        self.performer.perform_state.line_count
+    }
 }
 
 impl Performer {
@@ -64,6 +68,8 @@ impl Performer {
         // Default cursor pos 
         self.perform_state.x_pos = self.render_state.base_x;
         self.perform_state.y_pos = self.render_state.base_y;
+
+        self.perform_state.line_count = 1;
     }
 
     fn parse_16_bit_color(&self, bold: bool, code: u16) -> [f32; 3] {
@@ -130,9 +136,11 @@ impl Perform for Performer {
             return;
         }
 
-        //let should_wrap = self.render_state.wrap && *x >= self.render_state.chars_per_line as f32 - 1.0;
+        //let max_x = render_state.char_size * render_state.chars_per_line as f32;
+        //let should_wrap = render_state.wrap && *x >= render_state.chars_per_line as f32 * render_state.face_metrics.width;
         let should_wrap = render_state.wrap && state.line_char_count >= render_state.chars_per_line;
         if should_wrap {
+            state.line_count += 1;
             state.line_char_count = 0;
             *x = render_state.base_x;
             *y -= face_metrics.height;
@@ -203,6 +211,7 @@ impl Perform for Performer {
         //println!("[execute] {:02x}", byte);
         match byte {
             b'\n' => {
+                self.perform_state.line_count += 1;
                 self.perform_state.line_char_count = 0;
                 self.perform_state.x_pos = self.render_state.base_x;
                 self.perform_state.y_pos -= self.render_state.face_metrics.height;

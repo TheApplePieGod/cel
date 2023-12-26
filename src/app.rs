@@ -3,6 +3,7 @@ use rust_fontconfig::FcFontCache;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time;
+use std::cmp::max;
 
 use crate::app_state::AppState;
 use crate::commands::{Commands, self};
@@ -56,24 +57,40 @@ impl App {
     }
 
     pub fn run(&mut self) {
-        let chars_per_row = 64;
-        let mut line_offset: f32 = 0.0; // todo: move
+        let chars_per_row = 128;
+        let scroll_lines_per_second = 30.0;
+        let mut tail = true;
+        let mut line_count = 0;
+        let mut max_line_count = 0;
+        let mut line_offset: f32 = 0.0;
         let mut delta_time = time::Duration::new(0, 0);
         while AppState::current().borrow().running && !self.window.get_handle().should_close() {
             let frame_start = time::Instant::now();
 
             // Begin frame
-            self.commands.poll_io();
-            self.commands.resize(100, chars_per_row);
             self.window.poll_events();
             self.window.begin_frame();
+            self.commands.poll_io();
+            self.commands.send_input(self.window.get_input_buffer());
+            self.commands.resize(100, chars_per_row);
 
             // Handle input
+            let max_offset = (max(max_line_count, line_count) - max_line_count) as f32;
             if self.window.get_key_pressed(glfw::Key::Up) {
-                line_offset -= 10.0 * delta_time.as_secs_f32();
+                tail = false;
+                line_offset -= scroll_lines_per_second * delta_time.as_secs_f32();
+                if line_offset < 0.0 {
+                    line_offset = 0.0;
+                }
             }
             if self.window.get_key_pressed(glfw::Key::Down) {
-                line_offset += 10.0 * delta_time.as_secs_f32();
+                line_offset += scroll_lines_per_second * delta_time.as_secs_f32();
+                if line_offset >= max_offset {
+                    tail = true;
+                }
+            }
+            if tail {
+                line_offset = max_offset;
             }
 
             // Render
@@ -82,10 +99,11 @@ impl App {
                 self.window.get_pixel_height()
             );
 
-            self.renderer.render(
+            (line_count, max_line_count) = self.renderer.render(
                 &mut self.primary_font,
                 self.commands.get_output(),
                 //&vec![String::from("\x1b[32;44mNerd\nNerd2")],
+                //&vec![String::from("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ")],
                 chars_per_row,
                 line_offset,
                 true

@@ -13,6 +13,7 @@ const MSDF_RANGE: f32 = 4.0;
 #[derive(Default)]
 pub struct FaceMetrics {
     pub height: f32,
+    pub width: f32,
     pub space_size: f32
 }
 
@@ -123,6 +124,7 @@ impl Font {
         let space_glyph = face.glyph_index(' ').unwrap();
         FaceMetrics {
             height: face.height() as f32 / scale,
+            width: face.global_bounding_box().width() as f32 / scale,
             space_size: face.glyph_hor_advance(space_glyph).unwrap() as f32 / scale
         }
     }

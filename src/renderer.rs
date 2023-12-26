@@ -198,6 +198,7 @@ impl Renderer {
         self.height = height as u32;
     }
 
+    /// Returns rendered line count and max lines per screen
     pub fn render(
         &mut self,
         font: &Rc<RefCell<Font>>,
@@ -205,15 +206,13 @@ impl Renderer {
         chars_per_line: u32,
         line_offset: f32,
         wrap: bool
-    ) {
+    ) -> (u32, u32) {
         // Setup render state
         {
             let render_state = self.ansi_handler.get_render_state_mut();
             render_state.font = Some(font.clone());
             render_state.wrap = wrap;
             render_state.chars_per_line = chars_per_line;
-            render_state.char_size = 2.0 / chars_per_line as f32;
-            render_state.char_size_px = self.width as f32 / chars_per_line as f32;
             render_state.aspect_ratio = self.width as f32 / self.height as f32;
             render_state.coord_scale = 1.0 / font.borrow().get_atlas_size() as f32;
             render_state.face_metrics = font.borrow().get_face_metrics();
@@ -221,6 +220,10 @@ impl Renderer {
             render_state.base_y = -(render_state.face_metrics.height * (-line_offset + 1.0));
             render_state.msdf_vertices.clear();
             render_state.raster_vertices.clear();
+
+            // Scale up the character size when the maximum glyph size is smaller than 1.0
+            render_state.char_size = 2.0 / chars_per_line as f32 / render_state.face_metrics.width;
+            render_state.char_size_px = self.width as f32 / chars_per_line as f32 / render_state.face_metrics.width;
         }
 
         // Parse the input sequence and populate the final render state 
@@ -313,6 +316,14 @@ impl Renderer {
 
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
+
+        let line_count = self.ansi_handler.get_line_count();
+        let max_line_count = (
+            self.height as f32 / (
+                render_state.char_size_px * render_state.face_metrics.height
+            )
+        ) as u32;
+        (line_count, max_line_count)
     }
 
     fn compile_shader(shader_type: u32, source: &[u8]) -> Result<u32, String> {

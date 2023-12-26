@@ -1,10 +1,12 @@
-use glfw::{Action, Context, Key, fail_on_errors};
+use glfw::{Action, Context, Key, fail_on_errors, Modifiers};
 
 pub struct Window {
     glfw_instance: glfw::Glfw,
     window: glfw::PWindow,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
-    key_states: [bool; 512]
+    key_states: [bool; 512],
+    input_buffer: Vec<u8>,
+    utf8_buffer: [u8; 8]
 }
 
 impl Window {
@@ -23,7 +25,9 @@ impl Window {
         ).expect("Failed to create GLFW window.");
 
         window.make_current();
-        window.set_all_polling(true);
+        window.set_key_polling(true);
+        window.set_char_polling(true);
+        window.set_char_mods_polling(true);
 
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
@@ -31,7 +35,9 @@ impl Window {
             glfw_instance,
             window,
             event_receiver,
-            key_states: [false; 512]
+            key_states: [false; 512],
+            input_buffer: vec![],
+            utf8_buffer: [0; 8]
         }
     }
 
@@ -40,10 +46,38 @@ impl Window {
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             match event {
                 glfw::WindowEvent::Key(key, _, action, _) => {
-                    self.key_states[key as usize] = match action {
-                        Action::Press | Action::Repeat => true,
-                        Action::Release => false
-                    };
+                    if (key as usize) < self.key_states.len() {
+                        let key_state;
+                        match action {
+                            Action::Press | Action::Repeat => {
+                                key_state = true;
+
+                                // Send escape code to input buffer
+                                let ctrl_pressed = self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl);
+                                match key {
+                                    Key::Backspace => self.input_buffer.push(0x08),
+                                    Key::Delete => self.input_buffer.push(0x7F),
+                                    Key::Tab => self.input_buffer.push(0x09),
+                                    Key::Enter => {
+                                        self.input_buffer.push(0x0D);
+                                        self.input_buffer.push(0x0A);
+                                    },
+                                    Key::C if ctrl_pressed => self.input_buffer.push(0x03),
+                                    _ => {}
+                                }
+                            },
+                            Action::Release => key_state = false
+                        };
+                        self.key_states[key as usize] = key_state;
+                    }
+                },
+                glfw::WindowEvent::Char(key) => {
+                    if self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) {
+                        self.input_buffer.push(b'^');
+                    }
+                    self.input_buffer.extend_from_slice(
+                        key.encode_utf8(&mut self.utf8_buffer).as_bytes()
+                    );
                 },
                 _ => {},
             }
@@ -58,6 +92,7 @@ impl Window {
 
     pub fn end_frame(&mut self) {
         self.window.swap_buffers();
+        self.input_buffer.clear();
     }
 
     pub fn get_handle(&self) -> &glfw::Window { &self.window }
@@ -67,4 +102,5 @@ impl Window {
     pub fn get_pixel_width(&self) -> i32 { self.window.get_framebuffer_size().0 }
     pub fn get_pixel_height(&self) -> i32 { self.window.get_framebuffer_size().1 }
     pub fn get_key_pressed(&self, key: Key) -> bool { self.key_states[key as usize] }
+    pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
 }
