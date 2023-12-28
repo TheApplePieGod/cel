@@ -1,5 +1,5 @@
 use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
-use crate::{font::{Font, FaceMetrics}, ansi::AnsiHandler};
+use crate::{font::{Font, FaceMetrics, RenderType}, ansi::AnsiHandler, util::Util};
 
 const MAX_CHARACTERS: u32 = 20000;
 
@@ -201,38 +201,145 @@ impl Renderer {
     /// Returns rendered line count and max lines per screen
     pub fn render(
         &mut self,
-        font: &Rc<RefCell<Font>>,
+        font: &mut Font,
         text: &Vec<String>,
         chars_per_line: u32,
         line_offset: f32,
         wrap: bool
-    ) -> (u32, u32) {
+    ) -> (u32, bool) {
+
         // Setup render state
-        {
-            let render_state = self.ansi_handler.get_render_state_mut();
-            render_state.font = Some(font.clone());
-            render_state.wrap = wrap;
-            render_state.chars_per_line = chars_per_line;
-            render_state.aspect_ratio = self.width as f32 / self.height as f32;
-            render_state.coord_scale = 1.0 / font.borrow().get_atlas_size() as f32;
-            render_state.face_metrics = font.borrow().get_face_metrics();
-            render_state.base_x = 0.25;
-            render_state.base_y = -(render_state.face_metrics.height * (-line_offset + 1.0));
-            render_state.msdf_vertices.clear();
-            render_state.raster_vertices.clear();
+        let aspect_ratio = self.width as f32 / self.height as f32;
+        let coord_scale = 1.0 / font.get_atlas_size() as f32;
+        let face_metrics = font.get_face_metrics();
+        let base_x = 0.25;
+        let base_y = 0.0;
+        let char_size = 2.0 / chars_per_line as f32 / face_metrics.width;
+        let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.width;
 
-            // Scale up the character size when the maximum glyph size is smaller than 1.0
-            render_state.char_size = 2.0 / chars_per_line as f32 / render_state.face_metrics.width;
-            render_state.char_size_px = self.width as f32 / chars_per_line as f32 / render_state.face_metrics.width;
-        }
+        // TODO: move out
+        let line_offset = line_offset as usize;
+        let lines_per_screen = (
+            self.height as f32 / (
+                char_size_px * face_metrics.height
+            )
+        ) as usize;
 
-        // Parse the input sequence and populate the final render state 
+        // Update ansi state
+        self.ansi_handler.resize(chars_per_line, lines_per_screen as u32);
         self.ansi_handler.handle_sequence(&text);
 
-        let render_state = self.ansi_handler.get_render_state();
+        let mut x = base_x;
+        let mut y = base_y;
+        let mut can_scroll_down = true;
+        let mut rendered_line_count = 0;
+        let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
+        let mut raster_vertices: Vec<Vertex> = vec![];
+
+        // Render vertices 
+        let screen_buf = self.ansi_handler.get_screen_buffer();
+        'outer: for line_idx in line_offset..(line_offset + lines_per_screen) {
+            if line_idx >= screen_buf.len() {
+                can_scroll_down = false;
+                break;
+            }
+
+            rendered_line_count += 1;
+            x = base_x;
+            y -= face_metrics.height;
+
+            let line = &screen_buf[line_idx];
+            for char_idx in 0..line.len() {
+                if rendered_line_count >= lines_per_screen {
+                    break 'outer;
+                }
+
+                let c = line[char_idx];
+                if c.is_whitespace() {
+                    match c {
+                        ' ' => x += face_metrics.space_size,
+                        '\t' => x += face_metrics.space_size * font.get_tab_width(),
+                        _ => {}
+                    }
+
+                    continue;
+                }
+
+                // Need to figure this out. Potentially have to do with monospace advance?
+                let max_x = face_metrics.space_size * chars_per_line as f32;
+                let should_wrap = wrap && x >= max_x;
+                if should_wrap {
+                    rendered_line_count += 1;
+                    x = base_x;
+                    y -= face_metrics.height;
+                }
+
+                //TODO: precompute in metrics
+                // UV.y is flipped since the underlying atlas bitmaps have flipped y
+                let glyph_metrics = &font.get_glyph_data(c);
+                let glyph_bound = &glyph_metrics.glyph_bound;
+                let atlas_bound = &glyph_metrics.atlas_bound;
+                let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
+                let uv_min = [
+                    uv[0] + atlas_bound.left * coord_scale,
+                    uv[1] + atlas_bound.top * coord_scale
+                ];
+                let uv_max = [
+                    uv_min[0] + atlas_bound.width() * coord_scale,
+                    uv_min[1] - atlas_bound.height() * coord_scale
+                ];
+
+                // TODO: store in separate buffer?
+                //let fg_color = state.color_state.foreground.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                //let bg_color = state.color_state.background.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
+                let fg_color = [1.0, 1.0, 1.0];
+                let bg_color = [0.0, 0.0, 0.0];
+                let color = [
+                    Util::pack_floats(fg_color[0], bg_color[0]),
+                    Util::pack_floats(fg_color[1], bg_color[1]),
+                    Util::pack_floats(fg_color[2], bg_color[2])
+                ];
+
+                let tr = Vertex {
+                    position: Util::pack_floats(x + glyph_bound.right, y + glyph_bound.top),
+                    tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
+                    color
+                };
+                let br = Vertex {
+                    position: Util::pack_floats(x + glyph_bound.right, y + glyph_bound.bottom),
+                    tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
+                    color
+                };
+                let bl = Vertex {
+                    position: Util::pack_floats(x + glyph_bound.left, y + glyph_bound.bottom),
+                    tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
+                    color
+                };
+                let tl = Vertex {
+                    position: Util::pack_floats(x + glyph_bound.left, y + glyph_bound.top),
+                    tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
+                    color
+                };
+
+                let push_vec = match glyph_metrics.render_type {
+                    RenderType::MSDF => &mut msdf_vertices,
+                    RenderType::RASTER => &mut raster_vertices
+                };
+
+                push_vec.push(tl);
+                push_vec.push(br);
+                push_vec.push(tr);
+                push_vec.push(tl);
+                push_vec.push(bl);
+                push_vec.push(br);
+
+                x += glyph_metrics.advance;
+            }
+        }
+
         let model_mat: [f32; 16] = [
-            render_state.char_size, 0.0, 0.0, 0.0,
-            0.0, render_state.char_size * render_state.aspect_ratio, 0.0, 0.0,
+            char_size, 0.0, 0.0, 0.0,
+            0.0, char_size * aspect_ratio, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0
         ];
@@ -244,7 +351,7 @@ impl Renderer {
 
         // Render MSDF
         unsafe {
-            let vertices = &render_state.msdf_vertices;
+            let vertices = &msdf_vertices;
 
             // Bind program data
             gl::UseProgram(self.msdf_program);
@@ -261,14 +368,14 @@ impl Renderer {
 
             // Bind atlas tex
             gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, font.borrow().get_atlas_tex().get_id());
+            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
             gl::Uniform1i(gl::GetUniformLocation(
                 self.msdf_program,
                 b"atlasTex\0".as_ptr() as _
             ), 0);
 
             // Set pixel range
-            let pixel_range = render_state.char_size_px / font.borrow().get_glyph_size() as f32 * font.borrow().get_pixel_range();
+            let pixel_range = char_size_px / font.get_glyph_size() as f32 * font.get_pixel_range();
             gl::Uniform1f(gl::GetUniformLocation(
                 self.msdf_program,
                 b"pixelRange\0".as_ptr() as _
@@ -285,7 +392,7 @@ impl Renderer {
 
         // Render 
         unsafe {
-            let vertices = &render_state.raster_vertices;
+            let vertices = &raster_vertices;
 
             // Bind program data
             gl::UseProgram(self.raster_program);
@@ -302,7 +409,7 @@ impl Renderer {
 
             // Bind atlas tex
             gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, font.borrow().get_atlas_tex().get_id());
+            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
             gl::Uniform1i(gl::GetUniformLocation(
                 self.raster_program,
                 b"atlasTex\0".as_ptr() as _
@@ -317,13 +424,7 @@ impl Renderer {
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
 
-        let line_count = self.ansi_handler.get_line_count();
-        let max_line_count = (
-            self.height as f32 / (
-                render_state.char_size_px * render_state.face_metrics.height
-            )
-        ) as u32;
-        (line_count, max_line_count)
+        (rendered_line_count as u32, can_scroll_down)
     }
 
     fn compile_shader(shader_type: u32, source: &[u8]) -> Result<u32, String> {

@@ -28,13 +28,13 @@ impl Commands {
         }).unwrap();
 
         // Spawn a shell into the pty (TODO: find the default shell)
-        let cmd = CommandBuilder::new("bash");
+        let cmd = CommandBuilder::new("zsh");
         let child = pair.slave.spawn_command(cmd).unwrap();
 
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
-        writer.write_all(b"ls -la\r\n\0");
+        writer.write_all(b"vim\r\n\0");
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -57,7 +57,7 @@ impl Commands {
             pty_pair: pair,
             writer,
             child,
-            output: vec![String::from("abcdefghijklmnopqrstuvwxyz")]
+            output: vec![]
         }
     }
 
@@ -82,5 +82,9 @@ impl Commands {
 
     pub fn get_output(&self) -> &Vec<String> {
         &self.output
+    }
+
+    pub fn clear_output(&mut self) {
+        self.output.clear();
     }
 }

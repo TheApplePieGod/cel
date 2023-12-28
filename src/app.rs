@@ -15,7 +15,7 @@ pub struct App {
     window: Window,
     renderer: Renderer,
     commands: Commands,
-    primary_font: Rc<RefCell<Font>>
+    primary_font: Font
 }
 
 impl App {
@@ -52,7 +52,7 @@ impl App {
             window,
             commands: Commands::new(),
             renderer: Renderer::new(),
-            primary_font: Rc::new(RefCell::new(primary_font))
+            primary_font
         }
     }
 
@@ -61,7 +61,7 @@ impl App {
         let scroll_lines_per_second = 30.0;
         let mut tail = true;
         let mut line_count = 0;
-        let mut max_line_count = 0;
+        let mut can_scroll_down = false;
         let mut line_offset: f32 = 0.0;
         let mut delta_time = time::Duration::new(0, 0);
         while AppState::current().borrow().running && !self.window.get_handle().should_close() {
@@ -75,7 +75,6 @@ impl App {
             self.commands.resize(100, chars_per_row);
 
             // Handle input
-            let max_offset = (max(max_line_count, line_count) - max_line_count) as f32;
             if self.window.get_key_pressed(glfw::Key::Up) {
                 tail = false;
                 line_offset -= scroll_lines_per_second * delta_time.as_secs_f32();
@@ -83,14 +82,12 @@ impl App {
                     line_offset = 0.0;
                 }
             }
-            if self.window.get_key_pressed(glfw::Key::Down) {
-                line_offset += scroll_lines_per_second * delta_time.as_secs_f32();
-                if line_offset >= max_offset {
-                    tail = true;
+            if can_scroll_down {
+                if self.window.get_key_pressed(glfw::Key::Down) {
+                    line_offset += scroll_lines_per_second * delta_time.as_secs_f32();
                 }
-            }
-            if tail {
-                line_offset = max_offset;
+            } else {
+                //line_offset = 999999.0
             }
 
             // Render
@@ -99,10 +96,11 @@ impl App {
                 self.window.get_pixel_height()
             );
 
-            (line_count, max_line_count) = self.renderer.render(
+            (line_count, can_scroll_down) = self.renderer.render(
                 &mut self.primary_font,
                 self.commands.get_output(),
-                //&vec![String::from("\x1b[32;44mNerd\nNerd2")],
+                //&vec![String::from("Hello\x1b[2JYO")],
+                //&vec![String::from("\x1b[33mNerd\nNerd2")],
                 //&vec![String::from("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ")],
                 chars_per_row,
                 line_offset,
@@ -111,6 +109,7 @@ impl App {
 
             // End frame
             self.window.end_frame();
+            self.commands.clear_output();
 
             delta_time = time::Instant::now() - frame_start;
         }
