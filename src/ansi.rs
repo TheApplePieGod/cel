@@ -8,14 +8,20 @@ use crate::util::Util;
 pub type Cursor = [usize; 2];
 type SignedCursor = [isize; 2];
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct ColorState {
-    foreground: Option<[f32; 3]>,
-    background: Option<[f32; 3]>
+    pub foreground: Option<[f32; 3]>,
+    pub background: Option<[f32; 3]>
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct ScreenBufferElement {
+    pub elem: char,
+    pub color: ColorState // TODO: move this out
 }
 
 pub struct TerminalState {
-    pub screen_buffer: Vec<Vec<char>>,
+    pub screen_buffer: Vec<Vec<ScreenBufferElement>>,
     pub show_cursor: bool,
     pub color_state: ColorState,
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
@@ -304,7 +310,7 @@ impl Performer {
                     if x >= line.len() {
                         break;
                     }
-                    line[x] = ' ';
+                    line[x] = Default::default();
                 }
             } else {
                 line.clear();
@@ -355,10 +361,13 @@ impl Perform for Performer {
         }
         let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
         while state.global_cursor[0] >= buffer_line.len() {
-            buffer_line.push(' ');
+            buffer_line.push(Default::default());
         }
 
-        buffer_line[state.global_cursor[0]] = c;
+        buffer_line[state.global_cursor[0]] = ScreenBufferElement {
+            elem: c,
+            color: state.color_state
+        };
 
         // Advance the cursor
         state.global_cursor[0] += 1;
@@ -580,8 +589,8 @@ impl Perform for Performer {
                 );
             },
             'm' => { // Graphics
-                //self.perform_state.color_state = self.parse_color_escape(params.iter());
-                //log::debug!("{:?}", self.color_state);
+                self.terminal_state.color_state = self.parse_color_escape(&params);
+                //log::debug!("{:?}", self.terminal_state.color_state);
             },
             'n' => { // Device status report
                 let state = &mut self.terminal_state;

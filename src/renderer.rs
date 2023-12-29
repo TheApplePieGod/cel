@@ -258,7 +258,7 @@ impl Renderer {
                 }
 
                 let c = line[char_idx];
-                if c.is_whitespace() || c == '\0' {
+                if c.elem.is_whitespace() || c.elem == '\0' {
                     x += face_metrics.space_size;
                     continue;
                 }
@@ -276,7 +276,7 @@ impl Renderer {
                 // UV.y is flipped since the underlying atlas bitmaps have flipped y
                 let glyph_metrics = &font.get_glyph_data(match debug_line_number {
                     true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
-                    false => c
+                    false => c.elem
                 });
                 let glyph_bound = &glyph_metrics.glyph_bound;
                 let atlas_bound = &glyph_metrics.atlas_bound;
@@ -291,16 +291,16 @@ impl Renderer {
                 ];
 
                 // TODO: store in separate buffer?
-                //let fg_color = state.color_state.foreground.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
-                //let bg_color = state.color_state.background.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
+                let fg_color = c.color.foreground.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                let bg_color = c.color.background.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
 
                 Self::push_quad(
-                    [1.0, 1.0, 1.0],
-                    [0.0, 0.0, 0.0],
-                    uv_min,
-                    uv_max,
-                    [x + glyph_bound.left, y + glyph_bound.bottom],
-                    [x + glyph_bound.right, y + glyph_bound.top],
+                    fg_color,
+                    bg_color,
+                    &uv_min,
+                    &uv_max,
+                    &[x + glyph_bound.left, y + glyph_bound.bottom],
+                    &[x + glyph_bound.right, y + glyph_bound.top],
                     match glyph_metrics.render_type {
                         RenderType::MSDF => &mut msdf_vertices,
                         RenderType::RASTER => &mut raster_vertices
@@ -320,12 +320,12 @@ impl Renderer {
                 base_y + (-(cursor[1] as f32) - 1.0) * face_metrics.height
             ];
             Self::push_quad(
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 0.0],
-                [0.0, 0.0], //[char_coord_size, char_coord_size],
-                pos_min,
-                [pos_min[0] + 1.0, pos_min[1] + 1.0],
+                &[0.0, 0.0, 0.0],
+                &[1.0, 0.0, 0.0],
+                &[0.0, 0.0],
+                &[0.0, 0.0], //[char_coord_size, char_coord_size],
+                &pos_min,
+                &[pos_min[0] + 1.0, pos_min[1] + 1.0],
                 &mut raster_vertices
             );
         }
@@ -421,12 +421,12 @@ impl Renderer {
     }
 
     fn push_quad(
-        fg_color: [f32; 3],
-        bg_color: [f32; 3],
-        uv_min: [f32; 2],
-        uv_max: [f32; 2],
-        pos_min: [f32; 2],
-        pos_max: [f32; 2],
+        fg_color: &[f32; 3],
+        bg_color: &[f32; 3],
+        uv_min: &[f32; 2],
+        uv_max: &[f32; 2],
+        pos_min: &[f32; 2],
+        pos_max: &[f32; 2],
         vertices: &mut Vec<Vertex>
     ) {
         let color = [

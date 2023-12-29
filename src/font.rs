@@ -39,7 +39,6 @@ pub struct GlyphData {
 
 pub struct Font {
     name_list: Vec<String>,
-    tab_width: f32,
     font_data: Vec<Vec<u8>>,
     glyph_cache: HashMap<char, GlyphData>,
     glyph_lru: LruCache<char, GlyphMetrics>,
@@ -92,7 +91,6 @@ impl Font {
 
         Ok(Self {
             name_list: name_list.iter().map(|n| n.to_string()).collect(),
-            tab_width: 4.0,
             font_data,
             glyph_cache: Default::default(),
             glyph_lru: LruCache::new(NonZeroUsize::new(max_glyphs as usize).unwrap()),
@@ -103,10 +101,6 @@ impl Font {
 
     pub fn get_primary_name(&self) -> &str {
         &self.name_list[0]
-    }
-
-    pub fn get_tab_width(&self) -> f32 {
-        self.tab_width
     }
 
     pub fn get_atlas_tex(&self) -> &Texture<f32> {
