@@ -1,5 +1,5 @@
 use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
-use crate::{font::{Font, FaceMetrics, RenderType}, util::Util};
+use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, ansi::TerminalState};
 
 const MAX_CHARACTERS: u32 = 20000;
 
@@ -213,7 +213,7 @@ impl Renderer {
     pub fn render(
         &mut self,
         font: &mut Font,
-        screen_buffer: &Vec<Vec<char>>,
+        terminal_state: &TerminalState,
         chars_per_line: u32,
         lines_per_screen: u32,
         line_offset: f32,
@@ -228,6 +228,7 @@ impl Renderer {
         let base_y = 0.0;
         let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
         let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.space_size;
+        let char_coord_size = font.get_glyph_size() as f32 * coord_scale;
 
         // TODO: move out
         let line_offset = line_offset as usize;
@@ -241,7 +242,7 @@ impl Renderer {
 
         // Render vertices 
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
-            if line_idx >= screen_buffer.len() {
+            if line_idx >= terminal_state.screen_buffer.len() {
                 can_scroll_down = false;
                 break;
             }
@@ -250,7 +251,7 @@ impl Renderer {
             x = base_x;
             y -= face_metrics.height;
 
-            let line = &screen_buffer[line_idx];
+            let line = &terminal_state.screen_buffer[line_idx];
             for char_idx in 0..line.len() {
                 if rendered_line_count >= lines_per_screen {
                     break 'outer;
@@ -258,12 +259,7 @@ impl Renderer {
 
                 let c = line[char_idx];
                 if c.is_whitespace() || c == '\0' {
-                    match c {
-                        ' ' => x += face_metrics.space_size,
-                        '\t' => x += face_metrics.space_size * font.get_tab_width(),
-                        _ => {}
-                    }
-
+                    x += face_metrics.space_size;
                     continue;
                 }
 
@@ -297,49 +293,41 @@ impl Renderer {
                 // TODO: store in separate buffer?
                 //let fg_color = state.color_state.foreground.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
                 //let bg_color = state.color_state.background.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
-                let fg_color = [1.0, 1.0, 1.0];
-                let bg_color = [0.0, 0.0, 0.0];
-                let color = [
-                    Util::pack_floats(fg_color[0], bg_color[0]),
-                    Util::pack_floats(fg_color[1], bg_color[1]),
-                    Util::pack_floats(fg_color[2], bg_color[2])
-                ];
 
-                let tr = Vertex {
-                    position: Util::pack_floats(x + glyph_bound.right, y + glyph_bound.top),
-                    tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
-                    color
-                };
-                let br = Vertex {
-                    position: Util::pack_floats(x + glyph_bound.right, y + glyph_bound.bottom),
-                    tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
-                    color
-                };
-                let bl = Vertex {
-                    position: Util::pack_floats(x + glyph_bound.left, y + glyph_bound.bottom),
-                    tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
-                    color
-                };
-                let tl = Vertex {
-                    position: Util::pack_floats(x + glyph_bound.left, y + glyph_bound.top),
-                    tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
-                    color
-                };
+                Self::push_quad(
+                    [1.0, 1.0, 1.0],
+                    [0.0, 0.0, 0.0],
+                    uv_min,
+                    uv_max,
+                    [x + glyph_bound.left, y + glyph_bound.bottom],
+                    [x + glyph_bound.right, y + glyph_bound.top],
+                    match glyph_metrics.render_type {
+                        RenderType::MSDF => &mut msdf_vertices,
+                        RenderType::RASTER => &mut raster_vertices
+                    }
+                );
 
-                let push_vec = match glyph_metrics.render_type {
-                    RenderType::MSDF => &mut msdf_vertices,
-                    RenderType::RASTER => &mut raster_vertices
-                };
-
-                push_vec.push(tl);
-                push_vec.push(br);
-                push_vec.push(tr);
-                push_vec.push(tl);
-                push_vec.push(bl);
-                push_vec.push(br);
-
-                x += glyph_metrics.advance;
+                x += face_metrics.space_size;
+                //x += glyph_metrics.advance;
             }
+        }
+
+        // Render cursor
+        if terminal_state.show_cursor {
+            let cursor = &terminal_state.screen_cursor;
+            let pos_min = [
+                base_x + cursor[0] as f32 * face_metrics.space_size,
+                base_y + (-(cursor[1] as f32) - 1.0) * face_metrics.height
+            ];
+            Self::push_quad(
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0], //[char_coord_size, char_coord_size],
+                pos_min,
+                [pos_min[0] + 1.0, pos_min[1] + 1.0],
+                &mut raster_vertices
+            );
         }
 
         let model_mat: [f32; 16] = [
@@ -430,6 +418,50 @@ impl Renderer {
         }
 
         can_scroll_down
+    }
+
+    fn push_quad(
+        fg_color: [f32; 3],
+        bg_color: [f32; 3],
+        uv_min: [f32; 2],
+        uv_max: [f32; 2],
+        pos_min: [f32; 2],
+        pos_max: [f32; 2],
+        vertices: &mut Vec<Vertex>
+    ) {
+        let color = [
+            Util::pack_floats(fg_color[0], bg_color[0]),
+            Util::pack_floats(fg_color[1], bg_color[1]),
+            Util::pack_floats(fg_color[2], bg_color[2])
+        ];
+
+        let tr = Vertex {
+            position: Util::pack_floats(pos_max[0], pos_max[1]),
+            tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
+            color
+        };
+        let br = Vertex {
+            position: Util::pack_floats(pos_max[0], pos_min[1]),
+            tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
+            color
+        };
+        let bl = Vertex {
+            position: Util::pack_floats(pos_min[0], pos_min[1]),
+            tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
+            color
+        };
+        let tl = Vertex {
+            position: Util::pack_floats(pos_min[0], pos_max[1]),
+            tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
+            color
+        };
+
+        vertices.push(tl);
+        vertices.push(br);
+        vertices.push(tr);
+        vertices.push(tl);
+        vertices.push(bl);
+        vertices.push(br);
     }
 
     fn compile_shader(shader_type: u32, source: &[u8]) -> Result<u32, String> {

@@ -81,7 +81,14 @@ impl Font {
 
         // Generate font atlas data
         let max_glyphs = (ATLAS_SIZE / MSDF_SIZE) * (ATLAS_SIZE / MSDF_SIZE);
-        let atlas_tex = Texture::new(ATLAS_SIZE, ATLAS_SIZE, 4, true, None)?;
+        let mut atlas_tex = Texture::new(ATLAS_SIZE, ATLAS_SIZE, 4, true, None)?;
+
+        // Populate index zero
+        atlas_tex.update_pixels(
+            0, 0,
+            MSDF_SIZE, MSDF_SIZE,
+            &vec![1.0; (MSDF_SIZE * MSDF_SIZE * 4) as usize]
+        );
 
         Ok(Self {
             name_list: name_list.iter().map(|n| n.to_string()).collect(),
@@ -89,7 +96,7 @@ impl Font {
             font_data,
             glyph_cache: Default::default(),
             glyph_lru: LruCache::new(NonZeroUsize::new(max_glyphs as usize).unwrap()),
-            atlas_free_list: 0,
+            atlas_free_list: 1, // Spot zero is always empty
             atlas_tex
         })
     }
@@ -156,6 +163,8 @@ impl Font {
         }
 
         // Code reaching this point indicates atlas tex needs to be updated
+
+        // TODO: don't need to evict if new glyph is invalid (default to index 0)
 
         let glyph_data = self.glyph_cache.entry(key).or_insert_with(|| {
             let mut font_index = 0;

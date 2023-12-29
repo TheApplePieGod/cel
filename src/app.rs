@@ -149,7 +149,7 @@ impl App {
             // Render
             can_scroll_down = self.renderer.render(
                 &mut self.primary_font,
-                self.ansi_handler.get_screen_buffer(),
+                self.ansi_handler.get_terminal_state(),
                 chars_per_row,
                 lines_per_screen,
                 line_offset,
