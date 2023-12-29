@@ -112,12 +112,15 @@ impl App {
 
             output_buffer.extend_from_slice(self.commands.get_output());
             for _ in 0..max_sequences {
-                match self.ansi_handler.handle_sequence(&output_buffer) {
+                match self.ansi_handler.handle_sequence(&output_buffer, !continuous_processing) {
                     Some((i, j)) => {
                         output_buffer.drain(0..(i as usize));
                         output_buffer[0].drain(0..=(j as usize));
                     },
-                    None => break
+                    None => {
+                        output_buffer.clear();
+                        break;
+                    }
                 }
             }
 

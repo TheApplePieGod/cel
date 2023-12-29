@@ -64,12 +64,13 @@ impl AnsiHandler {
         }
     }
 
-    pub fn handle_sequence(&mut self, seq: &[String]) -> Option<(u32, u32)> {
+    pub fn handle_sequence(&mut self, seq: &[String], stop_early: bool) -> Option<(u32, u32)> {
         self.performer.action_performed = false;
         for (i, string) in seq.iter().enumerate() {
             for (j, c) in string.bytes().enumerate() {
                 self.state_machine.advance(&mut self.performer, c);
-                if self.performer.action_performed {
+                //log::warn!("{:?}", c as char);
+                if stop_early && self.performer.action_performed {
                     return Some((i as u32, j as u32))
                 }
             }
@@ -458,32 +459,36 @@ impl Perform for Performer {
         let params = self.parse_params(params);
         match c {
             'A' => {
-                if params.is_empty() || params[0] == 0 {
-                    return;
-                }
-                log::debug!("Cursor up [{:?}]", params[0]);
-                self.set_cursor_pos_relative(&[0, -(params[0] as isize)])
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Cursor up [{:?}]", amount);
+                self.set_cursor_pos_relative(&[0, -amount as isize])
             },
             'B' => {
-                if params.is_empty() || params[0] == 0 {
-                    return;
-                }
-                log::debug!("Cursor down [{:?}]", params[0]);
-                self.set_cursor_pos_relative(&[0, params[0] as isize])
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Cursor down [{:?}]", amount);
+                self.set_cursor_pos_relative(&[0, amount])
             },
             'C' => {
-                if params.is_empty() || params[0] == 0 {
-                    return;
-                }
-                log::debug!("Cursor right [{:?}]", params[0]);
-                self.set_cursor_pos_relative(&[params[0] as isize, 0])
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Cursor right [{:?}]", amount);
+                self.set_cursor_pos_relative(&[amount, 0])
             },
             'D' => {
-                if params.is_empty() || params[0] == 0 {
-                    return;
-                }
-                log::debug!("Cursor left [{:?}]", params[0]);
-                self.set_cursor_pos_relative(&[-(params[0] as isize), 0])
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Cursor left [{:?}]", amount);
+                self.set_cursor_pos_relative(&[-amount, 0])
             },
             'H' | 'f' => { // Place cursor
                 log::debug!("Cursor set position");
