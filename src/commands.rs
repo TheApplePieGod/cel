@@ -1,5 +1,5 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtySystem, Child, PtyPair};
-use std::{sync::mpsc, thread};
+use std::{sync::mpsc, thread, ffi::OsString};
 
 pub struct Commands {
     io_rx: mpsc::Receiver<String>,
@@ -27,14 +27,20 @@ impl Commands {
             pixel_height: 0,
         }).unwrap();
 
-        // Spawn a shell into the pty (TODO: find the default shell)
-        let cmd = CommandBuilder::new("zsh");
-        let child = pair.slave.spawn_command(cmd).unwrap();
+        let mut cmd = CommandBuilder::new("");
+        let shell = cmd.get_shell();
+        if shell.ends_with("zsh") {
+            // Disable extra output between each prompt line
+            cmd.args(["+o", "promptsp"]);
+        }
+        cmd.get_argv_mut()[0] = shell.into();
+        cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
 
+        let child = pair.slave.spawn_command(cmd).unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
-        writer.write_all(b"vim\r\n\0");
+        //writer.write_all(b"ls -la\r\n\0");
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -42,9 +48,8 @@ impl Commands {
             loop {
                 match reader.read(&mut buf) {
                     Ok(n) => if n > 0 {
-                        let _ = tx.send(
-                            std::str::from_utf8(&buf[0..n]).unwrap_or("").to_string()
-                        );
+                        let packet = std::str::from_utf8(&buf[0..n]).unwrap_or("").to_string();
+                        let _ = tx.send(packet);
                     }
                     Err(_) => {}
                 }

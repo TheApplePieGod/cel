@@ -166,7 +166,7 @@ impl Font {
             let mut glyph_index: Option<GlyphId>;
             loop {
                 if font_index >= self.font_data.len() {
-                    log::warn!("Missing glyph for '{}'", key);
+                    log::warn!("Missing glyph for '{:?}'", key);
                     return Default::default();
                 }
 
@@ -194,7 +194,7 @@ impl Font {
                 RenderType::RASTER => Self::generate_raster(&face, raster.unwrap())
             };
 
-            log::info!("Glyph '{}': {:?}", key, render_type);
+            //log::info!("Glyph '{}': {:?}", key, render_type);
 
             let scale = face.units_per_em() as f32;
             GlyphData {

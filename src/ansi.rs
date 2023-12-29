@@ -6,6 +6,7 @@ use crate::renderer::{RenderState, Vertex};
 use crate::util::Util;
 
 type Cursor = [usize; 2];
+type SignedCursor = [isize; 2];
 
 #[derive(Default)]
 struct ColorState {
@@ -17,10 +18,13 @@ struct ColorState {
 struct Performer {
     pub color_state: ColorState,
     pub screen_buffer: Vec<Vec<char>>,
-    pub screen_offset: usize,
     pub screen_width: usize,
     pub screen_height: usize,
-    pub cursor: Cursor,
+    pub output_stream: Vec<u8>,
+    global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
+    global_cursor: Cursor,
+    screen_cursor: Cursor,
+    action_performed: bool
 }
 
 pub struct AnsiHandler {
@@ -36,16 +40,18 @@ impl AnsiHandler {
         }
     }
 
-    pub fn handle_sequence(&mut self, seq: &Vec<String>) {
-        for string in seq {
-            for c in string.bytes() {
+    pub fn handle_sequence(&mut self, seq: &[String]) -> Option<(u32, u32)> {
+        self.performer.action_performed = false;
+        for (i, string) in seq.iter().enumerate() {
+            for (j, c) in string.bytes().enumerate() {
                 self.state_machine.advance(&mut self.performer, c);
+                if self.performer.action_performed {
+                    return Some((i as u32, j as u32))
+                }
             }
         }
-    }
 
-    pub fn update_screen_offset(&mut self, x: u32, y: u32) {
-        self.performer.screen_offset = y as usize;
+        None
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -55,6 +61,10 @@ impl AnsiHandler {
 
     pub fn get_screen_buffer(&self) -> &Vec<Vec<char>> {
         &self.performer.screen_buffer
+    }
+
+    pub fn consume_output_stream(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.performer.output_stream)
     }
 }
 
@@ -112,67 +122,142 @@ impl Performer {
         state
     }
 
-    fn get_max_screen_pos(&self) -> (u16, u16) {
-        (self.screen_width as u16 - 1, self.screen_height as u16 - 1)
-    }
-
     /// Top left position is (0, 0)
-    fn get_cursor_pos_from_screen(
-        &mut self,
-        target_x: u16,
-        target_y: u16
+    fn compute_new_cursor_pos(
+        &self,
+        cur_screen: Cursor,
+        cur_global: Cursor,
+        target_screen: Cursor
     ) -> Cursor {
-        log::warn!(
-            "Target: {}/{}, {}/{}",
-            target_x,
-            self.screen_width,
-            target_y,
-            self.screen_height
-        );
-        let target_x = target_x as usize;
-        let target_y = target_y as usize;
-        let mut screen_x = 0;
-        let mut screen_y = 0;
-        let mut line_y = 0;
+        let target_screen = [
+            target_screen[0].clamp(0, self.screen_width - 1),
+            target_screen[1].clamp(0, self.screen_height - 1)
+        ];
+        let mut cur_screen = cur_screen;
+        let mut cur_global = cur_global;
         loop {
-            let line_idx = line_y + self.screen_offset;
-
             // Can figure out exactly where to go if the lines are empty
-            if line_idx >= self.screen_buffer.len() {
-                log::warn!(
-                    "Target: {}, Screen: {}",
-                    target_y,
-                    screen_y
-                );
-                return [target_x, line_idx + (target_y - screen_y)];
+            if cur_global[1] >= self.screen_buffer.len() {
+                return [
+                    target_screen[0],
+                    cur_global[1] + (target_screen[1] - cur_screen[1])
+                ];
             }
 
             // TODO: this could definitely be optimized
-            let line = &self.screen_buffer[line_idx];
-            for char_idx in 0..line.len() {
-                if screen_y == target_y {
-                    return [char_idx + (target_x - screen_x), line_y];
+            let line = &self.screen_buffer[cur_global[1]];
+            for char_idx in cur_global[0]..line.len() {
+                if cur_screen[1] == target_screen[1] {
+                    return [
+                        char_idx + (target_screen[0] - cur_screen[0]),
+                        cur_global[1]
+                    ];
                 }
 
-                if screen_x >= self.screen_width {
-                    screen_x = 0;
-                    screen_y += 1;
+                cur_screen[0] += 1;
+                if cur_screen[0] >= self.screen_width {
+                    cur_screen[0] = 0;
+                    cur_screen[1] += 1;
                 }
             }
 
             // Should only happen if line is empty
-            if screen_y == target_y {
-                return [target_x - screen_x, line_y];
+            if cur_screen[1] == target_screen[1] {
+                return [
+                    target_screen[0] - cur_screen[0],
+                    cur_global[1]
+                ];
             }
 
-            screen_x = 0;
-            screen_y += 1;
-            line_y += 1;
+            cur_screen[0] = 0;
+            cur_screen[1] += 1;
+            cur_global[1] += 1;
         }
     }
 
-    fn set_cursor_pos_from_screen(&mut self, target_x: u16, target_y: u16) {
-        self.cursor = self.get_cursor_pos_from_screen(target_x, target_y);
+    /// Get the global cursor pos from an absolute screen position
+    fn get_cursor_pos_absolute(&self, screen_pos: &Cursor) -> Cursor {
+        self.compute_new_cursor_pos(
+            [0, 0],
+            self.global_cursor_home,
+            *screen_pos
+        )
+    }
+
+    fn set_cursor_pos_absolute(&mut self, screen_pos: &Cursor) {
+        let old_screen = self.screen_cursor;
+        let old_global = self.global_cursor;
+
+        self.global_cursor = self.get_cursor_pos_absolute(screen_pos);
+        self.screen_cursor = *screen_pos;
+
+        log::debug!(
+            "[set_cursor_pos_absolute{:?}] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
+            screen_pos,
+            old_screen, self.screen_cursor,
+            old_global, self.global_cursor
+        );
+    }
+
+    /// Get the global cursor pos from a position relative to the current screen cursor
+    fn get_cursor_pos_relative(&self, relative_screen: &SignedCursor) -> Cursor {
+        // TODO: optimize better for relative? right now we have to recompute from
+        // the origin in order to ensure correctness
+        let target = self.get_relative_screen_cursor(relative_screen);
+        self.get_cursor_pos_absolute(&target)
+    }
+
+    fn set_cursor_pos_relative(&mut self, relative_screen: &SignedCursor) {
+        let old_screen = self.screen_cursor;
+        let old_global = self.global_cursor;
+
+        let target = self.get_relative_screen_cursor(relative_screen);
+        self.global_cursor = self.get_cursor_pos_relative(relative_screen);
+        self.screen_cursor = target;
+
+        log::debug!(
+            "[set_cursor_pos_relative({:?})] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
+            relative_screen,
+            old_screen, self.screen_cursor,
+            old_global, self.global_cursor
+        );
+    }
+
+    fn get_max_screen_cursor(&self) -> Cursor {
+        [self.screen_width - 1, self.screen_height - 1]
+    }
+
+    fn get_relative_screen_cursor(&self, offset: &SignedCursor) -> Cursor {
+        let relative = [
+            (self.screen_cursor[0] as isize + offset[0]).max(0) as usize,
+            (self.screen_cursor[1] as isize + offset[1]).max(0) as usize
+        ];
+
+        /*
+        log::debug!(
+            "[get_relative_screen_cursor({:?})] Screen {:?} -> {:?}",
+            offset,
+            self.screen_cursor, relative
+        );
+        */
+
+        relative
+    }
+
+    /// Computes the global cursor pos at the start of the current line
+    fn get_cursor_pos_sol(&self) -> Cursor {
+        [
+            self.global_cursor[0] - self.screen_cursor[0],
+            self.global_cursor[1]
+        ]
+    }
+
+    /// Computes the global cursor pos at the end of the current line
+    fn get_cursor_pos_eol(&self) -> Cursor {
+        [
+            self.global_cursor[0] + (self.screen_width - self.screen_cursor[0] - 1),
+            self.global_cursor[1]
+        ]
     }
 
     fn erase(&mut self, start: Cursor, end: Cursor) {
@@ -202,11 +287,44 @@ impl Performer {
                 line.clear();
             }
         }
+
+        log::debug!(
+            "[erase] Global: {:?} -> {:?}",
+            start, end
+        );
+    }
+
+    /// Advance the screen cursor y by one, potentially scrolling the buffer if
+    /// necessary (updating the global cursor)
+    fn advance_screen_cursor_y(&mut self) {
+        let old_screen = self.screen_cursor;
+        let old_home = self.global_cursor_home;
+
+        if self.screen_cursor[1] < self.screen_height - 1 {
+            self.screen_cursor[1] += 1;
+        } else {
+            let global_line = &self.screen_buffer[self.global_cursor_home[1]];
+            let still_wrapped = self.global_cursor_home[0] + self.screen_width < global_line.len();
+            if still_wrapped {
+                self.global_cursor_home[0] += self.screen_width;
+            } else {
+                self.global_cursor_home[0] = 0;
+                self.global_cursor_home[1] += 1;
+            }
+        }
+
+        log::debug!(
+            "[advance_screen_cursor_y] Screen: {:?} -> {:?}, Home: {:?} -> {:?}",
+            old_screen, self.screen_cursor,
+            old_home, self.global_cursor_home
+        );
     }
 }
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
+        self.action_performed = true;
+
         // Filled in with all the rasterized positions of each line,
         // even if there is nothing there. This way we can easily populate
         // the primary buffer just by looking up which line it should be in the
@@ -225,18 +343,24 @@ impl Perform for Performer {
         }
         */
 
-        while self.cursor[1] >= self.screen_buffer.len() {
+        while self.global_cursor[1] >= self.screen_buffer.len() {
             self.screen_buffer.push(vec![]);
         }
-        let buffer_line = &mut self.screen_buffer[self.cursor[1]];
-        while self.cursor[0] >= buffer_line.len() {
+        let buffer_line = &mut self.screen_buffer[self.global_cursor[1]];
+        while self.global_cursor[0] >= buffer_line.len() {
             buffer_line.push(' ');
         }
 
-        buffer_line[self.cursor[0]] = c;
+        buffer_line[self.global_cursor[0]] = c;
 
         // Advance the cursor
-        self.cursor[0] += 1;
+        self.global_cursor[0] += 1;
+        self.screen_cursor[0] += 1;
+
+        if self.screen_cursor[0] >= self.screen_width {
+            self.screen_cursor[0] = 0;
+            self.advance_screen_cursor_y();
+        }
 
         // Check if the cursor has moved to the next line and will impact the screen.
         // If so, we need to update the raster buffer
@@ -250,27 +374,63 @@ impl Perform for Performer {
     }
 
     fn execute(&mut self, byte: u8) {
-        //println!("[execute] {:02x}", byte);
+        self.action_performed = true;
+        log::debug!("Exec [{:?}]", byte as char);
+
         match byte {
             b'\n' => {
-                self.cursor[0] = 0;
-                self.cursor[1] += 1;
-                /*
-                self.perform_state.line_count += 1;
-                self.perform_state.line_char_count = 0;
-                self.perform_state.x_pos = self.render_state.base_x;
-                self.perform_state.y_pos -= self.render_state.face_metrics.height;
-                */
+                let old_global = self.global_cursor;
+
+                self.global_cursor[0] = self.global_cursor[0] % self.screen_width;
+                self.global_cursor[1] += 1;
+                self.advance_screen_cursor_y();
+
+                log::debug!(
+                    "[\\n] Global: {:?} -> {:?}",
+                    old_global,
+                    self.global_cursor
+                );
             },
-            _ => {}
+            b'\r' => {
+                let old_global = self.global_cursor;
+
+                self.global_cursor = self.get_cursor_pos_sol();
+                self.screen_cursor[0] = 0;
+
+                log::debug!(
+                    "[\\r] Global: {:?} -> {:?}",
+                    old_global,
+                    self.global_cursor
+                );
+            },
+            0x07 => { // Bell
+                log::debug!("Bell!!!");
+            }
+            0x08 => { // Backspace
+                // Move cursor back by one with back-wrapping
+                if self.global_cursor[0] > 0 {
+                    self.global_cursor[0] -= 1;
+                    if self.screen_cursor[0] > 0 {
+                        self.screen_cursor[0] -= 1;
+                    } else {
+                        self.screen_cursor[0] = self.screen_width - 1;
+                        self.screen_cursor[1] -= 1;
+                    }
+                }
+            },
+            _ => {
+                //println!("[execute] {:02x}", byte);
+            }
         }
     }
 
     fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
+        /*
         println!(
             "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
             params, intermediates, ignore, c
         );
+        */
     }
 
     fn put(&mut self, byte: u8) {
@@ -286,56 +446,144 @@ impl Perform for Performer {
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
+        self.action_performed = true;
+
         let params = self.parse_params(params);
         match c {
-            'm' => { // Graphics
-                //self.perform_state.color_state = self.parse_color_escape(params.iter());
-                //log::debug!("{:?}", self.color_state);
+            'A' => {
+                if params.is_empty() {
+                    return;
+                }
+                log::debug!("Cursor up [{:?}]", params[0]);
+                self.set_cursor_pos_relative(&[0, -(params[0] as isize)])
+            },
+            'B' => {
+                if params.is_empty() {
+                    return;
+                }
+                log::debug!("Cursor down [{:?}]", params[0]);
+                self.set_cursor_pos_relative(&[0, params[0] as isize])
+            },
+            'C' => {
+                if params.is_empty() {
+                    return;
+                }
+                log::debug!("Cursor right [{:?}]", params[0]);
+                self.set_cursor_pos_relative(&[params[0] as isize, 0])
+            },
+            'D' => {
+                if params.is_empty() {
+                    return;
+                }
+                log::debug!("Cursor left [{:?}]", params[0]);
+                self.set_cursor_pos_relative(&[-(params[0] as isize), 0])
             },
             'H' | 'f' => { // Place cursor
+                log::debug!("Cursor set position");
                 match params.len() {
-                    0 => self.set_cursor_pos_from_screen(0, 0),
-                    2 => self.set_cursor_pos_from_screen(params[0], params[1]),
+                    0 => self.set_cursor_pos_absolute(&[0, 0]),
+                    2 => self.set_cursor_pos_absolute(&[
+                        // row, col format
+                        params[1] as usize - 1,
+                        params[0] as usize - 1
+                    ]),
                     _ => {}
                 }
             },
             'J' => { // Erase in display
-                let max_pos = self.get_max_screen_pos();
-                let max_cursor = self.get_cursor_pos_from_screen(max_pos.0, max_pos.1);
-                let min_cursor = self.get_cursor_pos_from_screen(0, 0);
+                log::debug!("Erase in display");
+                let min_cursor = self.global_cursor_home;
+                let max_cursor = self.get_cursor_pos_absolute(
+                    &self.get_max_screen_cursor()
+                );
                 let code = match params.len() {
                     1 => params[0],
                     _ => 0
                 };
                 match code {
-                    0 => self.erase(self.cursor, max_cursor),
-                    1 => self.erase(self.cursor, min_cursor),
+                    0 => self.erase(self.global_cursor, max_cursor),
+                    1 => self.erase(self.global_cursor, min_cursor),
                     2 => {
                         self.erase(min_cursor, max_cursor);
-                        self.cursor = min_cursor;
+                        self.global_cursor = min_cursor;
+                        self.screen_cursor = [0, 0];
                     },
                     3 => {}
                     _ => {}
                 }
             },
             'K' => { // Erase in line
+                log::debug!("Erase in line");
                 let code = match params.len() {
                     1 => params[0],
                     _ => 0
                 };
                 match code {
-                    0 => self.erase(self.cursor, [std::usize::MAX, self.cursor[1]]),
-                    1 => self.erase(self.cursor, [0, self.cursor[1]]),
-                    2 => self.erase([0, self.cursor[1]], [std::usize::MAX, self.cursor[1]]),
+                    0 => self.erase(
+                        self.global_cursor,
+                        self.get_cursor_pos_eol()
+                    ),
+                    1 => self.erase(
+                        self.global_cursor,
+                        self.get_cursor_pos_sol()
+                    ),
+                    2 => self.erase(
+                        self.get_cursor_pos_sol(),
+                        self.get_cursor_pos_eol()
+                    ),
                     _ => {}
                 }
             },
+            'c' => { // Send device attributes
+                if !params.is_empty() && params[0] != 0 {
+                    return;
+                }
+                match intermediates.len() {
+                    0 => {}, // Primary
+                    1 => {
+                        match intermediates[0] {
+                            b'>' => { // Secondary
+                                let esc_str = "\x1b[>0;10;1c";
+                                self.output_stream.extend_from_slice(esc_str.as_bytes());
+                            },
+                            b'=' => {}, // Tertiary
+                            _ => {}
+                        }
+                    },
+                    _ => {}
+                }
+            },
+            'h' => {
+                if params.len() != 1 {
+                    return;
+                }
+                // TODO: public vs private mode
+                log::debug!("Set mode [{:?}]", params[0]);
+            },
+            'm' => { // Graphics
+                //self.perform_state.color_state = self.parse_color_escape(params.iter());
+                //log::debug!("{:?}", self.color_state);
+            },
             'n' => { // Device status report
-                
+                if params.len() != 1 {
+                    return;
+                }
+                match params[0] {
+                    5 => {}, // Status report
+                    6 => { // Report cursor position
+                        let esc_str = format!(
+                            "\x1b[{};{}R",
+                            self.screen_cursor[1] + 1,
+                            self.screen_cursor[0] + 1
+                        );
+                        self.output_stream.extend_from_slice(esc_str.as_bytes());
+                    },
+                    _ => {}
+                }
             }
             _ => {
                 println!(
-                    "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
+                    "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
                     params, intermediates, ignore, c
                 );
             }
@@ -343,6 +591,9 @@ impl Perform for Performer {
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+        self.action_performed = true;
+        log::debug!("Esc [{:?}]", byte as char);
+
         /*
         println!(
             "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",

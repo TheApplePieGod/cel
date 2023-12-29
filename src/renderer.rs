@@ -1,5 +1,5 @@
 use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
-use crate::{font::{Font, FaceMetrics, RenderType}, ansi::AnsiHandler, util::Util};
+use crate::{font::{Font, FaceMetrics, RenderType}, util::Util};
 
 const MAX_CHARACTERS: u32 = 20000;
 
@@ -34,7 +34,6 @@ pub struct Renderer {
     quad_vbo: u32,
     width: u32,
     height: u32,
-    ansi_handler: AnsiHandler
 }
 
 impl Renderer {
@@ -187,8 +186,7 @@ impl Renderer {
             quad_vao,
             quad_vbo,
             width: 0,
-            height: 0,
-            ansi_handler: AnsiHandler::new()
+            height: 0
         }
     }
 
@@ -198,36 +196,41 @@ impl Renderer {
         self.height = height as u32;
     }
 
+    pub fn compute_max_screen_lines(&self, font: &Font, chars_per_line: u32) -> u32 {
+        let face_metrics = font.get_face_metrics();
+        let char_size = 2.0 / chars_per_line as f32 / face_metrics.width;
+        let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.width;
+        let lines_per_screen = (
+            self.height as f32 / (
+                char_size_px * face_metrics.height
+            )
+        ) as u32;
+
+        lines_per_screen
+    }
+
     /// Returns rendered line count and max lines per screen
     pub fn render(
         &mut self,
         font: &mut Font,
-        text: &Vec<String>,
+        screen_buffer: &Vec<Vec<char>>,
         chars_per_line: u32,
+        lines_per_screen: u32,
         line_offset: f32,
-        wrap: bool
-    ) -> (u32, bool) {
-
+        wrap: bool,
+        debug_line_number: bool
+    ) -> bool {
         // Setup render state
         let aspect_ratio = self.width as f32 / self.height as f32;
         let coord_scale = 1.0 / font.get_atlas_size() as f32;
         let face_metrics = font.get_face_metrics();
         let base_x = 0.25;
         let base_y = 0.0;
-        let char_size = 2.0 / chars_per_line as f32 / face_metrics.width;
-        let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.width;
+        let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
+        let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.space_size;
 
         // TODO: move out
         let line_offset = line_offset as usize;
-        let lines_per_screen = (
-            self.height as f32 / (
-                char_size_px * face_metrics.height
-            )
-        ) as usize;
-
-        // Update ansi state
-        self.ansi_handler.resize(chars_per_line, lines_per_screen as u32);
-        self.ansi_handler.handle_sequence(&text);
 
         let mut x = base_x;
         let mut y = base_y;
@@ -237,9 +240,8 @@ impl Renderer {
         let mut raster_vertices: Vec<Vertex> = vec![];
 
         // Render vertices 
-        let screen_buf = self.ansi_handler.get_screen_buffer();
-        'outer: for line_idx in line_offset..(line_offset + lines_per_screen) {
-            if line_idx >= screen_buf.len() {
+        'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
+            if line_idx >= screen_buffer.len() {
                 can_scroll_down = false;
                 break;
             }
@@ -248,14 +250,14 @@ impl Renderer {
             x = base_x;
             y -= face_metrics.height;
 
-            let line = &screen_buf[line_idx];
+            let line = &screen_buffer[line_idx];
             for char_idx in 0..line.len() {
                 if rendered_line_count >= lines_per_screen {
                     break 'outer;
                 }
 
                 let c = line[char_idx];
-                if c.is_whitespace() {
+                if c.is_whitespace() || c == '\0' {
                     match c {
                         ' ' => x += face_metrics.space_size,
                         '\t' => x += face_metrics.space_size * font.get_tab_width(),
@@ -276,7 +278,10 @@ impl Renderer {
 
                 //TODO: precompute in metrics
                 // UV.y is flipped since the underlying atlas bitmaps have flipped y
-                let glyph_metrics = &font.get_glyph_data(c);
+                let glyph_metrics = &font.get_glyph_data(match debug_line_number {
+                    true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
+                    false => c
+                });
                 let glyph_bound = &glyph_metrics.glyph_bound;
                 let atlas_bound = &glyph_metrics.atlas_bound;
                 let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
@@ -424,7 +429,7 @@ impl Renderer {
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
 
-        (rendered_line_count as u32, can_scroll_down)
+        can_scroll_down
     }
 
     fn compile_shader(shader_type: u32, source: &[u8]) -> Result<u32, String> {

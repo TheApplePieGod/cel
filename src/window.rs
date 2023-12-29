@@ -31,6 +31,8 @@ impl Window {
 
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
+        glfw_instance.set_swap_interval(glfw::SwapInterval::None);
+
         Self {
             glfw_instance,
             window,
@@ -58,10 +60,8 @@ impl Window {
                                     Key::Backspace => self.input_buffer.push(0x08),
                                     Key::Delete => self.input_buffer.push(0x7F),
                                     Key::Tab => self.input_buffer.push(0x09),
-                                    Key::Enter => {
-                                        self.input_buffer.push(0x0D);
-                                        self.input_buffer.push(0x0A);
-                                    },
+                                    Key::Escape => self.input_buffer.push(0x1b),
+                                    Key::Enter => self.input_buffer.push(0x0A),
                                     Key::C if ctrl_pressed => self.input_buffer.push(0x03),
                                     _ => {}
                                 }
@@ -72,9 +72,6 @@ impl Window {
                     }
                 },
                 glfw::WindowEvent::Char(key) => {
-                    if self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) {
-                        self.input_buffer.push(b'^');
-                    }
                     self.input_buffer.extend_from_slice(
                         key.encode_utf8(&mut self.utf8_buffer).as_bytes()
                     );
