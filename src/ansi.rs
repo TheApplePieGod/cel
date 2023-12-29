@@ -5,19 +5,30 @@ use crate::font::{Font, RenderType};
 use crate::renderer::{RenderState, Vertex};
 use crate::util::Util;
 
+pub type Color = [f32; 3];
 pub type Cursor = [usize; 2];
 type SignedCursor = [isize; 2];
 
 #[derive(Default, Clone, Copy)]
+pub enum ColorWeight {
+    #[default]
+    Normal,
+    Bold,
+    Faint
+}
+
+#[derive(Default, Clone, Copy)]
 pub struct ColorState {
-    pub foreground: Option<[f32; 3]>,
-    pub background: Option<[f32; 3]>
+    pub foreground: Option<Color>,
+    pub background: Option<Color>,
+    pub weight: ColorWeight
 }
 
 #[derive(Default, Clone, Copy)]
 pub struct ScreenBufferElement {
     pub elem: char,
-    pub color: ColorState // TODO: move this out
+    pub fg_color: Option<Color>, // TODO: move this out
+    pub bg_color: Option<Color> // TODO: move this out
 }
 
 pub struct TerminalState {
@@ -105,46 +116,48 @@ impl Performer {
         res
     }
 
-    fn parse_16_bit_color(&self, bold: bool, code: u16) -> [f32; 3] {
-        let factor: f32 = match bold {
-            true => 1.0,
-            false => 0.5
+    fn parse_16_bit_color(weight: ColorWeight, code: u16) -> [f32; 3] {
+        let factor: f32 = match weight {
+            ColorWeight::Normal => 0.5,
+            ColorWeight::Bold => 1.0,
+            ColorWeight::Faint => 0.25
         };
         let one = (code & 1) as f32 * factor;
         let two = ((code & 2) >> 1) as f32 * factor;
         let four = ((code & 4) >> 2) as f32 * factor;
         match code {
             1..=6 => [one, two, four],
-            0     => match bold {
-                true => [0.5, 0.5, 0.5],
-                false => [0.0, 0.0, 0.0]
+            0     => match weight {
+                ColorWeight::Normal => [0.0, 0.0, 0.0],
+                ColorWeight::Bold => [0.5, 0.5, 0.5],
+                ColorWeight::Faint => [0.25, 0.25, 0.25]
             },
-            7     => match bold {
-                true => [1.0, 1.0, 1.0],
-                false => [0.75, 0.75, 0.75]
+            7     => match weight {
+                ColorWeight::Normal => [0.75, 0.75, 0.75],
+                ColorWeight::Bold => [1.0, 1.0, 1.0],
+                ColorWeight::Faint => [0.5, 0.5, 0.5]
             }
             _ => [0.0, 0.0, 0.0]
         }
     }
 
-    fn parse_color_escape(&self, params: &Vec<u16>) -> ColorState {
-        let mut state: ColorState = Default::default();
-
-        let mut is_bold = false;
+    fn parse_color_escape(&mut self, params: &Vec<u16>) {
+        let state = &mut self.terminal_state.color_state;
         for code in params {
             match code {
-                1 => is_bold = true,
-                30..=37 => state.foreground = Some(self.parse_16_bit_color(is_bold, code - 30)),
-                40..=47 => state.background = Some(self.parse_16_bit_color(is_bold, code - 40)),
-                90..=97   => state.foreground = Some(self.parse_16_bit_color(true, code - 90)),
-                100..=107 => state.background = Some(self.parse_16_bit_color(true, code - 100)),
-                38 => state.foreground = None,
-                39 => state.background = None,
+                0 => *state = Default::default(),
+                22 => state.weight = ColorWeight::Normal,
+                1 => state.weight = ColorWeight::Bold,
+                2 => state.weight = ColorWeight::Faint,
+                30..=37 => state.foreground = Some(Self::parse_16_bit_color(state.weight, code - 30)),
+                40..=47 => state.background = Some(Self::parse_16_bit_color(state.weight, code - 40)),
+                90..=97   => state.foreground = Some(Self::parse_16_bit_color(ColorWeight::Bold, code - 90)),
+                100..=107 => state.background = Some(Self::parse_16_bit_color(ColorWeight::Bold, code - 100)),
+                39 => state.foreground = None,
+                49 => state.background = None,
                 _ => {}
             }
         }
-
-        state
     }
 
     /// Top left position is (0, 0)
@@ -367,7 +380,8 @@ impl Perform for Performer {
 
         buffer_line[state.global_cursor[0]] = ScreenBufferElement {
             elem: c,
-            color: state.color_state
+            fg_color: state.color_state.foreground,
+            bg_color: state.color_state.background
         };
 
         // Advance the cursor
@@ -594,8 +608,12 @@ impl Perform for Performer {
                 );
             },
             'm' => { // Graphics
-                self.terminal_state.color_state = self.parse_color_escape(&params);
-                //log::debug!("{:?}", self.terminal_state.color_state);
+                self.parse_color_escape(&params);
+                log::debug!(
+                    "Graphics [{:?}] -> {:?}",
+                    params,
+                    self.terminal_state.color_state
+                );
             },
             'n' => { // Device status report
                 let state = &mut self.terminal_state;

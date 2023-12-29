@@ -291,8 +291,8 @@ impl Renderer {
                 ];
 
                 // TODO: store in separate buffer?
-                let fg_color = c.color.foreground.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
-                let bg_color = c.color.background.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
+                let fg_color = c.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                let bg_color = c.bg_color.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
 
                 Self::push_quad(
                     fg_color,
