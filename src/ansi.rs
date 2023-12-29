@@ -3,21 +3,33 @@ use std::fmt;
 
 use crate::font::{Font, RenderType};
 use crate::renderer::{RenderState, Vertex};
-use crate::util::Util;
 
 pub type Color = [f32; 3];
 pub type Cursor = [usize; 2];
 type SignedCursor = [isize; 2];
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
+pub enum CursorStyle {
+    Block,
+    Underline,
+    Bar
+}
+
+#[derive(Clone, Copy)]
+pub struct CursorState {
+    pub style: CursorStyle,
+    pub visible: bool,
+    pub blinking: bool
+}
+
+#[derive(Clone, Copy)]
 pub enum ColorWeight {
-    #[default]
     Normal,
     Bold,
     Faint
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ColorState {
     pub foreground: Option<Color>,
     pub background: Option<Color>,
@@ -33,7 +45,7 @@ pub struct ScreenBufferElement {
 
 pub struct TerminalState {
     pub screen_buffer: Vec<Vec<ScreenBufferElement>>,
-    pub show_cursor: bool,
+    pub cursor_state: CursorState,
     pub color_state: ColorState,
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
     pub global_cursor: Cursor,
@@ -54,12 +66,32 @@ pub struct AnsiHandler {
     state_machine: Parser,
 }
 
+impl Default for CursorState {
+    fn default() -> Self {
+        Self {
+            style: CursorStyle::Block,
+            visible: true,
+            blinking: true
+        }
+    }
+}
+
+impl Default for ColorState{
+    fn default() -> Self {
+        Self {
+            foreground: None,
+            background: None,
+            weight: ColorWeight::Normal
+        }
+    }
+}
+
 impl Default for TerminalState {
     fn default() -> Self {
         Self {
             screen_buffer: Default::default(),
             color_state: Default::default(),
-            show_cursor: true,
+            cursor_state: Default::default(),
             global_cursor_home: [0, 0],
             global_cursor: [0, 0],
             screen_cursor: [0, 0]
@@ -146,9 +178,9 @@ impl Performer {
         for code in params {
             match code {
                 0 => *state = Default::default(),
-                22 => state.weight = ColorWeight::Normal,
                 1 => state.weight = ColorWeight::Bold,
                 2 => state.weight = ColorWeight::Faint,
+                22 => state.weight = ColorWeight::Normal,
                 30..=37 => state.foreground = Some(Self::parse_16_bit_color(state.weight, code - 30)),
                 40..=47 => state.background = Some(Self::parse_16_bit_color(state.weight, code - 40)),
                 90..=97   => state.foreground = Some(Self::parse_16_bit_color(ColorWeight::Bold, code - 90)),
@@ -272,14 +304,6 @@ impl Performer {
             (screen_cursor[0] as isize + offset[0]).max(0) as usize,
             (screen_cursor[1] as isize + offset[1]).max(0) as usize
         ];
-
-        /*
-        log::debug!(
-            "[get_relative_screen_cursor({:?})] Screen {:?} -> {:?}",
-            offset,
-            self.screen_cursor, relative
-        );
-        */
 
         relative
     }
@@ -453,10 +477,12 @@ impl Perform for Performer {
             params, intermediates, ignore, c
         );
         */
+        log::debug!("Hook [{:?}]", c);
     }
 
     fn put(&mut self, byte: u8) {
         //println!("[put] {:02x}", byte);
+        log::debug!("Put [{:?}]", byte as char);
     }
 
     fn unhook(&mut self) {
@@ -465,6 +491,8 @@ impl Perform for Performer {
 
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         //println!("[osc_dispatch] params={:?} bell_terminated={}", params, bell_terminated);
+        //self.action_performed = true;
+        log::debug!("Osc [{:?}]", params);
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
@@ -594,7 +622,7 @@ impl Perform for Performer {
                     true => {},
                     false => {
                         match params[0] {
-                            25 => self.terminal_state.show_cursor = enabled,
+                            25 => self.terminal_state.cursor_state.visible = enabled,
                             _ => {}
                         }
                     }
@@ -633,6 +661,9 @@ impl Perform for Performer {
                     _ => {}
                 }
             }
+            'q' => {
+                log::warn!("Cursor: {:?}, {:?}", params, intermediates);
+            },
             _ => {
                 println!(
                     "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",

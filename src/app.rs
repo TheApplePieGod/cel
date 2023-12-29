@@ -141,12 +141,17 @@ impl App {
                     line_offset = 0.0;
                 }
             }
-            if can_scroll_down {
+            else if can_scroll_down {
                 if self.window.get_key_pressed(glfw::Key::Down) {
                     line_offset += scroll_lines_per_second * delta_time.as_secs_f32();
                 }
             } else {
-                //line_offset = 999999.0
+                tail = true;
+            }
+
+            if tail {
+                let buffer = &self.ansi_handler.get_terminal_state().screen_buffer;
+                line_offset = ((buffer.len() + 1).max(lines_per_screen as usize) - lines_per_screen as usize) as f32;
             }
 
             // Render

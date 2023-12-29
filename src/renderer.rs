@@ -198,13 +198,9 @@ impl Renderer {
 
     pub fn compute_max_screen_lines(&self, font: &Font, chars_per_line: u32) -> u32 {
         let face_metrics = font.get_face_metrics();
-        let char_size = 2.0 / chars_per_line as f32 / face_metrics.width;
-        let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.width;
-        let lines_per_screen = (
-            self.height as f32 / (
-                char_size_px * face_metrics.height
-            )
-        ) as u32;
+        let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
+        let aspect_ratio = self.width as f32 / self.height as f32;
+        let lines_per_screen = (2.0 / (face_metrics.height * char_size * aspect_ratio)) as u32 + 1;
 
         lines_per_screen
     }
@@ -242,14 +238,34 @@ impl Renderer {
 
         // Render vertices 
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
-            if line_idx >= terminal_state.screen_buffer.len() {
-                can_scroll_down = false;
-                break;
-            }
-
             rendered_line_count += 1;
             x = base_x;
             y -= face_metrics.height;
+
+            // Render cursor
+            if terminal_state.cursor_state.visible {
+                let cursor = &terminal_state.global_cursor;
+                if cursor[1] == line_idx {
+                    let pos_min = [
+                        base_x + (cursor[0] % chars_per_line as usize) as f32 * face_metrics.space_size,
+                        y
+                    ];
+                    Self::push_quad(
+                        &[0.0, 0.0, 0.0],
+                        &[1.0, 0.0, 0.0],
+                        &[0.0, 0.0],
+                        &[0.0, 0.0], //[char_coord_size, char_coord_size],
+                        &pos_min,
+                        &[pos_min[0] + 1.0, pos_min[1] + 1.0],
+                        &mut raster_vertices
+                    );
+                }
+            }
+
+            if line_idx >= terminal_state.screen_buffer.len() {
+                can_scroll_down = false;
+                continue;
+            }
 
             let line = &terminal_state.screen_buffer[line_idx];
             for char_idx in 0..line.len() {
@@ -310,24 +326,6 @@ impl Renderer {
                 x += face_metrics.space_size;
                 //x += glyph_metrics.advance;
             }
-        }
-
-        // Render cursor
-        if terminal_state.show_cursor {
-            let cursor = &terminal_state.screen_cursor;
-            let pos_min = [
-                base_x + cursor[0] as f32 * face_metrics.space_size,
-                base_y + (-(cursor[1] as f32) - 1.0) * face_metrics.height
-            ];
-            Self::push_quad(
-                &[0.0, 0.0, 0.0],
-                &[1.0, 0.0, 0.0],
-                &[0.0, 0.0],
-                &[0.0, 0.0], //[char_coord_size, char_coord_size],
-                &pos_min,
-                &[pos_min[0] + 1.0, pos_min[1] + 1.0],
-                &mut raster_vertices
-            );
         }
 
         let model_mat: [f32; 16] = [
