@@ -6,6 +6,8 @@ use std::num::NonZeroUsize;
 use lru::LruCache;
 use crate::texture::Texture;
 
+pub type FontCache = FcFontCache;
+
 const ATLAS_SIZE: u32 = 2048;
 const MSDF_SIZE: u32 = 32;
 const MSDF_RANGE: f32 = 4.0;
@@ -63,7 +65,7 @@ impl Default for GlyphData {
 
 impl Font {
     pub fn new(
-        cache: &FcFontCache,
+        cache: &FontCache,
         name_list: &Vec<&str>,
     ) -> Result<Self, String> {
         let mut font_data = vec![];
@@ -308,7 +310,7 @@ impl Font {
         [offset[0] as f32 / atlas_f32, offset[1] as f32 / atlas_f32]
     }
 
-    fn load_font_by_name(cache: &FcFontCache, name: &str) -> Result<Vec<u8>, String> {
+    fn load_font_by_name(cache: &FontCache, name: &str) -> Result<Vec<u8>, String> {
         match cache.query(&FcPattern {
             name: Some(name.to_string()),
             ..Default::default()

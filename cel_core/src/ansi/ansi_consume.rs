@@ -1,103 +1,7 @@
-use vte::{Params, Parser, Perform};
+use vte::{Parser, Params, Perform};
 use std::fmt;
 
-use crate::font::{Font, RenderType};
-use crate::renderer::{RenderState, Vertex};
-
-pub type Color = [f32; 3];
-pub type Cursor = [usize; 2];
-type SignedCursor = [isize; 2];
-
-#[derive(Clone, Copy)]
-pub enum CursorStyle {
-    Block,
-    Underline,
-    Bar
-}
-
-#[derive(Clone, Copy)]
-pub struct CursorState {
-    pub style: CursorStyle,
-    pub visible: bool,
-    pub blinking: bool
-}
-
-#[derive(Clone, Copy)]
-pub enum ColorWeight {
-    Normal,
-    Bold,
-    Faint
-}
-
-#[derive(Clone, Copy)]
-pub struct ColorState {
-    pub foreground: Option<Color>,
-    pub background: Option<Color>,
-    pub weight: ColorWeight
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct ScreenBufferElement {
-    pub elem: char,
-    pub fg_color: Option<Color>, // TODO: move this out
-    pub bg_color: Option<Color> // TODO: move this out
-}
-
-pub struct TerminalState {
-    pub screen_buffer: Vec<Vec<ScreenBufferElement>>,
-    pub cursor_state: CursorState,
-    pub color_state: ColorState,
-    pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
-    pub global_cursor: Cursor,
-    pub screen_cursor: Cursor,
-}
-
-#[derive(Default)]
-struct Performer {
-    pub screen_width: usize,
-    pub screen_height: usize,
-    pub output_stream: Vec<u8>,
-    pub terminal_state: TerminalState,
-    action_performed: bool
-}
-
-pub struct AnsiHandler {
-    performer: Performer,
-    state_machine: Parser,
-}
-
-impl Default for CursorState {
-    fn default() -> Self {
-        Self {
-            style: CursorStyle::Block,
-            visible: true,
-            blinking: true
-        }
-    }
-}
-
-impl Default for ColorState{
-    fn default() -> Self {
-        Self {
-            foreground: None,
-            background: None,
-            weight: ColorWeight::Normal
-        }
-    }
-}
-
-impl Default for TerminalState {
-    fn default() -> Self {
-        Self {
-            screen_buffer: Default::default(),
-            color_state: Default::default(),
-            cursor_state: Default::default(),
-            global_cursor_home: [0, 0],
-            global_cursor: [0, 0],
-            screen_cursor: [0, 0]
-        }
-    }
-}
+use super::*;
 
 impl AnsiHandler {
     pub fn new() -> Self {
@@ -226,6 +130,7 @@ impl Performer {
                 }
 
                 cur_screen[0] += 1;
+
                 if cur_screen[0] >= self.screen_width {
                     cur_screen[0] = 0;
                     cur_screen[1] += 1;
@@ -240,8 +145,12 @@ impl Performer {
                 ];
             }
 
+            let is_wrapped = cur_screen[0] == 0 && (line.len().max(1) / self.screen_width) != 0;
+            if  !is_wrapped {
+                cur_screen[1] += 1;
+            }
+
             cur_screen[0] = 0;
-            cur_screen[1] += 1;
             cur_global[1] += 1;
         }
     }
@@ -371,8 +280,13 @@ impl Performer {
         if state.screen_cursor[1] < self.screen_height - 1 {
             state.screen_cursor[1] += 1;
         } else {
-            let global_line = &state.screen_buffer[state.global_cursor_home[1]];
-            let still_wrapped = state.global_cursor_home[0] + self.screen_width < global_line.len();
+            let still_wrapped = match state.global_cursor_home[1]  < state.screen_buffer.len() {
+                true => {
+                    let global_line = &state.screen_buffer[state.global_cursor_home[1]];
+                    state.global_cursor_home[0] + self.screen_width < global_line.len()
+                }
+                false => false
+            };
             if still_wrapped {
                 state.global_cursor_home[0] += self.screen_width;
             } else {
@@ -426,9 +340,13 @@ impl Perform for Performer {
             b'\n' => {
                 let old_global = self.terminal_state.global_cursor;
 
+                let is_wrapped = self.terminal_state.screen_cursor[0] == 0
+                                 && self.terminal_state.global_cursor[0] != 0;
                 self.terminal_state.global_cursor[0] = self.terminal_state.global_cursor[0] % self.screen_width;
                 self.terminal_state.global_cursor[1] += 1;
-                self.advance_screen_cursor_y();
+                if !is_wrapped {
+                    self.advance_screen_cursor_y();
+                }
 
                 log::debug!(
                     "[\\n] Global: {:?} -> {:?}",
@@ -532,17 +450,18 @@ impl Perform for Performer {
                 log::debug!("Cursor left [{:?}]", amount);
                 self.set_cursor_pos_relative(&[-amount, 0])
             },
-            'H' | 'f' => { // Place cursor
-                log::debug!("Cursor set position");
-                match params.len() {
-                    0 => self.set_cursor_pos_absolute(&[0, 0]),
-                    2 => self.set_cursor_pos_absolute(&[
-                        // row, col format
-                        params[1] as usize - 1,
-                        params[0] as usize - 1
-                    ]),
-                    _ => {}
-                }
+            'H' => { // Place cursor
+                // Params have row, col format
+                let row = match params.len() {
+                    1..=2 if params[0] > 0 => params[0] as usize - 1,
+                    _ => 0
+                };
+                let col = match params.len() {
+                    2 if params[1] > 0 => params[1] as usize - 1,
+                    _ => 0
+                };
+                log::debug!("Cursor set position [{}, {}]", col, row);
+                self.set_cursor_pos_absolute(&[col, row]);
             },
             'J' => { // Erase in display
                 log::debug!("Erase in display");

@@ -1,5 +1,6 @@
-use std::{ffi::c_void, mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
-use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, ansi::TerminalState};
+use std::{mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
+use cel_core::ansi::TerminalState;
+use crate::{font::{Font, FaceMetrics, RenderType}, util::Util};
 
 const MAX_CHARACTERS: u32 = 20000;
 
@@ -214,7 +215,8 @@ impl Renderer {
         lines_per_screen: u32,
         line_offset: f32,
         wrap: bool,
-        debug_line_number: bool
+        debug_line_number: bool,
+        debug_show_cursor: bool
     ) -> bool {
         // Setup render state
         let aspect_ratio = self.width as f32 / self.height as f32;
@@ -243,12 +245,15 @@ impl Renderer {
             y -= face_metrics.height;
 
             // Render cursor
-            if terminal_state.cursor_state.visible {
+            // TODO: can probably compute this without being in the loop
+            if terminal_state.cursor_state.visible || debug_show_cursor {
                 let cursor = &terminal_state.global_cursor;
-                if cursor[1] == line_idx {
+                let rendered_y = cursor[1] + cursor[0] / chars_per_line as usize;
+                if rendered_y == line_idx {
+                    // Compute absolute position to account for wraps
                     let pos_min = [
                         base_x + (cursor[0] % chars_per_line as usize) as f32 * face_metrics.space_size,
-                        y
+                        base_y + -face_metrics.height * (line_idx - line_offset + 1) as f32
                     ];
                     Self::push_quad(
                         &[0.0, 0.0, 0.0],

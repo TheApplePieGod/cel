@@ -1,12 +1,10 @@
 use log::*;
-use rust_fontconfig::FcFontCache;
 use std::time;
 
-use crate::ansi::AnsiHandler;
+use cel_core::{ansi::AnsiHandler, commands::Commands};
+use cel_renderer::{font::{Font, FontCache}, renderer::Renderer};
+
 use crate::app_state::AppState;
-use crate::commands::{Commands, self};
-use crate::font::Font;
-use crate::renderer::{Renderer, self};
 use crate::window::Window;
 
 pub struct App {
@@ -20,7 +18,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let window = Window::new();
-        let font_cache = FcFontCache::build();
+        let font_cache = FontCache::build();
 
         /*
         for font in font_cache.list() {
@@ -68,12 +66,15 @@ impl App {
             chars_per_row
         );
 
+        log::info!("CPR: {}, LPS: {}", chars_per_row, lines_per_screen);
+
         self.commands.resize(lines_per_screen, chars_per_row);
         self.ansi_handler.resize(chars_per_row, lines_per_screen);
 
         let scroll_lines_per_second = 30.0;
-        let continuous_processing = true;
+        let continuous_processing = false;
         let debug_line_numbers = false;
+        let debug_show_cursor = true;
 
         let mut tail = true;
         let mut can_scroll_down = false;
@@ -95,12 +96,15 @@ impl App {
             };
             if self.window.get_key_pressed(glfw::Key::F10)
                || self.window.get_key_pressed(glfw::Key::F11)
+               || self.window.get_key_pressed(glfw::Key::F12)
                || self.window.get_key_pressed(glfw::Key::F5) {
                 if process_next_input {
                     if self.window.get_key_pressed(glfw::Key::F10) {
                         max_sequences = 1;
                     } else if self.window.get_key_pressed(glfw::Key::F11) {
                         max_sequences = 10;
+                    } else if self.window.get_key_pressed(glfw::Key::F12) {
+                        max_sequences = 100;
                     } else {
                         max_sequences = std::u32::MAX;
                     }
@@ -124,14 +128,8 @@ impl App {
                 }
             }
 
-            //self.ansi_handler.handle_sequence(self.commands.get_output());
-
             self.commands.send_input(&self.ansi_handler.consume_output_stream());
             self.commands.send_input(self.window.get_input_buffer());
-
-            //&vec![String::from("Hello\x1b[2JYO")],
-            //&vec![String::from("\x1b[33mNerd\nNerd2")],
-            //&vec![String::from("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a ")],
 
             // Handle input
             if self.window.get_key_pressed(glfw::Key::Up) {
@@ -162,7 +160,8 @@ impl App {
                 lines_per_screen,
                 line_offset,
                 true,
-                debug_line_numbers
+                debug_line_numbers,
+                debug_show_cursor
             );
 
             // End frame

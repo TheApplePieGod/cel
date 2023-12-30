@@ -1,17 +1,7 @@
-mod ansi;
 mod app;
 mod app_state;
-mod commands;
-mod font;
 mod logging;
-mod renderer;
-mod texture;
-mod util;
 mod window;
-
-extern crate glfw;
-extern crate gl;
-extern crate log;
 
 use crate::{app::App, logging::ConsoleLogger};
 

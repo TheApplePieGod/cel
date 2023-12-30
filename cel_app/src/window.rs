@@ -1,4 +1,4 @@
-use glfw::{Action, Context, Key, fail_on_errors, Modifiers};
+use glfw::{Action, Context, Key, fail_on_errors};
 
 pub struct Window {
     glfw_instance: glfw::Glfw,
@@ -31,6 +31,7 @@ impl Window {
 
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
+        // Disable vsync to decrease latency
         glfw_instance.set_swap_interval(glfw::SwapInterval::None);
 
         Self {
@@ -57,6 +58,10 @@ impl Window {
                                 // Send escape code to input buffer
                                 let ctrl_pressed = self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl);
                                 match key {
+                                    Key::Up => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'A']),
+                                    Key::Down => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'B']),
+                                    Key::Right => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'C']),
+                                    Key::Left => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'D']),
                                     Key::Backspace => self.input_buffer.push(0x08),
                                     Key::Delete => self.input_buffer.push(0x7F),
                                     Key::Tab => self.input_buffer.push(0x09),
