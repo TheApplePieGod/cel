@@ -45,8 +45,11 @@ pub struct ScreenBufferElement {
     pub bg_color: Option<Color> // TODO: move this out
 }
 
+pub type ScreenBuffer = Vec<Vec<ScreenBufferElement>>;
+
+#[derive(Clone)]
 pub struct TerminalState {
-    pub screen_buffer: Vec<Vec<ScreenBufferElement>>,
+    pub screen_buffer: ScreenBuffer,
     pub cursor_state: CursorState,
     pub color_state: ColorState,
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
@@ -68,7 +71,9 @@ pub struct AnsiHandler {
     state_machine: Parser,
 }
 
-pub struct AnsiBuilder {}
+pub struct AnsiBuilder {
+    buffer: Vec<u8>
+}
 
 impl Default for CursorState {
     fn default() -> Self {

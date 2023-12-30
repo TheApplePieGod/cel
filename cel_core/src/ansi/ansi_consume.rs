@@ -11,15 +11,32 @@ impl AnsiHandler {
         }
     }
 
-    pub fn handle_sequence(&mut self, seq: &[String], stop_early: bool) -> Option<(u32, u32)> {
+    pub fn handle_sequence_strings(
+        &mut self,
+        seq: &[String],
+        stop_early: bool
+    ) -> Option<(u32, u32)> {
         self.performer.action_performed = false;
         for (i, string) in seq.iter().enumerate() {
-            for (j, c) in string.bytes().enumerate() {
-                self.state_machine.advance(&mut self.performer, c);
-                //log::warn!("{:?}", c as char);
-                if stop_early && self.performer.action_performed {
-                    return Some((i as u32, j as u32))
-                }
+            match self.handle_sequence_bytes(string.as_bytes(), stop_early) {
+                Some(j) => return Some((i as u32, j)),
+                None => {}
+            }
+        }
+
+        None
+    }
+
+    pub fn handle_sequence_bytes(
+        &mut self,
+        seq: &[u8],
+        stop_early: bool
+    ) -> Option<u32> {
+        self.performer.action_performed = false;
+        for (i, c) in seq.iter().enumerate() {
+            self.state_machine.advance(&mut self.performer, *c);
+            if stop_early && self.performer.action_performed {
+                return Some(i as u32)
             }
         }
 
