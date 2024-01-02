@@ -201,7 +201,7 @@ impl Renderer {
         let face_metrics = font.get_face_metrics();
         let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
         let aspect_ratio = self.width as f32 / self.height as f32;
-        let lines_per_screen = (2.0 / (face_metrics.height * char_size * aspect_ratio)) as u32 + 1;
+        let lines_per_screen = (2.0 / (face_metrics.height * char_size * aspect_ratio)).round() as u32;
 
         lines_per_screen
     }
@@ -222,7 +222,7 @@ impl Renderer {
         let aspect_ratio = self.width as f32 / self.height as f32;
         let coord_scale = 1.0 / font.get_atlas_size() as f32;
         let face_metrics = font.get_face_metrics();
-        let base_x = 0.25;
+        let base_x = 0.0; //0.25;
         let base_y = 0.0;
         let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
         let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.space_size;
@@ -274,7 +274,7 @@ impl Renderer {
 
             let line = &terminal_state.screen_buffer[line_idx];
             for char_idx in 0..line.len() {
-                if rendered_line_count >= lines_per_screen {
+                if rendered_line_count > lines_per_screen {
                     break 'outer;
                 }
 

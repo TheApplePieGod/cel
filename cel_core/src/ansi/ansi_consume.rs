@@ -120,10 +120,6 @@ impl Performer {
         cur_global: Cursor,
         target_screen: Cursor
     ) -> Cursor {
-        let target_screen = [
-            target_screen[0].clamp(0, self.screen_width - 1),
-            target_screen[1].clamp(0, self.screen_height - 1)
-        ];
         let mut cur_screen = cur_screen;
         let mut cur_global = cur_global;
         let state = &self.terminal_state;
@@ -139,6 +135,12 @@ impl Performer {
             // TODO: this could definitely be optimized
             let line = &state.screen_buffer[cur_global[1]];
             for char_idx in cur_global[0]..line.len() {
+                // Handle wrap only when we have a character to place there
+                if cur_screen[0] >= self.screen_width {
+                    cur_screen[0] = 0;
+                    cur_screen[1] += 1;
+                }
+
                 if cur_screen[1] == target_screen[1] {
                     return [
                         char_idx + (target_screen[0] - cur_screen[0]),
@@ -147,11 +149,6 @@ impl Performer {
                 }
 
                 cur_screen[0] += 1;
-
-                if cur_screen[0] >= self.screen_width {
-                    cur_screen[0] = 0;
-                    cur_screen[1] += 1;
-                }
             }
 
             // Should only happen if line is empty
@@ -185,12 +182,14 @@ impl Performer {
         let old_screen = self.terminal_state.screen_cursor;
         let old_global = self.terminal_state.global_cursor;
 
-        self.terminal_state.global_cursor = self.get_cursor_pos_absolute(screen_pos);
-        self.terminal_state.screen_cursor = *screen_pos;
+        let clamped_pos = self.clamp_screen_cursor(screen_pos);
+        self.terminal_state.global_cursor = self.get_cursor_pos_absolute(&clamped_pos);
+        self.terminal_state.screen_cursor = clamped_pos;
+        self.terminal_state.wants_wrap = false;
 
         log::debug!(
             "[set_cursor_pos_absolute{:?}] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
-            screen_pos,
+            clamped_pos,
             old_screen, self.terminal_state.screen_cursor,
             old_global, self.terminal_state.global_cursor
         );
@@ -207,21 +206,34 @@ impl Performer {
     fn set_cursor_pos_relative(&mut self, relative_screen: &SignedCursor) {
         let old_screen = self.terminal_state.screen_cursor;
         let old_global = self.terminal_state.global_cursor;
+        let old_wrap = self.terminal_state.wants_wrap;
 
         let target = self.get_relative_screen_cursor(relative_screen);
         self.terminal_state.global_cursor = self.get_cursor_pos_relative(relative_screen);
         self.terminal_state.screen_cursor = target;
+        self.terminal_state.wants_wrap = false;
 
         log::debug!(
-            "[set_cursor_pos_relative({:?})] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
+            "[set_cursor_pos_relative({:?})] Screen: {:?} -> {:?}, Global: {:?} -> {:?} {}",
             relative_screen,
             old_screen, self.terminal_state.screen_cursor,
-            old_global, self.terminal_state.global_cursor
+            old_global, self.terminal_state.global_cursor,
+            match old_wrap {
+                true => "<WRAPPED>",
+                false => ""
+            }
         );
     }
 
     fn get_max_screen_cursor(&self) -> Cursor {
         [self.screen_width - 1, self.screen_height - 1]
+    }
+
+    fn clamp_screen_cursor(&self, cursor: &Cursor) -> Cursor {
+        [
+            cursor[0].min(self.screen_width - 1),
+            cursor[1].min(self.screen_height - 1)
+        ]
     }
 
     fn get_relative_screen_cursor(&self, offset: &SignedCursor) -> Cursor {
@@ -231,7 +243,7 @@ impl Performer {
             (screen_cursor[1] as isize + offset[1]).max(0) as usize
         ];
 
-        relative
+        self.clamp_screen_cursor(&relative)
     }
 
     /// Computes the global cursor pos at the start of the current line
@@ -250,6 +262,19 @@ impl Performer {
             state.global_cursor[0] + (self.screen_width - state.screen_cursor[0] - 1),
             state.global_cursor[1]
         ]
+    }
+
+    fn get_remaining_wrapped_line_count(&self, cursor: &Cursor) -> u32 {
+        let buffer = &self.terminal_state.screen_buffer;
+        match cursor[1] >= buffer.len() || cursor[0] >= buffer[cursor[1]].len() {
+            true => 0,
+            false => {
+                let buffer_lines = buffer[cursor[1]].len() / (self.screen_width + 1);
+                let cursor_lines = cursor[0] / self.screen_width;
+
+                (buffer_lines - cursor_lines) as u32
+            }
+        }
     }
 
     fn erase(&mut self, start: Cursor, end: Cursor) {
@@ -289,7 +314,7 @@ impl Performer {
 
     /// Advance the screen cursor y by one, potentially scrolling the buffer if
     /// necessary (updating the global cursor)
-    fn advance_screen_cursor_y(&mut self) {
+    fn advance_screen_cursor_with_scroll(&mut self) {
         let state = &mut self.terminal_state;
         let old_screen = state.screen_cursor;
         let old_home = state.global_cursor_home;
@@ -297,14 +322,14 @@ impl Performer {
         if state.screen_cursor[1] < self.screen_height - 1 {
             state.screen_cursor[1] += 1;
         } else {
-            let still_wrapped = match state.global_cursor_home[1]  < state.screen_buffer.len() {
+            let home_still_wrapped = match state.global_cursor_home[1]  < state.screen_buffer.len() {
                 true => {
                     let global_line = &state.screen_buffer[state.global_cursor_home[1]];
                     state.global_cursor_home[0] + self.screen_width < global_line.len()
                 }
                 false => false
             };
-            if still_wrapped {
+            if home_still_wrapped {
                 state.global_cursor_home[0] += self.screen_width;
             } else {
                 state.global_cursor_home[0] = 0;
@@ -322,8 +347,17 @@ impl Performer {
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
-        let state = &mut self.terminal_state;
         self.action_performed = true;
+
+        // Handle wrapping only when we place a character
+        if self.terminal_state.wants_wrap {
+            self.terminal_state.screen_cursor[0] = 0;
+            self.terminal_state.global_cursor[0] += 1;
+            self.terminal_state.wants_wrap = false;
+            self.advance_screen_cursor_with_scroll();
+        }
+
+        let state = &mut self.terminal_state;
 
         while state.global_cursor[1] >= state.screen_buffer.len() {
             state.screen_buffer.push(vec![]);
@@ -339,14 +373,25 @@ impl Perform for Performer {
             bg_color: state.color_state.background
         };
 
-        // Advance the cursor
-        state.global_cursor[0] += 1;
-        state.screen_cursor[0] += 1;
-
-        if state.screen_cursor[0] >= self.screen_width {
-            state.screen_cursor[0] = 0;
-            self.advance_screen_cursor_y();
+        // Check for wrap. If we want to wrap, update the state accordingly. Otherwise,
+        // update the cursor directly
+        let wrap = state.screen_cursor[0] + 1 >= self.screen_width;
+        if wrap {
+            state.wants_wrap = true;
+        } else {
+            // Advance the cursor
+            state.global_cursor[0] += 1;
+            state.screen_cursor[0] += 1;
         }
+
+        log::trace!(
+            "Print {:?} {}",
+            c,
+            match wrap {
+                true => "<NEXT WRAP>",
+                false => ""
+            }
+        );
     }
 
     fn execute(&mut self, byte: u8) {
@@ -357,13 +402,17 @@ impl Perform for Performer {
             b'\n' => {
                 let old_global = self.terminal_state.global_cursor;
 
-                let is_wrapped = self.terminal_state.screen_cursor[0] == 0
-                                 && self.terminal_state.global_cursor[0] != 0;
-                self.terminal_state.global_cursor[0] = self.terminal_state.global_cursor[0] % self.screen_width;
-                self.terminal_state.global_cursor[1] += 1;
-                if !is_wrapped {
-                    self.advance_screen_cursor_y();
+                self.terminal_state.wants_wrap = false;
+
+                let keep_line = self.get_remaining_wrapped_line_count(&self.terminal_state.global_cursor) > 0;
+                if keep_line {
+                    self.terminal_state.global_cursor[0] += self.screen_width;
+                } else {
+                    self.terminal_state.global_cursor[0] = self.terminal_state.global_cursor[0] % self.screen_width;
+                    self.terminal_state.global_cursor[1] += 1;
                 }
+
+                self.advance_screen_cursor_with_scroll();
 
                 log::debug!(
                     "[\\n] Global: {:?} -> {:?}",
@@ -374,6 +423,7 @@ impl Perform for Performer {
             b'\r' => {
                 let old_global = self.terminal_state.global_cursor;
 
+                self.terminal_state.wants_wrap = false;
                 self.terminal_state.global_cursor = self.get_cursor_pos_sol();
                 self.terminal_state.screen_cursor[0] = 0;
 

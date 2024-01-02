@@ -60,7 +60,7 @@ impl App {
             self.window.get_pixel_height()
         );
 
-        let chars_per_row = 128;
+        let chars_per_row = 100;
         let lines_per_screen = self.renderer.compute_max_screen_lines(
             &self.primary_font,
             chars_per_row
@@ -72,7 +72,7 @@ impl App {
         self.ansi_handler.resize(chars_per_row, lines_per_screen);
 
         let scroll_lines_per_second = 30.0;
-        let continuous_processing = false;
+        let continuous_processing = true;
         let debug_line_numbers = false;
         let debug_show_cursor = true;
 
@@ -149,7 +149,7 @@ impl App {
 
             if tail {
                 let buffer = &self.ansi_handler.get_terminal_state().screen_buffer;
-                line_offset = ((buffer.len() + 1).max(lines_per_screen as usize) - lines_per_screen as usize) as f32;
+                line_offset = (buffer.len().max(lines_per_screen as usize) - lines_per_screen as usize) as f32;
             }
 
             // Render

@@ -52,6 +52,7 @@ pub struct TerminalState {
     pub screen_buffer: ScreenBuffer,
     pub cursor_state: CursorState,
     pub color_state: ColorState,
+    pub wants_wrap: bool,
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
     pub global_cursor: Cursor,
     pub screen_cursor: Cursor,
@@ -101,6 +102,7 @@ impl Default for TerminalState {
             screen_buffer: Default::default(),
             color_state: Default::default(),
             cursor_state: Default::default(),
+            wants_wrap: false,
             global_cursor_home: [0, 0],
             global_cursor: [0, 0],
             screen_cursor: [0, 0]

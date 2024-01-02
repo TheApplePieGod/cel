@@ -45,6 +45,14 @@ impl AnsiBuilder {
         self.add_raw_csi(&[amount], None, 'D')
     }
 
+    pub fn set_cursor_pos(self, x: u32, y: u32) -> Self {
+        self.add_raw_csi(&[y, x], None, 'H')
+    }
+
+    pub fn reset_cursor_pos(self) -> Self {
+        self.set_cursor_pos(1, 1)
+    }
+
     // Raw
 
     pub fn add_raw_csi(
