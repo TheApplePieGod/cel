@@ -60,7 +60,11 @@ impl App {
             self.window.get_pixel_height()
         );
 
-        let chars_per_row = 100;
+        let chars_per_row = 128;
+        let scroll_lines_per_second = 30.0;
+        let continuous_processing = true;
+        let debug_line_numbers = false;
+        let debug_show_cursor = true;
         let lines_per_screen = self.renderer.compute_max_screen_lines(
             &self.primary_font,
             chars_per_row
@@ -70,11 +74,6 @@ impl App {
 
         self.commands.resize(lines_per_screen, chars_per_row);
         self.ansi_handler.resize(chars_per_row, lines_per_screen);
-
-        let scroll_lines_per_second = 30.0;
-        let continuous_processing = true;
-        let debug_line_numbers = false;
-        let debug_show_cursor = true;
 
         let mut tail = true;
         let mut can_scroll_down = false;
@@ -116,10 +115,9 @@ impl App {
 
             output_buffer.extend_from_slice(self.commands.get_output());
             for _ in 0..max_sequences {
-                match self.ansi_handler.handle_sequence_strings(&output_buffer, !continuous_processing) {
-                    Some((i, j)) => {
-                        output_buffer.drain(0..(i as usize));
-                        output_buffer[0].drain(0..=(j as usize));
+                match self.ansi_handler.handle_sequence_bytes(&output_buffer, !continuous_processing) {
+                    Some(i) => {
+                        output_buffer.drain(0..=(i as usize));
                     },
                     None => {
                         output_buffer.clear();

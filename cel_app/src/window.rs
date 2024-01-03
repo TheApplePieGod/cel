@@ -65,8 +65,8 @@ impl Window {
                                     Key::Backspace => self.input_buffer.push(0x08),
                                     Key::Delete => self.input_buffer.push(0x7F),
                                     Key::Tab => self.input_buffer.push(0x09),
-                                    Key::Escape => self.input_buffer.push(0x1b),
-                                    Key::Enter => self.input_buffer.push(0x0A),
+                                    Key::Escape => self.input_buffer.push(0x1B),
+                                    Key::Enter => self.input_buffer.push(0x0D),
                                     Key::C if ctrl_pressed => self.input_buffer.push(0x03),
                                     _ => {}
                                 }

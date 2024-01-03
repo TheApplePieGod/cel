@@ -2,12 +2,12 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, PtyPair};
 use std::{sync::mpsc, thread};
 
 pub struct Commands {
-    io_rx: mpsc::Receiver<String>,
+    io_rx: mpsc::Receiver<Vec<u8>>,
     //reader: Box<dyn std::io::Read + Send>,
     pty_pair: PtyPair,
     writer: Box<dyn std::io::Write + Send>,
     child: Box<dyn Child + Send + Sync>,
-    output: Vec<String>
+    output: Vec<u8>
 }
 
 impl Commands {
@@ -48,8 +48,7 @@ impl Commands {
             loop {
                 match reader.read(&mut buf) {
                     Ok(n) => if n > 0 {
-                        let packet = std::str::from_utf8(&buf[0..n]).unwrap_or("").to_string();
-                        let _ = tx.send(packet);
+                        let _ = tx.send(Vec::from(&buf[0..n]));
                     }
                     Err(_) => {}
                 }
@@ -68,7 +67,7 @@ impl Commands {
 
     pub fn poll_io(&mut self) {
         while let Ok(v) = self.io_rx.try_recv() {
-            self.output.push(v);
+            self.output.extend(v);
         }
     }
 
@@ -85,7 +84,7 @@ impl Commands {
         let _ = self.writer.write_all(input);
     }
 
-    pub fn get_output(&self) -> &Vec<String> {
+    pub fn get_output(&self) -> &Vec<u8> {
         &self.output
     }
 

@@ -11,22 +11,6 @@ impl AnsiHandler {
         }
     }
 
-    pub fn handle_sequence_strings(
-        &mut self,
-        seq: &[String],
-        stop_early: bool
-    ) -> Option<(u32, u32)> {
-        self.performer.action_performed = false;
-        for (i, string) in seq.iter().enumerate() {
-            match self.handle_sequence_bytes(string.as_bytes(), stop_early) {
-                Some(j) => return Some((i as u32, j)),
-                None => {}
-            }
-        }
-
-        None
-    }
-
     pub fn handle_sequence_bytes(
         &mut self,
         seq: &[u8],
@@ -34,6 +18,7 @@ impl AnsiHandler {
     ) -> Option<u32> {
         self.performer.action_performed = false;
         for (i, c) in seq.iter().enumerate() {
+            //print!("{:?} ", *c as char);
             self.state_machine.advance(&mut self.performer, *c);
             if stop_early && self.performer.action_performed {
                 return Some(i as u32)
@@ -205,12 +190,14 @@ impl Performer {
         self.terminal_state.screen_cursor = clamped_pos;
         self.terminal_state.wants_wrap = false;
 
+        /*
         log::debug!(
             "[set_cursor_pos_absolute{:?}] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
             clamped_pos,
             old_screen, self.terminal_state.screen_cursor,
             old_global, self.terminal_state.global_cursor
         );
+        */
     }
 
     /// Get the global cursor pos from a position relative to the current screen cursor
@@ -231,6 +218,7 @@ impl Performer {
         self.terminal_state.screen_cursor = target;
         self.terminal_state.wants_wrap = false;
 
+        /*
         log::debug!(
             "[set_cursor_pos_relative({:?})] Screen: {:?} -> {:?}, Global: {:?} -> {:?} {}",
             relative_screen,
@@ -241,6 +229,7 @@ impl Performer {
                 false => ""
             }
         );
+        */
     }
 
     fn get_max_screen_cursor(&self) -> Cursor {
@@ -324,10 +313,12 @@ impl Performer {
             }
         }
 
+        /*
         log::debug!(
             "[erase] Global: {:?} -> {:?}",
             start, end
         );
+        */
     }
 
     /// Advance the screen cursor y by one, potentially scrolling the buffer if
@@ -355,13 +346,21 @@ impl Performer {
             }
         }
 
+        /*
         log::debug!(
-            "[advance_screen_cursor_y] Screen: {:?} -> {:?}, Home: {:?} -> {:?}",
+            "[advance_screen_cursor_with_scroll] Screen: {:?} -> {:?}, Home: {:?} -> {:?}",
             old_screen, state.screen_cursor,
             old_home, state.global_cursor_home
         );
+        */
     }
 }
+
+// TO ADD:
+// - OSC commands (color query, window name, font, etc)
+// - Cursor modes
+// - Alternate screen buffer
+// - Mouse modes (1000-1034)
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
@@ -414,7 +413,7 @@ impl Perform for Performer {
 
     fn execute(&mut self, byte: u8) {
         self.action_performed = true;
-        log::debug!("Exec [{:?}]", byte as char);
+        //log::debug!("Exec [{:?}]", byte as char);
 
         match byte {
             b'\n' => {
@@ -432,11 +431,13 @@ impl Perform for Performer {
 
                 self.advance_screen_cursor_with_scroll();
 
+                /*
                 log::debug!(
                     "[\\n] Global: {:?} -> {:?}",
                     old_global,
                     self.terminal_state.global_cursor
                 );
+                */
             },
             b'\r' => {
                 let old_global = self.terminal_state.global_cursor;
@@ -445,11 +446,13 @@ impl Perform for Performer {
                 self.terminal_state.global_cursor = self.get_cursor_pos_sol();
                 self.terminal_state.screen_cursor[0] = 0;
 
+                /*
                 log::debug!(
                     "[\\r] Global: {:?} -> {:?}",
                     old_global,
                     self.terminal_state.global_cursor
                 );
+                */
             },
             0x07 => { // Bell
                 log::debug!("Bell!!!");
@@ -468,7 +471,7 @@ impl Perform for Performer {
                 }
             },
             _ => {
-                //println!("[execute] {:02x}", byte);
+                log::debug!("[execute] {:02x}", byte);
             }
         }
     }
@@ -489,7 +492,7 @@ impl Perform for Performer {
     }
 
     fn unhook(&mut self) {
-        //println!("[unhook]");
+        log::debug!("[unhook]");
     }
 
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
@@ -508,7 +511,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                log::debug!("Cursor up [{:?}]", amount);
+                //log::debug!("Cursor up [{:?}]", amount);
                 self.set_cursor_pos_relative(&[0, -amount as isize])
             },
             'B' => {
@@ -516,7 +519,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                log::debug!("Cursor down [{:?}]", amount);
+                //log::debug!("Cursor down [{:?}]", amount);
                 self.set_cursor_pos_relative(&[0, amount])
             },
             'C' => {
@@ -524,7 +527,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                log::debug!("Cursor right [{:?}]", amount);
+                //log::debug!("Cursor right [{:?}]", amount);
                 self.set_cursor_pos_relative(&[amount, 0])
             },
             'D' => {
@@ -532,7 +535,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                log::debug!("Cursor left [{:?}]", amount);
+                //log::debug!("Cursor left [{:?}]", amount);
                 self.set_cursor_pos_relative(&[-amount, 0])
             },
             'H' => { // Place cursor
@@ -545,11 +548,11 @@ impl Perform for Performer {
                     2 if params[1] > 0 => params[1] as usize - 1,
                     _ => 0
                 };
-                log::debug!("Cursor set position [{}, {}]", col, row);
+                //log::debug!("Cursor set position [{}, {}]", col, row);
                 self.set_cursor_pos_absolute(&[col, row]);
             },
             'J' => { // Erase in display
-                log::debug!("Erase in display");
+                //log::debug!("Erase in display");
                 let min_cursor = self.terminal_state.global_cursor_home;
                 let max_cursor = self.get_cursor_pos_absolute(
                     &self.get_max_screen_cursor()
@@ -571,7 +574,7 @@ impl Perform for Performer {
                 }
             },
             'K' => { // Erase in line
-                log::debug!("Erase in line");
+                //log::debug!("Erase in line");
                 let code = match params.len() {
                     1 => params[0],
                     _ => 0
@@ -641,11 +644,13 @@ impl Perform for Performer {
             },
             'm' => { // Graphics
                 self.parse_color_escape(&params);
+                /*
                 log::debug!(
                     "Graphics [{:?}] -> {:?}",
                     params,
                     self.terminal_state.color_state
                 );
+                */
             },
             'n' => { // Device status report
                 let state = &mut self.terminal_state;
@@ -664,6 +669,7 @@ impl Perform for Performer {
                     },
                     _ => {}
                 }
+                log::debug!("DSR requested");
             }
             'q' => {
                 log::warn!("Cursor: {:?}, {:?}", params, intermediates);
@@ -679,14 +685,17 @@ impl Perform for Performer {
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
         self.action_performed = true;
-        log::debug!("Esc [{:?}]", byte as char);
+        //log::debug!("Esc [{:?}]", byte as char);
 
-        /*
-        println!(
-            "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
-            intermediates, ignore, byte
-        );
-        */
+        match byte {
+            b'B' => {},
+            _ => {
+                println!(
+                    "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
+                    intermediates, ignore, byte
+                );
+            }
+        }
     }
 }
 
