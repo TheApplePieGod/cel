@@ -1,5 +1,5 @@
-use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtySystem, Child, PtyPair};
-use std::{sync::mpsc, thread, ffi::OsString};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, PtyPair};
+use std::{sync::mpsc, thread};
 
 pub struct Commands {
     io_rx: mpsc::Receiver<String>,

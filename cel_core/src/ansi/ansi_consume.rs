@@ -69,7 +69,7 @@ impl Performer {
         res
     }
 
-    fn parse_16_bit_color(weight: ColorWeight, code: u16) -> [f32; 3] {
+    fn parse_4_bit_color(weight: ColorWeight, code: u16) -> [f32; 3] {
         let factor: f32 = match weight {
             ColorWeight::Normal => 0.5,
             ColorWeight::Bold => 1.0,
@@ -94,19 +94,37 @@ impl Performer {
         }
     }
 
+    fn parse_8_bit_color(rgb: &[u16]) -> [f32; 3] {
+        let rgb: [u16; 3] = rgb.try_into().unwrap_or([0, 0, 0]);
+        rgb.map(|c| c as f32 / 255.0)
+    }
+
     fn parse_color_escape(&mut self, params: &Vec<u16>) {
         let state = &mut self.terminal_state.color_state;
-        for code in params {
+        let mut extended_mode = 0;
+        for (i, code) in params.iter().enumerate() {
             match code {
                 0 => *state = Default::default(),
                 1 => state.weight = ColorWeight::Bold,
-                2 => state.weight = ColorWeight::Faint,
+                2 => match extended_mode {
+                    38 => {
+                        state.foreground = Some(Self::parse_8_bit_color(&params[(i + 1)..]));
+                        return;
+                    },
+                    48 => {
+                        state.background = Some(Self::parse_8_bit_color(&params[(i + 1)..]));
+                        return;
+                    },
+                    _ => state.weight = ColorWeight::Faint,
+                },
                 22 => state.weight = ColorWeight::Normal,
-                30..=37 => state.foreground = Some(Self::parse_16_bit_color(state.weight, code - 30)),
-                40..=47 => state.background = Some(Self::parse_16_bit_color(state.weight, code - 40)),
-                90..=97   => state.foreground = Some(Self::parse_16_bit_color(ColorWeight::Bold, code - 90)),
-                100..=107 => state.background = Some(Self::parse_16_bit_color(ColorWeight::Bold, code - 100)),
+                30..=37 => state.foreground = Some(Self::parse_4_bit_color(state.weight, code - 30)),
+                40..=47 => state.background = Some(Self::parse_4_bit_color(state.weight, code - 40)),
+                90..=97   => state.foreground = Some(Self::parse_4_bit_color(ColorWeight::Bold, code - 90)),
+                100..=107 => state.background = Some(Self::parse_4_bit_color(ColorWeight::Bold, code - 100)),
+                38 => extended_mode = 38,
                 39 => state.foreground = None,
+                48 => extended_mode = 48,
                 49 => state.background = None,
                 _ => {}
             }
