@@ -60,7 +60,7 @@ impl App {
             self.window.get_pixel_height()
         );
 
-        let chars_per_row = 128;
+        let chars_per_row = 100;
         let scroll_lines_per_second = 30.0;
         let continuous_processing = true;
         let debug_line_numbers = false;

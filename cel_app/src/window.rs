@@ -1,4 +1,4 @@
-use glfw::{Action, Context, Key, fail_on_errors};
+use glfw::{Action, Context, Key, fail_on_errors, Modifiers};
 
 pub struct Window {
     glfw_instance: glfw::Glfw,
@@ -44,32 +44,20 @@ impl Window {
         }
     }
 
+    // https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
     pub fn poll_events(&mut self) {
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             match event {
-                glfw::WindowEvent::Key(key, _, action, _) => {
+                glfw::WindowEvent::Key(key, _, action, mods) => {
                     if (key as usize) < self.key_states.len() {
                         let key_state;
                         match action {
                             Action::Press | Action::Repeat => {
                                 key_state = true;
-
-                                // Send escape code to input buffer
-                                let ctrl_pressed = self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl);
-                                match key {
-                                    Key::Up => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'A']),
-                                    Key::Down => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'B']),
-                                    Key::Right => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'C']),
-                                    Key::Left => self.input_buffer.extend_from_slice(&[0x1b, b'[', b'D']),
-                                    Key::Backspace => self.input_buffer.push(0x08),
-                                    Key::Delete => self.input_buffer.push(0x7F),
-                                    Key::Tab => self.input_buffer.push(0x09),
-                                    Key::Escape => self.input_buffer.push(0x1B),
-                                    Key::Enter => self.input_buffer.push(0x0D),
-                                    Key::C if ctrl_pressed => self.input_buffer.push(0x03),
-                                    _ => {}
-                                }
+                                self.input_buffer.extend(
+                                    self.encode_input_key(key, mods)
+                                );
                             },
                             Action::Release => key_state = false
                         };
@@ -104,5 +92,108 @@ impl Window {
     pub fn get_pixel_width(&self) -> i32 { self.window.get_framebuffer_size().0 }
     pub fn get_pixel_height(&self) -> i32 { self.window.get_framebuffer_size().1 }
     pub fn get_key_pressed(&self, key: Key) -> bool { self.key_states[key as usize] }
+    pub fn is_super_down(&self) -> bool { self.get_key_pressed(Key::LeftSuper) || self.get_key_pressed(Key::RightSuper) }
+    pub fn is_shift_down(&self) -> bool { self.get_key_pressed(Key::LeftShift) || self.get_key_pressed(Key::RightShift) }
+    pub fn is_ctrl_down(&self) -> bool { self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) }
+    pub fn is_alt_down(&self) -> bool { self.get_key_pressed(Key::LeftAlt) || self.get_key_pressed(Key::RightAlt) }
     pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
+
+    fn glfw_key_to_ascii(&self, key: Key) -> Option<u8> {
+        let val = key as i32;
+        if val >= 32 && val <= 126 {
+            Some(val as u8)
+        } else {
+            None
+        }
+    }
+
+    // Convert an ascii character to its relative control character (when ctrl is down)
+    fn ascii_to_control(&self, key: u8) -> u8 {
+        match key {
+            b' '  => 0,
+            b'/'  => 31,
+            b'0'  => 48,
+            b'1'  => 49,
+            b'2'  => 0,
+            b'3'  => 27,
+            b'4'  => 28,
+            b'5'  => 29,
+            b'6'  => 30,
+            b'7'  => 31,
+            b'8'  => 127,
+            b'9'  => 57,
+            b'?'  => 127,
+            b'@'  => 0,
+            b'['  => 27,
+            b'\\' => 28,
+            b']'  => 29,
+            b'^'  => 30,
+            b'_'  => 31,
+            b'~'  => 30,
+            b'A'..=b'Z' => key - 64,
+            _ => key
+        }
+    }
+
+    // https://github.com/kovidgoyal/kitty/blob/master/kitty/key_encoding.c#L148
+    // http://www.leonerd.org.uk/hacks/fixterms/
+    fn encode_input_key(&self, key: Key, mods: Modifiers) -> Vec<u8> {
+        let mut result = vec![];
+
+        // TODO: Keypad keys
+        // TODO: https://stackoverflow.com/questions/12382499/looking-for-altleftarrowkey-solution-in-zsh
+        // TODO: https://github.com/kovidgoyal/kitty/issues/838
+
+        match self.glfw_key_to_ascii(key) {
+            Some(mut k) => { // Printable
+                // Do not handle raw characters since the char callback does this 
+                if !mods.is_empty() && mods != Modifiers::Shift {
+                    if mods.contains(Modifiers::Alt) {
+                        result.push(0x1b);
+                    }
+                    if mods.contains(Modifiers::Control) {
+                        k = self.ascii_to_control(k);
+                    }
+                    result.push(k);
+                }
+            },
+            None => 'handled: { // Function character
+                let esc_char = match key {
+                    Key::Up => b'A',
+                    Key::Down => b'B',
+                    Key::Right => b'C',
+                    Key::Left => b'D',
+                    Key::End => b'F',
+                    Key::Home => b'H',
+                    Key::F1 => b'P',
+                    Key::F2 => b'Q',
+                    Key::F3 => b'R',
+                    Key::F4 => b'S',
+                    _ => 0
+                };
+                if esc_char > 0 {
+                    result.extend_from_slice(&[0x1b, b'O', esc_char]);
+                    break 'handled;
+                }
+
+                let esc_char = match key {
+                    Key::Tab => b'\t',
+                    Key::Enter => b'\r',
+                    Key::Escape => 0x1b,
+                    Key::Backspace => 0x08,
+                    Key::Delete => 0x7f,
+                    _ => 0
+                };
+                if esc_char > 0 {
+                    if mods.contains(Modifiers::Alt) {
+                        result.push(0x1b);
+                    }
+                    result.push(esc_char);
+                    break 'handled;
+                }
+            }
+        }
+
+        result
+    }
 }
