@@ -1,6 +1,6 @@
 use std::{mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
 use cel_core::ansi::TerminalState;
-use crate::{font::{Font, FaceMetrics, RenderType}, util::Util};
+use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, glchk};
 
 const MAX_CHARACTERS: u32 = 20000;
 
@@ -380,7 +380,7 @@ impl Renderer {
             // Set global model matrix (column major)
             gl::UniformMatrix4fv(gl::GetUniformLocation(
                 self.msdf_program,
-                "model".as_ptr() as *const i8
+                "model\0".as_ptr() as *const i8
             ), 1, gl::FALSE, model_mat.as_ptr());
 
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
@@ -414,7 +414,7 @@ impl Renderer {
             // Set global model matrix (column major)
             gl::UniformMatrix4fv(gl::GetUniformLocation(
                 self.raster_program,
-                "model".as_ptr() as *const i8
+                "model\0".as_ptr() as *const i8
             ), 1, gl::FALSE, model_mat.as_ptr());
 
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);

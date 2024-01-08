@@ -6,6 +6,9 @@ mod tests {
 
     use crate::common::{get_final_state, assert_buffer_chars_eq};
 
+    // TODO: tests for insert, delete lines & chars
+    // TODO: tests for scroll region
+
     #[test]
     fn basic() {
         let state = get_final_state(AnsiBuilder::new()

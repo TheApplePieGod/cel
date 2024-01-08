@@ -47,11 +47,20 @@ pub struct ScreenBufferElement {
 
 pub type ScreenBuffer = Vec<Vec<ScreenBufferElement>>;
 
+#[derive(Default, Clone, Copy)]
+pub struct Margin {
+    pub top: usize,
+    pub bottom: usize,
+    pub left: usize,
+    pub right: usize
+}
+
 #[derive(Clone)]
 pub struct TerminalState {
     pub screen_buffer: ScreenBuffer,
     pub cursor_state: CursorState,
     pub color_state: ColorState,
+    pub margin: Margin,
     pub wants_wrap: bool,
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
     pub global_cursor: Cursor,
@@ -102,6 +111,7 @@ impl Default for TerminalState {
             screen_buffer: Default::default(),
             color_state: Default::default(),
             cursor_state: Default::default(),
+            margin: Default::default(),
             wants_wrap: false,
             global_cursor_home: [0, 0],
             global_cursor: [0, 0],

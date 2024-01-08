@@ -3,6 +3,12 @@ use std::fmt;
 
 use super::*;
 
+enum ScrollRegionResult {
+    GlobalScroll,
+    LineRemoved,
+    LineTrimmed
+}
+
 impl AnsiHandler {
     pub fn new() -> Self {
         Self {
@@ -29,8 +35,15 @@ impl AnsiHandler {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
+        // TODO: realtive margin update?
         self.performer.screen_width = width as usize;
         self.performer.screen_height = height as usize;
+        self.performer.terminal_state.margin = Margin {
+            top: 0,
+            bottom: height as usize - 1,
+            left: 0,
+            right: width as usize - 1
+        };
     }
 
     pub fn get_terminal_state(&self) -> &TerminalState {
@@ -190,14 +203,12 @@ impl Performer {
         self.terminal_state.screen_cursor = clamped_pos;
         self.terminal_state.wants_wrap = false;
 
-        /*
         log::debug!(
             "[set_cursor_pos_absolute{:?}] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
             clamped_pos,
             old_screen, self.terminal_state.screen_cursor,
             old_global, self.terminal_state.global_cursor
         );
-        */
     }
 
     /// Get the global cursor pos from a position relative to the current screen cursor
@@ -243,6 +254,14 @@ impl Performer {
         ]
     }
 
+    fn is_in_margins(&self, screen_cursor: &Cursor) -> bool {
+        let margin = &self.terminal_state.margin;
+        return screen_cursor[0] >= margin.left
+               && screen_cursor[0] <= margin.right
+               && screen_cursor[1] >= margin.top
+               && screen_cursor[1] <= margin.bottom;
+    }
+
     fn get_relative_screen_cursor(&self, offset: &SignedCursor) -> Cursor {
         let screen_cursor = &self.terminal_state.screen_cursor;
         let relative = [
@@ -269,6 +288,48 @@ impl Performer {
             state.global_cursor[0] + (self.screen_width - state.screen_cursor[0] - 1),
             state.global_cursor[1]
         ]
+    }
+
+    /// Computes the global cursor pos directly below the supplied cursor
+    fn get_cursor_pos_next_line(&self, cursor: &Cursor) -> Cursor {
+        let state = &self.terminal_state;
+        let keep_line = self.get_remaining_wrapped_line_count(cursor) > 0;
+        if keep_line {
+            [cursor[0] + self.screen_width, cursor[1]]
+        } else {
+            [cursor[0] % self.screen_width, cursor[1] + 1]
+        }
+    }
+
+    /// Computes the global cursor pos directly above the supplied cursor
+    fn get_cursor_pos_prev_line(&self, cursor: &Cursor) -> Cursor {
+        let state = &self.terminal_state;
+        if cursor[1] == 0 {
+            return *cursor;
+        }
+
+        let cur_wrap = cursor[0] % self.screen_width;
+        if cur_wrap == 0 {
+            let prev_line_count = self.get_total_wrapped_line_count(&[0, cursor[1] - 1]);
+            [
+                (prev_line_count - 1) as usize * self.screen_width + cur_wrap,
+                cursor[1] - 1
+            ]
+        } else {
+            [cursor[0] - self.screen_width, cursor[1]]
+        }
+    }
+
+    fn get_total_wrapped_line_count(&self, cursor: &Cursor) -> u32 {
+        let buffer = &self.terminal_state.screen_buffer;
+        match cursor[1] >= buffer.len() {
+            true => 1,
+            false => {
+                let buffer_lines = buffer[cursor[1]].len() / (self.screen_width + 1) + 1;
+
+                buffer_lines as u32
+            }
+        }
     }
 
     fn get_remaining_wrapped_line_count(&self, cursor: &Cursor) -> u32 {
@@ -321,16 +382,41 @@ impl Performer {
         */
     }
 
-    /// Advance the screen cursor y by one, potentially scrolling the buffer if
-    /// necessary (updating the global cursor)
-    fn advance_screen_cursor_with_scroll(&mut self) {
-        let state = &mut self.terminal_state;
-        let old_screen = state.screen_cursor;
-        let old_home = state.global_cursor_home;
+    fn insert_or_remove_lines(&mut self, remove: bool, amount: u32) {
+        if !self.is_in_margins(&self.terminal_state.screen_cursor) {
+            return;
+        }
 
-        if state.screen_cursor[1] < self.screen_height - 1 {
-            state.screen_cursor[1] += 1;
-        } else {
+        let mut removal_margin = self.terminal_state.margin;
+        removal_margin.top = self.terminal_state.screen_cursor[1];
+        for _ in 0..amount {
+            self.scroll_region(remove, removal_margin);
+        }
+    }
+
+    /// Scroll the specified screenspace buffer region up or down by one line. Up 
+    /// refers to the direction the text is moving
+    /// Returns the type of scroll operation that was performed, which may be useful
+    /// for post cursor manipulation
+    fn scroll_region(&mut self, up: bool, margin: Margin) -> ScrollRegionResult {
+        let state = &self.terminal_state;
+
+        log::debug!(
+            "[scroll_region] Margin: T{} B{} L{} R{}",
+            margin.top, margin.bottom, margin.left, margin.right
+        );
+
+        // Only support default scrollback behavior if we don't have any margin. Otherwise,
+        // physically scroll the buffer in memory when adding new characters
+        let support_scrollback = margin.top == 0
+                                 && margin.left == 0
+                                 && margin.bottom == self.screen_height - 1
+                                 && margin.right == self.screen_width - 1;
+
+        if support_scrollback {
+            // Scroll the region with scrollback by updating the reference [0, 0]
+            // position in screen space
+
             let home_still_wrapped = match state.global_cursor_home[1]  < state.screen_buffer.len() {
                 true => {
                     let global_line = &state.screen_buffer[state.global_cursor_home[1]];
@@ -339,20 +425,147 @@ impl Performer {
                 false => false
             };
             if home_still_wrapped {
-                state.global_cursor_home[0] += self.screen_width;
+                self.terminal_state.global_cursor_home[0] += self.screen_width;
             } else {
-                state.global_cursor_home[0] = 0;
-                state.global_cursor_home[1] += 1;
+                self.terminal_state.global_cursor_home[0] = 0;
+                self.terminal_state.global_cursor_home[1] += 1;
+            }
+
+            ScrollRegionResult::GlobalScroll
+        } else {
+
+            let region_size_x = margin.right - margin.left;
+            let region_size_y = margin.bottom - margin.top;
+            
+            let evict_pos = match up{
+                // Evict at the top of the region
+                true => self.get_cursor_pos_absolute(&[margin.left, margin.top]),
+                // Evict at the bottom of the region
+                false => self.get_cursor_pos_absolute(&[margin.left, margin.bottom])
+            };
+
+            // We can directly edit the buffer line only if there is no x margin and the 
+            let can_trim_lines = region_size_x == self.screen_width - 1;
+            if can_trim_lines {
+                // Perform simulated scrolling in the margins by removing entire or partial
+                // buffer lines, which will affect the positioning of the lines and visually
+                // simulates scrolling
+
+                let wrapped_line_count = self.get_total_wrapped_line_count(&evict_pos);
+                if wrapped_line_count == 1 {
+                    let buf = &mut self.terminal_state.screen_buffer;
+
+                    // Directly remove evicted line
+                    buf.remove(evict_pos[1]);
+
+                    // If necessary insert a new empty 'scrolled' line so other
+                    // lines don't shift
+                    let new_y = match up {
+                        true => evict_pos[1] + region_size_y,
+                        false => evict_pos[1] - region_size_y
+                    };
+                    if new_y < buf.len() {
+                        buf.insert(new_y, vec![]);
+                    }
+
+                    log::warn!("Line removed!!! {}", self.terminal_state.screen_buffer.len());
+
+                    ScrollRegionResult::LineRemoved
+                } else {
+                    // Trim the line from the front or back depending on scroll direction
+                    // This will definitely (?) break if a line wraps into the scroll region but
+                    // it's fine
+                    let line = &mut self.terminal_state.screen_buffer[evict_pos[1]];
+                    line.drain(evict_pos[0]..=(evict_pos[0] + region_size_x));
+                    //let line = &mut self.terminal_state.screen_buffer[evict_pos[1]];
+
+                    ScrollRegionResult::LineTrimmed
+                }
+            } else {
+                // Perform simulated scrolling in the margins by replacing the contents of each line
+                // in the scrolling region with the next or prev depending on direction,
+                // erasing the final line at the end
+
+                todo!("Scroll region with x margin");
+                /*
+                let mut evict_pos = evict_pos;
+                let mut replace_pos = match up {
+                    true => replace_pos = self.get_cursor_pos_next_line(&evict_pos),
+                    false => self.get_cursor_pos_prev_line(&evict_pos)
+                };
+
+                for _ in 0..region_size_y {
+                    let evict_range = evict_pos[0]..=(evict_pos[0] + region_size_x);
+                    let replace_range = replace_pos[0]..=(replace_pos[0] + region_size_x);
+
+                    // Ensure the evict region is large enough
+                    let evict_buf = &mut self.terminal_state.screen_buffer[evict_pos[1]];
+                    if evict_buf.len() < evict_pos[0] + region_size_x + 1 {
+                        evict_buf.resize(evict_pos[0] + region_size_x + 1, Default::default());
+                    }
+
+                    // Ensure the replacement region is large enough
+                    let replace_buf = &mut self.terminal_state.screen_buffer[replace_pos[1]];
+                    if replace_buf.len() < replace_pos[0] + region_size_x + 1 {
+                        replace_buf.resize(replace_pos[0] + region_size_x + 1, Default::default());
+                    }
+                    let replace_chars = replace_buf[replace_range].to_vec();
+
+                    self.terminal_state.screen_buffer[evict_pos[1]].splice(
+                        evict_range,
+                        replace_chars
+                    );
+
+                    evict_pos = replace_pos;
+                    replace_pos = match up {
+                        true => self.get_cursor_pos_next_line(&replace_pos),
+                        false => self.get_cursor_pos_prev_line(&replace_pos),
+                    };
+                }
+
+                // Erase the final 'scrolled' line
+                self.erase(
+                    evict_pos,
+                    [evict_pos[0] + region_size_x, evict_pos[1]]
+                );
+
+                false
+                */
+            }
+        }
+    }
+
+    /// Advance the screen cursor y by one, potentially scrolling the region if necessary
+    fn advance_screen_cursor_with_scroll(&mut self) {
+        let state = &self.terminal_state;
+        let old_screen = state.screen_cursor;
+        let old_home = state.global_cursor_home;
+        let old_global = state.global_cursor;
+
+        if state.screen_cursor[1] < state.margin.bottom {
+            self.terminal_state.screen_cursor[1] += 1;
+        } else {
+            // Scroll the region and account for the updates to the screen buffer structure
+            // by updating the cursor
+            match self.scroll_region(true, state.margin) {
+                ScrollRegionResult::LineRemoved => {
+                    self.terminal_state.global_cursor[1] -= 1;
+                },
+                ScrollRegionResult::LineTrimmed => {
+                    if self.terminal_state.global_cursor[0] >= self.screen_width {
+                        self.terminal_state.global_cursor[0] -= self.screen_width;
+                    }
+                },
+                ScrollRegionResult::GlobalScroll => {}
             }
         }
 
-        /*
         log::debug!(
-            "[advance_screen_cursor_with_scroll] Screen: {:?} -> {:?}, Home: {:?} -> {:?}",
-            old_screen, state.screen_cursor,
-            old_home, state.global_cursor_home
+            "[advance_screen_cursor_with_scroll] Screen: {:?} -> {:?}, Global: {:?} -> {:?}, Home: {:?} -> {:?}",
+            old_screen, self.terminal_state.screen_cursor,
+            old_global, self.terminal_state.global_cursor,
+            old_home, self.terminal_state.global_cursor_home
         );
-        */
     }
 }
 
@@ -361,6 +574,7 @@ impl Performer {
 // - Cursor modes
 // - Alternate screen buffer
 // - Mouse modes (1000-1034)
+// - Origin mode
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
@@ -413,21 +627,16 @@ impl Perform for Performer {
 
     fn execute(&mut self, byte: u8) {
         self.action_performed = true;
-        //log::debug!("Exec [{:?}]", byte as char);
+        log::debug!("Exec [{:?}]", byte as char);
 
         match byte {
             b'\n' => {
                 let old_global = self.terminal_state.global_cursor;
 
                 self.terminal_state.wants_wrap = false;
-
-                let keep_line = self.get_remaining_wrapped_line_count(&self.terminal_state.global_cursor) > 0;
-                if keep_line {
-                    self.terminal_state.global_cursor[0] += self.screen_width;
-                } else {
-                    self.terminal_state.global_cursor[0] = self.terminal_state.global_cursor[0] % self.screen_width;
-                    self.terminal_state.global_cursor[1] += 1;
-                }
+                self.terminal_state.global_cursor = self.get_cursor_pos_next_line(
+                    &self.terminal_state.global_cursor
+                );
 
                 self.advance_screen_cursor_with_scroll();
 
@@ -511,7 +720,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                //log::debug!("Cursor up [{:?}]", amount);
+                log::debug!("Cursor up [{:?}]", amount);
                 self.set_cursor_pos_relative(&[0, -amount as isize])
             },
             'B' => {
@@ -519,7 +728,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                //log::debug!("Cursor down [{:?}]", amount);
+                log::debug!("Cursor down [{:?}]", amount);
                 self.set_cursor_pos_relative(&[0, amount])
             },
             'C' => {
@@ -527,7 +736,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                //log::debug!("Cursor right [{:?}]", amount);
+                log::debug!("Cursor right [{:?}]", amount);
                 self.set_cursor_pos_relative(&[amount, 0])
             },
             'D' => {
@@ -535,7 +744,7 @@ impl Perform for Performer {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
-                //log::debug!("Cursor left [{:?}]", amount);
+                log::debug!("Cursor left [{:?}]", amount);
                 self.set_cursor_pos_relative(&[-amount, 0])
             },
             'H' => { // Place cursor
@@ -548,7 +757,7 @@ impl Perform for Performer {
                     2 if params[1] > 0 => params[1] as usize - 1,
                     _ => 0
                 };
-                //log::debug!("Cursor set position [{}, {}]", col, row);
+                log::debug!("Cursor set position [{}, {}]", col, row);
                 self.set_cursor_pos_absolute(&[col, row]);
             },
             'J' => { // Erase in display
@@ -594,6 +803,29 @@ impl Perform for Performer {
                     ),
                     _ => {}
                 }
+            },
+            'L' | 'M' => { // Insert/Remove lines
+                let remove = c == 'M';
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as u32;
+                log::debug!(
+                    "{} lines [{:?}]",
+                    match remove {
+                        true => "Delete",
+                        false => "Insert"
+                    },
+                    amount
+                );
+                self.insert_or_remove_lines(remove, amount);
+            },
+            'P' => { // Delete characters
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as u32;
+                log::debug!("Delete chars [{:?}]", amount);
             },
             'c' => { // Send device attributes
                 if !params.is_empty() && params[0] != 0 {
@@ -674,6 +906,46 @@ impl Perform for Performer {
             'q' => {
                 log::warn!("Cursor: {:?}, {:?}", params, intermediates);
             },
+            'r' => { // Set scroll margin Y
+                let top = match params.len() {
+                    1..=2 if params[0] > 0 => params[0] as usize - 1,
+                    _ => 0
+                };
+                let bottom = match params.len() {
+                    2 if params[1] > 0 => params[1] as usize - 1,
+                    _ => self.screen_height - 1
+                };
+
+                if top >= bottom || bottom >= self.screen_height {
+                    return;
+                }
+
+                self.terminal_state.margin.top = top;
+                self.terminal_state.margin.bottom = bottom;
+                self.set_cursor_pos_absolute(&[0, 0]);
+
+                log::debug!("Scroll margin Y: [{:?}, {:?}]", top, bottom);
+            },
+            's' => { // Set scroll margin X
+                let left = match params.len() {
+                    1..=2 if params[0] > 0 => params[0] as usize - 1,
+                    _ => 0
+                };
+                let right = match params.len() {
+                    2 if params[1] > 0 => params[1] as usize - 1,
+                    _ => self.screen_width - 1
+                };
+
+                if left >= right || right >= self.screen_width {
+                    return;
+                }
+
+                self.terminal_state.margin.left = left;
+                self.terminal_state.margin.right = right;
+                self.set_cursor_pos_absolute(&[0, 0]);
+
+                log::debug!("Scroll margin X: [{:?}, {:?}]", left, right);
+            },
             _ => {
                 println!(
                     "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
@@ -711,6 +983,16 @@ impl fmt::Debug for ColorState {
             None => write!(f, "BG<None>")?
         };
 
+        Ok(())
+    }
+}
+
+impl fmt::Debug for ScreenBufferElement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SBufElem: ")?;
+        write!(f, "C: {:?}, ", self.elem)?;
+        write!(f, "FG: {:?}, ", self.fg_color)?;
+        write!(f, "BG: {:?}", self.bg_color)?;
         Ok(())
     }
 }
