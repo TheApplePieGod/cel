@@ -67,13 +67,25 @@ pub struct TerminalState {
     pub screen_cursor: Cursor,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy)]
+pub enum BufferState {
+    Disabled,
+    Enabled,
+    Active
+}
+
 struct Performer {
     pub screen_width: usize,
     pub screen_height: usize,
     pub output_stream: Vec<u8>,
+    action_performed: bool,
+
+    // State associated with one specific 'terminal' / 'buffer'
     pub terminal_state: TerminalState,
-    action_performed: bool
+    pub saved_terminal_state: TerminalState,
+
+    // Global state
+    pub alt_screen_buffer_state: BufferState,
 }
 
 pub struct AnsiHandler {
@@ -116,6 +128,33 @@ impl Default for TerminalState {
             global_cursor_home: [0, 0],
             global_cursor: [0, 0],
             screen_cursor: [0, 0]
+        }
+    }
+}
+
+impl Default for Performer {
+    fn default() -> Self {
+        Self {
+            screen_width: 1,
+            screen_height: 1,
+            output_stream: vec![],
+            action_performed: false,
+
+            terminal_state: Default::default(),
+            saved_terminal_state: Default::default(),
+
+            alt_screen_buffer_state: BufferState::Enabled,
+        }
+    }
+}
+
+impl Margin {
+    fn get_from_screen_size(width: u32, height: u32) -> Self {
+        Self {
+            top: 0,
+            bottom: height as usize - 1,
+            left: 0,
+            right: width as usize - 1
         }
     }
 }

@@ -38,12 +38,7 @@ impl AnsiHandler {
         // TODO: realtive margin update?
         self.performer.screen_width = width as usize;
         self.performer.screen_height = height as usize;
-        self.performer.terminal_state.margin = Margin {
-            top: 0,
-            bottom: height as usize - 1,
-            left: 0,
-            right: width as usize - 1
-        };
+        self.performer.terminal_state.margin = Margin::get_from_screen_size(width, height);
     }
 
     pub fn get_terminal_state(&self) -> &TerminalState {
@@ -567,6 +562,32 @@ impl Performer {
             old_home, self.terminal_state.global_cursor_home
         );
     }
+
+    fn activate_alternate_screen_buffer(&mut self) {
+        self.saved_terminal_state = self.terminal_state.clone();
+        self.terminal_state = Default::default();
+
+        // Reset default margins
+        self.terminal_state.margin = Margin::get_from_screen_size(
+            self.screen_width as u32,
+            self.screen_height as u32
+        );
+
+        log::debug!("[activate_alternate_screen_buffer]");
+    }
+
+    fn deactivate_alternate_screen_buffer(&mut self) {
+        let moved_state = std::mem::replace(&mut self.saved_terminal_state, Default::default());
+        self.terminal_state = moved_state;
+
+        // Reset default margins
+        self.terminal_state.margin = Margin::get_from_screen_size(
+            self.screen_width as u32,
+            self.screen_height as u32
+        );
+
+        log::debug!("[deactivate_alternate_screen_buffer]");
+    }
 }
 
 // TO ADD:
@@ -862,6 +883,35 @@ impl Perform for Performer {
                     false => {
                         match params[0] {
                             25 => self.terminal_state.cursor_state.visible = enabled,
+                            1046 => match enabled {
+                                true => match self.alt_screen_buffer_state {
+                                    BufferState::Active => {}
+                                    BufferState::Enabled => {}
+                                    BufferState::Disabled => self.alt_screen_buffer_state = BufferState::Enabled
+                                }
+                                false => match self.alt_screen_buffer_state {
+                                    BufferState::Active => {
+                                        self.alt_screen_buffer_state = BufferState::Disabled;
+                                        self.deactivate_alternate_screen_buffer();
+                                    },
+                                    BufferState::Enabled => self.alt_screen_buffer_state = BufferState::Disabled,
+                                    BufferState::Disabled => {}
+                                }
+                            }
+                            // These should technically do different things, but this implementation  
+                            // always saves & restores the cursor so we can just treat them as the same
+                            1047 | 1049 => match self.alt_screen_buffer_state {
+                                BufferState::Active if !enabled => {
+                                    self.alt_screen_buffer_state = BufferState::Enabled;
+                                    self.deactivate_alternate_screen_buffer();
+                                },
+                                BufferState::Enabled if enabled => {
+                                    self.alt_screen_buffer_state = BufferState::Active;
+                                    self.activate_alternate_screen_buffer();
+                                }
+                                BufferState::Disabled => {}
+                                _ => {}
+                            }
                             _ => {}
                         }
                     }
