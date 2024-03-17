@@ -247,6 +247,7 @@ impl Renderer {
         let mut should_render_cursor = terminal_state.cursor_state.visible || debug_show_cursor;
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
+        let mut prev_bg_color = terminal_state.background_color;
         let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
         let mut raster_vertices: Vec<Vertex> = vec![];
         let mut bg_vertices: Vec<Vertex> = vec![];
@@ -289,8 +290,6 @@ impl Renderer {
                 }
             }
 
-            log::debug!("{}", wrap_offset);
-
             let line = &terminal_state.screen_buffer[line_idx];
             let line_occupancy = line.len() / chars_per_line as usize + 1;
             let mut start_char = 0;
@@ -304,18 +303,67 @@ impl Renderer {
                     break 'outer;
                 }
 
-                let c = line[char_idx];
-                if c.elem.is_whitespace() || c.elem == '\0' {
-                    x += rc.char_root_size;
-                    continue;
-                }
-
                 let max_x = rc.char_root_size * chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
                     rendered_line_count += 1;
                     x = base_x;
                     y -= rc.line_height;
+                }
+
+                let c = line[char_idx];
+
+                // TODO: store in separate buffer?
+                let fg_color = c.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                let bg_color = c.bg_color.as_ref().unwrap_or(&terminal_state.background_color);
+
+                if bg_color[0] != prev_bg_color[0] ||
+                   bg_color[1] != prev_bg_color[1] ||
+                   bg_color[2] != prev_bg_color[2]
+                {
+                    // Set the background color.
+                    // We do this by comparing with the previously set background color.
+                    // If it changes, we need to update all the next cells with this color,
+                    // even ones with no text. Thus, we cannot simply rely on the background
+                    // of each character. So, we push two quads, one that goes to the end of
+                    // the line and one that goes down the rest of the screen. This will optimize
+                    // the majority case when background does not change that often. Worst case,
+                    // background changes every character and we push 2n background quads.
+                    // Unfortunately, we have to check this for every whitespace as well in case the 
+                    // background color changes.
+
+                    prev_bg_color = *bg_color;
+
+                    // TODO: we can drastically simplify this because we don't need most of this info
+
+                    // Quad extends to end of line
+                    Self::push_quad(
+                        fg_color,
+                        bg_color,
+                        &[0.0, 0.0],
+                        &[0.0, 0.0],
+                        &[x, y],
+                        &[max_x, y + rc.line_height],
+                        &mut bg_vertices
+                    );
+
+                    // Quad extends fully below, excluding this line
+                    // Should probably do some math so y does not go below the screen
+                    // but it's fine
+                    Self::push_quad(
+                        fg_color,
+                        bg_color,
+                        &[0.0, 0.0],
+                        &[0.0, 0.0],
+                        &[base_x, y - rc.line_height * lines_per_screen as f32],
+                        &[max_x, y],
+                        &mut bg_vertices
+                    );
+                }
+
+                if c.elem.is_whitespace() || c.elem == '\0' {
+                    x += rc.char_root_size;
+                    continue;
                 }
 
                 let glyph_metrics = &font.get_glyph_data(match debug_line_number {
@@ -325,9 +373,6 @@ impl Renderer {
                 let glyph_bound = &glyph_metrics.glyph_bound;
                 let atlas_uv = &glyph_metrics.atlas_uv;
 
-                // TODO: store in separate buffer?
-                let fg_color = c.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
-                let bg_color = c.bg_color.as_ref().unwrap_or(&[0.0, 0.0, 0.0]);
 
                 Self::push_quad(
                     fg_color,
@@ -341,20 +386,6 @@ impl Renderer {
                         RenderType::RASTER => &mut raster_vertices
                     }
                 );
-
-                // Push background quad
-                // TODO: we can drastically simplify this because we don't need most of this info
-                if c.bg_color.is_some() {
-                    Self::push_quad(
-                        fg_color,
-                        bg_color,
-                        &[0.0, 0.0],
-                        &[0.0, 0.0],
-                        &[x, y],
-                        &[x + rc.char_root_size, y + rc.line_height],
-                        &mut bg_vertices
-                    );
-                }
 
                 x += rc.char_root_size;
             }

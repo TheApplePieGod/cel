@@ -60,6 +60,7 @@ pub struct TerminalState {
     pub screen_buffer: ScreenBuffer,
     pub cursor_state: CursorState,
     pub color_state: ColorState,
+    pub background_color: [f32; 3], // Default background color to reset to
     pub margin: Margin,
     pub wants_wrap: bool,
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
@@ -121,8 +122,9 @@ impl Default for TerminalState {
     fn default() -> Self {
         Self {
             screen_buffer: Default::default(),
-            color_state: Default::default(),
             cursor_state: Default::default(),
+            color_state: Default::default(),
+            background_color: [0.0, 0.0, 0.0],
             margin: Default::default(),
             wants_wrap: false,
             global_cursor_home: [0, 0],

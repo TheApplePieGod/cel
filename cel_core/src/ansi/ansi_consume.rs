@@ -62,6 +62,20 @@ impl Performer {
         res
     }
 
+    fn parse_osc_command(&self, bytes: &[u8]) -> u16 {
+        let mut result = 0;
+
+        // Convert each byte to its integer rep from ascii
+        let mut power = 1;
+        for i in 0..bytes.len() {
+            let byte = bytes[bytes.len() - i - 1];
+            result += (byte - 48) as u16 * power;
+            power *= 10;
+        }
+        
+        result
+    }
+
     fn parse_4_bit_color(weight: ColorWeight, code: u16) -> [f32; 3] {
         let factor: f32 = match weight {
             ColorWeight::Normal => 0.5,
@@ -725,10 +739,36 @@ impl Perform for Performer {
         log::debug!("[unhook]");
     }
 
-    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
-        //println!("[osc_dispatch] params={:?} bell_terminated={}", params, bell_terminated);
-        //self.action_performed = true;
-        log::debug!("Osc [{:?}]", params);
+    fn osc_dispatch(&mut self, all_params: &[&[u8]], bell_terminated: bool) {
+        self.action_performed = true;
+
+        // TODO: investigate the bell, seems like it is relevant for many commands
+
+        println!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
+        let command = self.parse_osc_command(all_params[0]);
+        let params = match all_params.len() {
+            1 => vec![],
+            _ => all_params[1].to_vec()
+        };
+        match command {
+            /*
+            11 | 16 => { // Set background color
+                if params.len() == 0 {
+                    return;
+                }
+
+                if params[0] == b'?' { // Requesting default background color
+                    let esc_str = "\x1b]11;rgb:0d0d/0f0f/1818\x07"; // Note: ends with bell
+                    self.output_stream.extend_from_slice(esc_str.as_bytes());
+                    return;
+                }
+            },
+            */
+            _ => {
+                println!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
+            }
+        }
+
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
