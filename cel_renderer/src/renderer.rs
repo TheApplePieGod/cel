@@ -22,6 +22,16 @@ pub struct Renderer {
     height: u32,
 }
 
+struct RenderConstants {
+    aspect_ratio: f32,
+    char_root_size: f32, // Fundamental base size of one character cell
+    char_size_x_px: f32,
+    char_size_y_px: f32,
+    char_size_x_screen: f32,
+    char_size_y_screen: f32,
+    line_height: f32
+}
+
 impl Renderer {
     pub fn new() -> Self {
         // Generate buffers
@@ -208,12 +218,10 @@ impl Renderer {
     }
 
     pub fn compute_max_screen_lines(&self, font: &Font, chars_per_line: u32) -> u32 {
-        let face_metrics = font.get_face_metrics();
-        let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
-        let aspect_ratio = self.width as f32 / self.height as f32;
-        let lines_per_screen = (2.0 / (face_metrics.height * char_size * aspect_ratio)).round() as u32;
+        let rc = self.compute_render_constants(font, chars_per_line);
+        let lines_per_screen = (2.0 / (rc.line_height * rc.char_size_y_screen)).floor();
 
-        lines_per_screen
+        lines_per_screen as u32
     }
 
     /// Returns rendered line count and max lines per screen
@@ -231,12 +239,8 @@ impl Renderer {
         // Setup render state
         let base_x = 0.0; //0.25;
         let base_y = 0.0;
-        let aspect_ratio = self.width as f32 / self.height as f32;
         let face_metrics = font.get_face_metrics();
-        let char_size_x_px = self.width as f32 / chars_per_line as f32 / face_metrics.space_size;
-        let char_size_x = 2.0 * (char_size_x_px / self.width as f32);
-        let char_size_y = char_size_x * aspect_ratio;
-        let line_height = 1.0 + face_metrics.descender;
+        let rc = self.compute_render_constants(font, chars_per_line);
 
         let mut x = base_x;
         let mut y = base_y;
@@ -247,37 +251,71 @@ impl Renderer {
         let mut raster_vertices: Vec<Vertex> = vec![];
         let mut bg_vertices: Vec<Vertex> = vec![];
 
-        // Render vertices 
+        //
+        // Populate vertex buffers
+        //
+
+        let wrap_offset = line_offset.fract();
         let line_offset = line_offset as usize;
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
             rendered_line_count += 1;
             x = base_x;
-            y -= line_height;
+            y -= rc.line_height;
 
             if line_idx >= terminal_state.screen_buffer.len() {
                 can_scroll_down = false;
                 continue;
             }
 
+            // Render cursor
+            if should_render_cursor{
+                let cursor = &terminal_state.global_cursor;
+                if cursor[1] == line_idx {
+                    // Compute absolute position to account for wraps
+                    should_render_cursor = false;
+                    let pos_min = [
+                        base_x + (cursor[0] % chars_per_line as usize) as f32 * rc.char_root_size,
+                        y - rc.line_height * (cursor[0] / chars_per_line as usize) as f32
+                    ];
+                    Self::push_quad(
+                        &[0.0, 0.0, 0.0],
+                        &[1.0, 0.0, 0.0],
+                        &[0.0, 0.0],
+                        &[0.0, 0.0],
+                        &pos_min,
+                        &[pos_min[0] + rc.char_root_size, pos_min[1] + rc.line_height],
+                        &mut raster_vertices
+                    );
+                }
+            }
+
+            log::debug!("{}", wrap_offset);
+
             let line = &terminal_state.screen_buffer[line_idx];
-            for char_idx in 0..line.len() {
+            let line_occupancy = line.len() / chars_per_line as usize + 1;
+            let mut start_char = 0;
+            if line_idx == line_offset {
+                // Account for partially visible wrapped first line
+                start_char = (line_occupancy as f32 * wrap_offset) as usize * chars_per_line as usize;
+            }
+
+            for char_idx in start_char..line.len() {
                 if rendered_line_count > lines_per_screen {
                     break 'outer;
                 }
 
                 let c = line[char_idx];
                 if c.elem.is_whitespace() || c.elem == '\0' {
-                    x += face_metrics.space_size;
+                    x += rc.char_root_size;
                     continue;
                 }
 
-                // Need to figure this out. Potentially have to do with monospace advance?
-                let max_x = face_metrics.space_size * chars_per_line as f32;
+                let max_x = rc.char_root_size * chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
                     rendered_line_count += 1;
                     x = base_x;
-                    y -= line_height;
+                    y -= rc.line_height;
                 }
 
                 let glyph_metrics = &font.get_glyph_data(match debug_line_number {
@@ -313,46 +351,18 @@ impl Renderer {
                         &[0.0, 0.0],
                         &[0.0, 0.0],
                         &[x, y],
-                        &[x + face_metrics.space_size, y + line_height],
+                        &[x + rc.char_root_size, y + rc.line_height],
                         &mut bg_vertices
                     );
                 }
 
-                // Render cursor
-                // TODO: can probably compute this without being in the loop
-                if should_render_cursor{
-                    let cursor = &terminal_state.global_cursor;
-                    //let rendered_y = cursor[1] + cursor[0] / chars_per_line as usize;
-                    //if rendered_y == line_idx + char_idx / chars_per_line as usize {
-                    if cursor[1] == line_idx && (cursor[0] / chars_per_line as usize) == (char_idx / chars_per_line as usize) {
-                        // Compute absolute position to account for wraps
-                        should_render_cursor = false;
-                        let pos_min = [
-                            base_x + (cursor[0] % chars_per_line as usize) as f32 * face_metrics.space_size,
-                            //base_y + -face_metrics.height * rendered_line_count as f32
-                            //base_y - (rendered_line_count as f32 * line_height)
-                            y
-                        ];
-                        Self::push_quad(
-                            &[0.0, 0.0, 0.0],
-                            &[1.0, 0.0, 0.0],
-                            &[0.0, 0.0],
-                            &[0.0, 0.0], //[char_coord_size, char_coord_size],
-                            &pos_min,
-                            &[pos_min[0] + face_metrics.space_size, pos_min[1] + line_height],
-                            &mut raster_vertices
-                        );
-                    }
-                }
-
-                x += face_metrics.space_size;
-                //x += glyph_metrics.advance;
+                x += rc.char_root_size;
             }
         }
     
         let model_mat: [f32; 16] = [
-            char_size_x, 0.0, 0.0, 0.0,
-            0.0, char_size_y, 0.0, 0.0,
+            rc.char_size_x_screen, 0.0, 0.0, 0.0,
+            0.0, rc.char_size_y_screen, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0
         ];
@@ -414,7 +424,7 @@ impl Renderer {
             ), 0);
 
             // Set pixel range
-            let pixel_range = char_size_x_px / font.get_glyph_size() as f32 * font.get_pixel_range();
+            let pixel_range = rc.char_size_x_px / font.get_glyph_size() as f32 * font.get_pixel_range();
             gl::Uniform1f(gl::GetUniformLocation(
                 self.msdf_program,
                 b"pixelRange\0".as_ptr() as _
@@ -464,6 +474,24 @@ impl Renderer {
         }
 
         can_scroll_down
+    }
+
+    fn compute_render_constants(&self, font: &Font, chars_per_line: u32) -> RenderConstants {
+        let face_metrics = font.get_face_metrics();
+        let aspect_ratio = self.width as f32 / self.height as f32;
+        let char_root_size = face_metrics.space_size;
+        let char_size_x_px = self.width as f32 / chars_per_line as f32 / char_root_size;
+        let char_size_x_screen = 2.0 * (char_size_x_px / self.width as f32);
+
+        RenderConstants {
+            aspect_ratio,
+            char_root_size,
+            char_size_x_px,
+            char_size_y_px: char_size_x_px * aspect_ratio,
+            char_size_x_screen,
+            char_size_y_screen: char_size_x_screen * aspect_ratio,
+            line_height: 1.0 + face_metrics.descender
+        }
     }
 
     fn push_quad(
