@@ -16,6 +16,7 @@ const MSDF_RANGE: f32 = 4.0;
 pub struct FaceMetrics {
     pub height: f32,
     pub width: f32,
+    pub descender: f32,
     pub space_size: f32
 }
 
@@ -28,6 +29,7 @@ pub enum RenderType {
 #[derive(Clone, Copy)]
 pub struct GlyphMetrics {
     pub atlas_index: u32,
+    pub atlas_uv: Bound<f32>,
     pub advance: f32,
     pub glyph_bound: Bound<f32>,
     pub atlas_bound: Bound<f32>,
@@ -54,9 +56,10 @@ impl Default for GlyphData {
             pixels: vec![1.0; (MSDF_SIZE * MSDF_SIZE * 4) as usize],
             metrics: GlyphMetrics {
                 atlas_index: 0,
-                advance: 1.0,
-                glyph_bound: Bound::new(0.0, 0.0, 1.0, 1.0),
-                atlas_bound: Bound::new(0.5, 0.5, MSDF_SIZE as f32 - 0.5, MSDF_SIZE as f32 - 0.5),
+                atlas_uv: Default::default(),
+                advance: 0.0,
+                glyph_bound: Default::default(),
+                atlas_bound: Default::default(),
                 render_type: RenderType::RASTER
             }
         }
@@ -126,8 +129,9 @@ impl Font {
         let scale = face.units_per_em() as f32;
         let space_glyph = face.glyph_index(' ').unwrap();
         FaceMetrics {
-            height: face.height() as f32 / scale,
+            height: face.global_bounding_box().height() as f32 / scale,
             width: face.global_bounding_box().width() as f32 / scale,
+            descender: face.descender().abs() as f32 / scale,
             space_size: face.glyph_hor_advance(space_glyph).unwrap() as f32 / scale
         }
     }
@@ -138,15 +142,13 @@ impl Font {
     }
 
     pub fn get_glyph_data(&mut self, key: char) -> GlyphMetrics {
-        let atlas_index: u32;
+        // TODO: don't need to evict if new glyph is invalid (default to index 0)
         match self.glyph_lru.get(&key) {
-            Some(v) => {
-                // Already present, return immediately
-                return *v;
-            },
+            Some(v) => *v,
             None => {
-                // Pull from free list first
+                let atlas_index: u32;
                 if self.atlas_free_list < self.glyph_lru.cap().get() as u32 {
+                    // Pull from free list first
                     atlas_index = self.atlas_free_list;
                     self.atlas_free_list += 1;
                 } else {
@@ -155,65 +157,23 @@ impl Font {
                     let lru = self.glyph_lru.pop_lru().unwrap();
                     atlas_index = lru.1.atlas_index;
                 }
+
+                let glyph_data = self.update_char_in_atlas(key, atlas_index);
+
+                glyph_data.metrics
             }
         }
+    }
 
-        // Code reaching this point indicates atlas tex needs to be updated
+    fn update_char_in_atlas(&mut self, key: char, atlas_index: u32) -> &GlyphData {
+        // TODO: batching for face parsing 
+        if !self.glyph_cache.contains_key(&key) {
+            self.glyph_cache.insert(key, self.load_glyph(key));
+        }
 
-        // TODO: don't need to evict if new glyph is invalid (default to index 0)
+        let glyph_data = self.glyph_cache.get_mut(&key).unwrap();
 
-        let glyph_data = self.glyph_cache.entry(key).or_insert_with(|| {
-            let mut font_index = 0;
-            let mut face: Face;
-            let render_type: RenderType;
-            let mut raster: Option<RasterGlyphImage>;
-            let mut shape: Option<Shape> = None;
-            let mut glyph_index: Option<GlyphId>;
-            loop {
-                if font_index >= self.font_data.len() {
-                    log::warn!("Missing glyph for '{:?}'", key);
-                    return Default::default();
-                }
-
-                face = Face::parse(self.font_data[font_index].as_slice(), 0).unwrap();
-                glyph_index = face.glyph_index(key);
-                font_index += 1;
-
-                if glyph_index.is_some() {
-                    raster = face.glyph_raster_image(glyph_index.unwrap(), std::u16::MAX);
-                    if raster.is_some() {
-                        render_type = RenderType::RASTER;
-                        break;
-                    }
-                    shape = face.glyph_shape(glyph_index.unwrap());
-                    if shape.is_some() {
-                        render_type = RenderType::MSDF;
-                        break;
-                    }
-                }
-            }
-
-            let glyph_index = glyph_index.unwrap();
-            let (pixels, glyph_bound, atlas_bound) = match render_type {
-                RenderType::MSDF => Self::generate_msdf(&face, shape.unwrap()),
-                RenderType::RASTER => Self::generate_raster(&face, raster.unwrap())
-            };
-
-            //log::info!("Glyph '{}': {:?}", key, render_type);
-
-            let scale = face.units_per_em() as f32;
-            GlyphData {
-                pixels,
-                metrics: GlyphMetrics {
-                    atlas_index: 0,
-                    advance: face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32 / scale as f32,
-                    glyph_bound,
-                    atlas_bound,
-                    render_type
-                }
-            }
-        });
-
+        // Update atlas pixels
         let offset = Self::convert_atlas_index_to_offset(atlas_index);
         self.atlas_tex.update_pixels(
             offset[0], offset[1],
@@ -221,10 +181,88 @@ impl Font {
             &glyph_data.pixels
         );
 
+        // Update the atlas position of the glyph & compute new UV
+        // UV.y is flipped since the underlying atlas bitmaps have flipped y
         glyph_data.metrics.atlas_index = atlas_index;
+        let uv = Font::get_atlas_texcoord(atlas_index);
+        let uv_min = [
+            uv[0] + glyph_data.metrics.atlas_bound.left,
+            uv[1] + glyph_data.metrics.atlas_bound.top,
+        ];
+        let uv_max = [
+            uv_min[0] + glyph_data.metrics.atlas_bound.width(),
+            uv_min[1] - glyph_data.metrics.atlas_bound.height(),
+        ];
+        glyph_data.metrics.atlas_uv = Bound::new(
+            uv_min[0],
+            uv_max[1],
+            uv_max[0],
+            uv_min[1],
+        );
+
         self.glyph_lru.put(key, glyph_data.metrics);
 
-        glyph_data.metrics
+        glyph_data
+    }
+
+    fn load_glyph(&self, key: char) -> GlyphData {
+        let render_type: RenderType;
+        let mut font_index = 0;
+        let mut face: Face;
+        let mut raster: Option<RasterGlyphImage>;
+        let mut shape: Option<Shape> = None;
+        let mut glyph_index: Option<GlyphId>;
+        loop {
+            if font_index >= self.font_data.len() {
+                log::warn!("Missing glyph for '{:?}'", key);
+                return Default::default();
+            }
+
+            face = Face::parse(self.font_data[font_index].as_slice(), 0).unwrap();
+            glyph_index = face.glyph_index(key);
+            font_index += 1;
+
+            if glyph_index.is_some() {
+                raster = face.glyph_raster_image(glyph_index.unwrap(), std::u16::MAX);
+                if raster.is_some() {
+                    render_type = RenderType::RASTER;
+                    break;
+                }
+                shape = face.glyph_shape(glyph_index.unwrap());
+                if shape.is_some() {
+                    render_type = RenderType::MSDF;
+                    break;
+                }
+            }
+        }
+
+        let glyph_index = glyph_index.unwrap();
+        let (pixels, glyph_bound, pixel_bound) = match render_type {
+            RenderType::MSDF => Self::generate_msdf(&face, shape.unwrap()),
+            RenderType::RASTER => Self::generate_raster(raster.unwrap())
+        };
+
+        // Compute final atlas bound (uv coords)
+        let texcoord_scale = 1.0 / self.get_atlas_size() as f32;
+        let atlas_bound = Bound::new(
+            pixel_bound.left * texcoord_scale,
+            pixel_bound.bottom * texcoord_scale,
+            pixel_bound.right * texcoord_scale,
+            pixel_bound.top * texcoord_scale,
+        );
+
+        let scale = face.units_per_em() as f32;
+        GlyphData {
+            pixels,
+            metrics: GlyphMetrics {
+                atlas_index: 0,
+                atlas_uv: Bound::new(0.0, 0.0, 0.0, 0.0),
+                advance: face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32 / scale as f32,
+                glyph_bound,
+                atlas_bound,
+                render_type
+            }
+        }
     }
 
     fn generate_msdf(face: &Face, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f32>) {
@@ -255,6 +293,7 @@ impl Font {
             pixels[i * 4 + 3] = bmp_pixels[i].a;
         }
 
+        // Convert pixel units to normalized units
         let scale = face.units_per_em() as f32;
         let glyph_bound = Bound::new(
             bound.left as f32 / scale,
@@ -263,20 +302,22 @@ impl Font {
             bound.top as f32 / scale
         );
 
-        let atlas_bound = Bound::new(
+        // Cursed math that I don't fully understand but basically this is
+        // necessary to go from glyph space into pixel space within the atlas
+        let pixel_bound = Bound::new(
             ((bound.left + framing.translate.x) * framing.scale.x) as f32,
             ((bound.bottom + framing.translate.y) * framing.scale.y) as f32,
             ((bound.right + framing.translate.x) * framing.scale.x) as f32,
             ((bound.top + framing.translate.y) * framing.scale.y) as f32
         );
 
-        (pixels, glyph_bound, atlas_bound)
+        (pixels, glyph_bound, pixel_bound)
     }
 
-    fn generate_raster(face: &Face, raster: RasterGlyphImage) -> (Vec<f32>, Bound<f32>, Bound<f32>) {
+    fn generate_raster(raster: RasterGlyphImage) -> (Vec<f32>, Bound<f32>, Bound<f32>) {
         // TODO: half pixel correction here is not great
         let glyph_bound = Bound::new(0.0, 0.0, 1.0, 1.0);
-        let atlas_bound = Bound::new(0.5, 0.5, MSDF_SIZE as f32 - 0.5, MSDF_SIZE as f32 - 0.5);
+        let pixel_bound = Bound::new(0.5, 0.5, MSDF_SIZE as f32 - 0.5, MSDF_SIZE as f32 - 0.5);
 
         let mut image = match image::load_from_memory(raster.data) {
             Ok(img) => img,
@@ -295,7 +336,7 @@ impl Font {
 
         let pixels = image.to_rgba32f().as_raw().clone();
 
-        (pixels, glyph_bound, atlas_bound)
+        (pixels, glyph_bound, pixel_bound)
     }
 
     fn convert_atlas_index_to_offset(index: u32) -> [u32; 2] {

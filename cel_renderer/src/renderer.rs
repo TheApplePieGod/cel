@@ -12,25 +12,10 @@ pub struct Vertex {
     pub color: [u32; 3]  // r, g, b (fg, bg)
 }
 
-#[derive(Default)]
-pub struct RenderState {
-    pub font: Option<Rc<RefCell<Font>>>,
-    pub wrap: bool,
-    pub chars_per_line: u32,
-    pub char_size: f32,
-    pub char_size_px: f32,
-    pub aspect_ratio: f32,
-    pub coord_scale: f32,
-    pub face_metrics: FaceMetrics,
-    pub base_x: f32,
-    pub base_y: f32,
-    pub msdf_vertices: Vec<Vertex>,
-    pub raster_vertices: Vec<Vertex>
-}
-
 pub struct Renderer {
     msdf_program: u32,
     raster_program: u32,
+    bg_program: u32,
     quad_vao: u32,
     quad_vbo: u32,
     width: u32,
@@ -152,6 +137,21 @@ impl Renderer {
             }
         \0";
 
+        let bg_frag_shader_source = b"
+            #version 400 core
+
+            in vec2 texCoord;
+            in vec3 fgColor;
+            in vec3 bgColor;
+
+            out vec4 fragColor;
+
+            void main()
+            {
+                fragColor = vec4(bgColor, 1.f);
+            }
+        \0";
+
         // Compile shaders & generate program
         let vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, vert_shader_source) {
             Ok(id) => id,
@@ -165,6 +165,10 @@ impl Renderer {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile raster frag shader: {}", msg)
         };
+        let bg_frag_shader = match Self::compile_shader(gl::FRAGMENT_SHADER, bg_frag_shader_source) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to compile bg frag shader: {}", msg)
+        };
         let msdf_program = match Self::link_program(vert_shader, msdf_frag_shader) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to link msdf program: {}", msg)
@@ -173,17 +177,23 @@ impl Renderer {
             Ok(id) => id,
             Err(msg) => panic!("Failed to link raster program: {}", msg)
         };
+        let bg_program = match Self::link_program(vert_shader, bg_frag_shader) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to link bg program: {}", msg)
+        };
 
         // Free shaders
         unsafe {
             gl::DeleteShader(vert_shader);
             gl::DeleteShader(msdf_frag_shader);
             gl::DeleteShader(raster_frag_shader);
+            gl::DeleteShader(bg_frag_shader);
         }
 
         Self {
             msdf_program,
             raster_program,
+            bg_program,
             quad_vao,
             quad_vbo,
             width: 0,
@@ -219,53 +229,30 @@ impl Renderer {
         debug_show_cursor: bool
     ) -> bool {
         // Setup render state
-        let aspect_ratio = self.width as f32 / self.height as f32;
-        let coord_scale = 1.0 / font.get_atlas_size() as f32;
-        let face_metrics = font.get_face_metrics();
         let base_x = 0.0; //0.25;
         let base_y = 0.0;
-        let char_size = 2.0 / chars_per_line as f32 / face_metrics.space_size;
-        let char_size_px = self.width as f32 / chars_per_line as f32 / face_metrics.space_size;
-        let char_coord_size = font.get_glyph_size() as f32 * coord_scale;
-
-        // TODO: move out
-        let line_offset = line_offset as usize;
+        let aspect_ratio = self.width as f32 / self.height as f32;
+        let face_metrics = font.get_face_metrics();
+        let char_size_x_px = self.width as f32 / chars_per_line as f32 / face_metrics.space_size;
+        let char_size_x = 2.0 * (char_size_x_px / self.width as f32);
+        let char_size_y = char_size_x * aspect_ratio;
+        let line_height = 1.0 + face_metrics.descender;
 
         let mut x = base_x;
         let mut y = base_y;
+        let mut should_render_cursor = terminal_state.cursor_state.visible || debug_show_cursor;
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
         let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
         let mut raster_vertices: Vec<Vertex> = vec![];
+        let mut bg_vertices: Vec<Vertex> = vec![];
 
         // Render vertices 
+        let line_offset = line_offset as usize;
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
             rendered_line_count += 1;
             x = base_x;
-            y -= face_metrics.height;
-
-            // Render cursor
-            // TODO: can probably compute this without being in the loop
-            if terminal_state.cursor_state.visible || debug_show_cursor {
-                let cursor = &terminal_state.global_cursor;
-                let rendered_y = cursor[1] + cursor[0] / chars_per_line as usize;
-                if rendered_y == line_idx {
-                    // Compute absolute position to account for wraps
-                    let pos_min = [
-                        base_x + (cursor[0] % chars_per_line as usize) as f32 * face_metrics.space_size,
-                        base_y + -face_metrics.height * (line_idx - line_offset + 1) as f32
-                    ];
-                    Self::push_quad(
-                        &[0.0, 0.0, 0.0],
-                        &[1.0, 0.0, 0.0],
-                        &[0.0, 0.0],
-                        &[0.0, 0.0], //[char_coord_size, char_coord_size],
-                        &pos_min,
-                        &[pos_min[0] + 1.0, pos_min[1] + 1.0],
-                        &mut raster_vertices
-                    );
-                }
-            }
+            y -= line_height;
 
             if line_idx >= terminal_state.screen_buffer.len() {
                 can_scroll_down = false;
@@ -290,26 +277,15 @@ impl Renderer {
                 if should_wrap {
                     rendered_line_count += 1;
                     x = base_x;
-                    y -= face_metrics.height;
+                    y -= line_height;
                 }
 
-                //TODO: precompute in metrics
-                // UV.y is flipped since the underlying atlas bitmaps have flipped y
                 let glyph_metrics = &font.get_glyph_data(match debug_line_number {
                     true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
                     false => c.elem
                 });
                 let glyph_bound = &glyph_metrics.glyph_bound;
-                let atlas_bound = &glyph_metrics.atlas_bound;
-                let uv = Font::get_atlas_texcoord(glyph_metrics.atlas_index);
-                let uv_min = [
-                    uv[0] + atlas_bound.left * coord_scale,
-                    uv[1] + atlas_bound.top * coord_scale
-                ];
-                let uv_max = [
-                    uv_min[0] + atlas_bound.width() * coord_scale,
-                    uv_min[1] - atlas_bound.height() * coord_scale
-                ];
+                let atlas_uv = &glyph_metrics.atlas_uv;
 
                 // TODO: store in separate buffer?
                 let fg_color = c.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
@@ -318,24 +294,65 @@ impl Renderer {
                 Self::push_quad(
                     fg_color,
                     bg_color,
-                    &uv_min,
-                    &uv_max,
-                    &[x + glyph_bound.left, y + glyph_bound.bottom],
-                    &[x + glyph_bound.right, y + glyph_bound.top],
+                    &[atlas_uv.left, atlas_uv.top],
+                    &[atlas_uv.right, atlas_uv.bottom],
+                    &[x + glyph_bound.left, y + glyph_bound.bottom + face_metrics.descender],
+                    &[x + glyph_bound.right, y + glyph_bound.top + face_metrics.descender],
                     match glyph_metrics.render_type {
                         RenderType::MSDF => &mut msdf_vertices,
                         RenderType::RASTER => &mut raster_vertices
                     }
                 );
 
+                // Push background quad
+                // TODO: we can drastically simplify this because we don't need most of this info
+                if c.bg_color.is_some() {
+                    Self::push_quad(
+                        fg_color,
+                        bg_color,
+                        &[0.0, 0.0],
+                        &[0.0, 0.0],
+                        &[x, y],
+                        &[x + face_metrics.space_size, y + line_height],
+                        &mut bg_vertices
+                    );
+                }
+
+                // Render cursor
+                // TODO: can probably compute this without being in the loop
+                if should_render_cursor{
+                    let cursor = &terminal_state.global_cursor;
+                    //let rendered_y = cursor[1] + cursor[0] / chars_per_line as usize;
+                    //if rendered_y == line_idx + char_idx / chars_per_line as usize {
+                    if cursor[1] == line_idx && (cursor[0] / chars_per_line as usize) == (char_idx / chars_per_line as usize) {
+                        // Compute absolute position to account for wraps
+                        should_render_cursor = false;
+                        let pos_min = [
+                            base_x + (cursor[0] % chars_per_line as usize) as f32 * face_metrics.space_size,
+                            //base_y + -face_metrics.height * rendered_line_count as f32
+                            //base_y - (rendered_line_count as f32 * line_height)
+                            y
+                        ];
+                        Self::push_quad(
+                            &[0.0, 0.0, 0.0],
+                            &[1.0, 0.0, 0.0],
+                            &[0.0, 0.0],
+                            &[0.0, 0.0], //[char_coord_size, char_coord_size],
+                            &pos_min,
+                            &[pos_min[0] + face_metrics.space_size, pos_min[1] + line_height],
+                            &mut raster_vertices
+                        );
+                    }
+                }
+
                 x += face_metrics.space_size;
                 //x += glyph_metrics.advance;
             }
         }
-
+    
         let model_mat: [f32; 16] = [
-            char_size, 0.0, 0.0, 0.0,
-            0.0, char_size * aspect_ratio, 0.0, 0.0,
+            char_size_x, 0.0, 0.0, 0.0,
+            0.0, char_size_y, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0
         ];
@@ -343,6 +360,32 @@ impl Renderer {
         unsafe {
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
+        }
+
+        // Render background quads
+        unsafe {
+            let vertices = &bg_vertices;
+
+            // Bind program data
+            gl::UseProgram(self.bg_program);
+            gl::BindVertexArray(self.quad_vao);
+
+            // Update vertex data
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
+            gl::BufferSubData(
+                gl::ARRAY_BUFFER,
+                0,
+                (size_of::<Vertex>() * vertices.len()) as isize,
+                vertices.as_ptr() as _
+            );
+
+            // Set global model matrix (column major)
+            gl::UniformMatrix4fv(gl::GetUniformLocation(
+                self.bg_program,
+                "model\0".as_ptr() as *const i8
+            ), 1, gl::FALSE, model_mat.as_ptr());
+
+            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
 
         // Render MSDF
@@ -371,7 +414,7 @@ impl Renderer {
             ), 0);
 
             // Set pixel range
-            let pixel_range = char_size_px / font.get_glyph_size() as f32 * font.get_pixel_range();
+            let pixel_range = char_size_x_px / font.get_glyph_size() as f32 * font.get_pixel_range();
             gl::Uniform1f(gl::GetUniformLocation(
                 self.msdf_program,
                 b"pixelRange\0".as_ptr() as _
@@ -386,7 +429,7 @@ impl Renderer {
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
 
-        // Render 
+        // Render raster
         unsafe {
             let vertices = &raster_vertices;
 
@@ -518,6 +561,7 @@ impl Drop for Renderer {
             gl::DeleteBuffers(del_buf.len() as i32, del_buf.as_ptr());
             gl::DeleteProgram(self.msdf_program);
             gl::DeleteProgram(self.raster_program);
+            gl::DeleteProgram(self.bg_program);
         }
     }
 }
