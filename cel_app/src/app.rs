@@ -71,7 +71,7 @@ impl App {
         let scroll_lines_per_second = 10.0;
         let continuous_processing = true;
         let debug_line_numbers = false;
-        let debug_show_cursor = true;
+        let debug_show_cursor = false;
 
         let mut tail = true;
         let mut can_scroll_down = false;
@@ -172,6 +172,7 @@ impl App {
                 self.chars_per_line,
                 self.lines_per_screen,
                 line_offset,
+                self.window.get_time_seconds(),
                 true,
                 debug_line_numbers,
                 debug_show_cursor

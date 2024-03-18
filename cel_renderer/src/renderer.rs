@@ -1,5 +1,5 @@
 use std::{mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
-use cel_core::ansi::TerminalState;
+use cel_core::ansi::{CursorStyle, TerminalState};
 use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, glchk};
 
 const MAX_CHARACTERS: u32 = 20000;
@@ -232,6 +232,7 @@ impl Renderer {
         chars_per_line: u32,
         lines_per_screen: u32,
         line_offset: f32,
+        timestamp_seconds: f64,
         wrap: bool,
         debug_line_number: bool,
         debug_show_cursor: bool
@@ -244,7 +245,12 @@ impl Renderer {
 
         let mut x = base_x;
         let mut y = base_y;
-        let mut should_render_cursor = terminal_state.cursor_state.visible || debug_show_cursor;
+        let mut should_render_cursor = match debug_show_cursor {
+            true => true,
+            false => terminal_state.cursor_state.visible && (
+                        !terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5
+                     )
+        };
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
         let mut prev_bg_color = terminal_state.background_color;
@@ -269,11 +275,19 @@ impl Renderer {
             }
 
             // Render cursor
-            if should_render_cursor{
+            if should_render_cursor {
                 let cursor = &terminal_state.global_cursor;
                 if cursor[1] == line_idx {
                     // Compute absolute position to account for wraps
                     should_render_cursor = false;
+                    let width = match terminal_state.cursor_state.style {
+                        CursorStyle::Bar => 0.15,
+                        _ => 1.0
+                    };
+                    let height = match terminal_state.cursor_state.style {
+                        CursorStyle::Underline => 0.09,
+                        _ => 1.0
+                    };
                     let pos_min = [
                         base_x + (cursor[0] % chars_per_line as usize) as f32 * rc.char_root_size,
                         y - rc.line_height * (cursor[0] / chars_per_line as usize) as f32
@@ -284,7 +298,7 @@ impl Renderer {
                         &[0.0, 0.0],
                         &[0.0, 0.0],
                         &pos_min,
-                        &[pos_min[0] + rc.char_root_size, pos_min[1] + rc.line_height],
+                        &[pos_min[0] + rc.char_root_size * width, pos_min[1] + rc.line_height * height],
                         &mut raster_vertices
                     );
                 }

@@ -10,7 +10,7 @@ pub type Color = [f32; 3];
 pub type Cursor = [usize; 2];
 type SignedCursor = [isize; 2];
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum CursorStyle {
     Block,
     Underline,
@@ -101,7 +101,7 @@ pub struct AnsiBuilder {
 impl Default for CursorState {
     fn default() -> Self {
         Self {
-            style: CursorStyle::Block,
+            style: CursorStyle::Bar,
             visible: true,
             blinking: true
         }

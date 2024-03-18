@@ -109,6 +109,7 @@ impl Window {
     pub fn is_alt_down(&self) -> bool { self.get_key_pressed(Key::LeftAlt) || self.get_key_pressed(Key::RightAlt) }
     pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
     pub fn was_resized(&self) -> bool { self.just_resized }
+    pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
 
     fn glfw_key_to_ascii(&self, key: Key) -> Option<u8> {
         let val = key as i32;

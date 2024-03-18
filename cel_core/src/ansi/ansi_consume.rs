@@ -488,10 +488,6 @@ impl Performer {
             let region_size_x = margin.right - margin.left;
             let can_trim_lines = region_size_x == self.screen_width - 1;
             if can_trim_lines {
-                // Perform simulated scrolling in the margins by removing entire or partial
-                // buffer lines, which will affect the positioning of the lines and visually
-                // simulates scrolling
-
                 if evict_pos[1] >= self.terminal_state.screen_buffer.len() {
                     return false;
                 }
@@ -1008,7 +1004,31 @@ impl Perform for Performer {
                 log::debug!("DSR requested");
             }
             'q' => {
-                log::warn!("Cursor: {:?}, {:?}", params, intermediates);
+                let state = &mut self.terminal_state;
+                if intermediates.len() != 1 {
+                    return;
+                }
+                match intermediates[0] {
+                    b' ' => {
+                        let param = match params.len() {
+                            1 => params[0],
+                            _ => 0
+                        };
+                        state.cursor_state.style = match param {
+                            3..=4 => CursorStyle::Underline,
+                            5..=6 => CursorStyle::Bar,
+                            _ => CursorStyle::Block
+                        };
+                        state.cursor_state.blinking = param % 2 == 1 || param == 0;
+
+                        log::debug!(
+                            "Cursor style: [{:?}, {:?}]",
+                            state.cursor_state.style,
+                            state.cursor_state.blinking
+                        );
+                    }
+                    _ => {}
+                }
             },
             'r' => { // Set scroll margin Y
                 let top = match params.len() {
