@@ -193,7 +193,7 @@ impl Window {
                     Key::Tab => b'\t',
                     Key::Enter => b'\r',
                     Key::Escape => 0x1b,
-                    Key::Backspace => 0x08,
+                    Key::Backspace => 0x7f, // 0x08
                     Key::Delete => 0x7f,
                     _ => 0
                 };
