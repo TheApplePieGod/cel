@@ -3,12 +3,6 @@ use std::fmt;
 
 use super::*;
 
-enum ScrollRegionResult {
-    GlobalScroll,
-    LineRemoved,
-    LineTrimmed
-}
-
 impl AnsiHandler {
     pub fn new() -> Self {
         Self {
@@ -157,6 +151,8 @@ impl Performer {
                 ];
             }
 
+            // log::warn!("Line {}", cur_global[1]);
+
             // TODO: this could definitely be optimized
             let line = &state.screen_buffer[cur_global[1]];
             for char_idx in cur_global[0]..line.len() {
@@ -165,6 +161,8 @@ impl Performer {
                     cur_screen[0] = 0;
                     cur_screen[1] += 1;
                 }
+
+                // log::warn!("{}", line[char_idx].elem);
 
                 if cur_screen[1] == target_screen[1] {
                     return [
@@ -190,6 +188,7 @@ impl Performer {
             }
 
             cur_screen[0] = 0;
+            cur_global[0] = 0;
             cur_global[1] += 1;
         }
     }
@@ -354,6 +353,21 @@ impl Performer {
         }
     }
 
+    // Splits a wrapped line into two lines, where the second line starts on the line
+    // corresponding to cursor[0]
+    fn split_line(&mut self, cursor: &Cursor) -> bool {
+        let buffer = &mut self.terminal_state.screen_buffer;
+        if cursor[1] >= buffer.len() || cursor[0] < self.screen_width {
+            return false;
+        }
+
+        let start_index = cursor[0] - (cursor[0] % self.screen_width);
+        let new_line = buffer[cursor[1]].drain(start_index..).collect();
+        buffer.insert(cursor[1] + 1, new_line);
+
+        true
+    }
+
     fn erase(&mut self, start: Cursor, end: Cursor) {
         let state = &mut self.terminal_state;
         let mut start = start;
@@ -405,14 +419,14 @@ impl Performer {
 
     /// Scroll the specified screenspace buffer region up or down by one line. Up 
     /// refers to the direction the text is moving
-    /// Returns the type of scroll operation that was performed, which may be useful
-    /// for post cursor manipulation
-    fn scroll_region(&mut self, up: bool, margin: Margin) -> ScrollRegionResult {
+    /// Returns true if the global cursor should be recomputed from the screen cursor
+    /// in the case that the buffer was severely messed with
+    fn scroll_region(&mut self, up: bool, margin: Margin) -> bool {
         let state = &self.terminal_state;
 
         log::debug!(
-            "[scroll_region] Margin: T{} B{} L{} R{}",
-            margin.top, margin.bottom, margin.left, margin.right
+            "[scroll_region] Margin: T{} B{} L{} R{}, up={}",
+            margin.top, margin.bottom, margin.left, margin.right, up
         );
 
         // Only support default scrollback behavior if we don't have any margin. Otherwise,
@@ -440,56 +454,58 @@ impl Performer {
                 self.terminal_state.global_cursor_home[1] += 1;
             }
 
-            ScrollRegionResult::GlobalScroll
+            false
         } else {
-
-            let region_size_x = margin.right - margin.left;
-            let region_size_y = margin.bottom - margin.top;
+            // Start by isolating the lines in the region to scroll. That is, split
+            // them such that the lines at the top and bottom of the region are their
+            // own lines and are no longer wrapped. This way, we can simply remove /
+            // insert around them without any issues. This simplifies logic greatly.
             
-            let evict_pos = match up{
-                // Evict at the top of the region
-                true => self.get_cursor_pos_absolute(&[margin.left, margin.top]),
-                // Evict at the bottom of the region
-                false => self.get_cursor_pos_absolute(&[margin.left, margin.bottom])
+            let mut region_cursor_top = self.get_cursor_pos_absolute(&[margin.left, margin.top]);
+            if self.split_line(&region_cursor_top) {
+                region_cursor_top[0] = 0;
+                region_cursor_top[1] += 1;
+            }
+            self.split_line(&self.get_cursor_pos_next_line(&region_cursor_top));
+
+            let mut region_cursor_bot = self.get_cursor_pos_absolute(&[margin.left, margin.bottom]);
+            if self.split_line(&region_cursor_bot) {
+                region_cursor_bot[0] = 0;
+                region_cursor_bot[1] += 1;
+            }
+            self.split_line(&self.get_cursor_pos_next_line(&region_cursor_bot));
+
+            let evict_pos = match up {
+                true => region_cursor_top,
+                false => region_cursor_bot
+            };
+            let replace_pos = match up {
+                true => region_cursor_bot,
+                false => region_cursor_top
             };
 
             // We can directly edit the buffer line only if there is no x margin and the 
+            let region_size_x = margin.right - margin.left;
             let can_trim_lines = region_size_x == self.screen_width - 1;
             if can_trim_lines {
                 // Perform simulated scrolling in the margins by removing entire or partial
                 // buffer lines, which will affect the positioning of the lines and visually
                 // simulates scrolling
 
-                let wrapped_line_count = self.get_total_wrapped_line_count(&evict_pos);
-                if wrapped_line_count == 1 {
-                    let buf = &mut self.terminal_state.screen_buffer;
-
-                    // Directly remove evicted line
-                    buf.remove(evict_pos[1]);
-
-                    // If necessary insert a new empty 'scrolled' line so other
-                    // lines don't shift
-                    let new_y = match up {
-                        true => evict_pos[1] + region_size_y,
-                        false => evict_pos[1] - region_size_y
-                    };
-                    if new_y < buf.len() {
-                        buf.insert(new_y, vec![]);
-                    }
-
-                    log::warn!("Line removed!!! {}", self.terminal_state.screen_buffer.len());
-
-                    ScrollRegionResult::LineRemoved
-                } else {
-                    // Trim the line from the front or back depending on scroll direction
-                    // This will definitely (?) break if a line wraps into the scroll region but
-                    // it's fine
-                    let line = &mut self.terminal_state.screen_buffer[evict_pos[1]];
-                    line.drain(evict_pos[0]..=(evict_pos[0] + region_size_x));
-                    //let line = &mut self.terminal_state.screen_buffer[evict_pos[1]];
-
-                    ScrollRegionResult::LineTrimmed
+                if evict_pos[1] >= self.terminal_state.screen_buffer.len() {
+                    return false;
                 }
+
+                let buf = &mut self.terminal_state.screen_buffer;
+                //log::warn!("Removed buffer line {}: {:?}", evict_pos[1], buf[evict_pos[1]]);
+
+                buf.remove(evict_pos[1]);
+
+                if replace_pos[1] < buf.len() {
+                    buf.insert(replace_pos[1], vec![]);
+                }
+
+                true
             } else {
                 // Perform simulated scrolling in the margins by replacing the contents of each line
                 // in the scrolling region with the next or prev depending on direction,
@@ -554,18 +570,16 @@ impl Performer {
         if state.screen_cursor[1] < state.margin.bottom {
             self.terminal_state.screen_cursor[1] += 1;
         } else {
-            // Scroll the region and account for the updates to the screen buffer structure
-            // by updating the cursor
-            match self.scroll_region(true, state.margin) {
-                ScrollRegionResult::LineRemoved => {
-                    self.terminal_state.global_cursor[1] -= 1;
-                },
-                ScrollRegionResult::LineTrimmed => {
-                    if self.terminal_state.global_cursor[0] >= self.screen_width {
-                        self.terminal_state.global_cursor[0] -= self.screen_width;
-                    }
-                },
-                ScrollRegionResult::GlobalScroll => {}
+            if self.scroll_region(true, state.margin) {
+                // After messing with the buffer state, recompute the correct global
+                // cursor absolutely rather than trying to use deltas to figure out
+                // how it should change. This could work in the future, but it's very
+                // complicated with many edge cases and this is much simpler and more
+                // reliable. Another downside to this is that it will not continue wrapping
+                // and put things on a new line (which should be ok)
+                self.terminal_state.global_cursor = self.get_cursor_pos_absolute(
+                    &self.terminal_state.screen_cursor
+                );
             }
         }
 

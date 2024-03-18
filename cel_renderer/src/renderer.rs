@@ -373,7 +373,6 @@ impl Renderer {
                 let glyph_bound = &glyph_metrics.glyph_bound;
                 let atlas_uv = &glyph_metrics.atlas_uv;
 
-
                 Self::push_quad(
                     fg_color,
                     bg_color,

@@ -1,3 +1,4 @@
+use std::{sync::mpsc, thread};
 use glfw::{Action, Context, Key, fail_on_errors, Modifiers};
 
 pub struct Window {
@@ -6,7 +7,8 @@ pub struct Window {
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
     key_states: [bool; 512],
     input_buffer: Vec<u8>,
-    utf8_buffer: [u8; 8]
+    utf8_buffer: [u8; 8],
+    just_resized: bool
 }
 
 impl Window {
@@ -20,14 +22,16 @@ impl Window {
         ));
 
         let (mut window, event_receiver) = glfw_instance.create_window(
-            1920, 1080, "cel_", 
+            1920, 600, "cel_", 
             glfw::WindowMode::Windowed
         ).expect("Failed to create GLFW window.");
 
         window.make_current();
+        window.set_size_polling(true);
         window.set_key_polling(true);
         window.set_char_polling(true);
         window.set_char_mods_polling(true);
+        window.set_resizable(true);
 
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
@@ -40,15 +44,21 @@ impl Window {
             event_receiver,
             key_states: [false; 512],
             input_buffer: vec![],
-            utf8_buffer: [0; 8]
+            utf8_buffer: [0; 8],
+            just_resized: false
         }
     }
 
     // https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
     pub fn poll_events(&mut self) {
+        self.just_resized = false;
+
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             match event {
+                glfw::WindowEvent::Size(_, _) => {
+                    self.just_resized = true;
+                },
                 glfw::WindowEvent::Key(key, _, action, mods) => {
                     if (key as usize) < self.key_states.len() {
                         let key_state;
@@ -74,8 +84,9 @@ impl Window {
         }
     }
 
-    pub fn begin_frame<'a>(&mut self) {
+    pub fn begin_frame<'a>(&mut self, color: &[f32; 3]) {
         unsafe {
+            gl::ClearColor(color[0], color[1], color[2], 0.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
     }
@@ -97,6 +108,7 @@ impl Window {
     pub fn is_ctrl_down(&self) -> bool { self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) }
     pub fn is_alt_down(&self) -> bool { self.get_key_pressed(Key::LeftAlt) || self.get_key_pressed(Key::RightAlt) }
     pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
+    pub fn was_resized(&self) -> bool { self.just_resized }
 
     fn glfw_key_to_ascii(&self, key: Key) -> Option<u8> {
         let val = key as i32;

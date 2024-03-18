@@ -12,7 +12,9 @@ pub struct App {
     renderer: Renderer,
     commands: Commands,
     ansi_handler: AnsiHandler,
-    primary_font: Font
+    primary_font: Font,
+    chars_per_line: u32,
+    lines_per_screen: u32
 }
 
 impl App {
@@ -45,13 +47,19 @@ impl App {
         info!("Loaded primary font '{}'", primary_font.get_primary_name());
         info!("Initialized");
 
-        Self {
+        let mut obj = Self {
             window,
             commands: Commands::new(),
             renderer: Renderer::new(),
             primary_font,
-            ansi_handler: AnsiHandler::new()
-        }
+            ansi_handler: AnsiHandler::new(),
+            chars_per_line: 1,
+            lines_per_screen: 1
+        };
+
+        obj.resize();
+
+        obj
     }
 
     pub fn run(&mut self) {
@@ -60,20 +68,10 @@ impl App {
             self.window.get_pixel_height()
         );
 
-        let chars_per_row = 175;
-        let scroll_lines_per_second = 30.0;
+        let scroll_lines_per_second = 10.0;
         let continuous_processing = true;
         let debug_line_numbers = false;
         let debug_show_cursor = true;
-        let lines_per_screen = self.renderer.compute_max_screen_lines(
-            &self.primary_font,
-            chars_per_row
-        );
-
-        log::info!("CPR: {}, LPS: {}", chars_per_row, lines_per_screen);
-
-        self.commands.resize(lines_per_screen, chars_per_row);
-        self.ansi_handler.resize(chars_per_row, lines_per_screen);
 
         let mut tail = true;
         let mut can_scroll_down = false;
@@ -86,8 +84,13 @@ impl App {
 
             // Begin frame
             self.window.poll_events();
-            self.window.begin_frame();
+            self.window.begin_frame(&self.ansi_handler.get_terminal_state().background_color);
             self.commands.poll_io();
+
+            // Handle resize
+            if self.window.was_resized() {
+                self.resize();
+            }
 
             let mut max_sequences: u32 = match continuous_processing {
                 true => std::u32::MAX,
@@ -130,32 +133,44 @@ impl App {
             self.commands.send_input(self.window.get_input_buffer());
 
             // Handle input
+            // TODO: kinda scuffed
+            let term_state = &self.ansi_handler.get_terminal_state();
+            let line_occupancy = match (line_offset as usize) < term_state.screen_buffer.len() {
+                false => 0,
+                true => term_state.screen_buffer[line_offset as usize].len()
+            } / self.chars_per_line as usize + 1;
+            let wrap_offset_increment = 1.0 / line_occupancy as f32;
+            let line_offset_increment = scroll_lines_per_second * wrap_offset_increment * delta_time.as_secs_f32();
             if self.window.get_key_pressed(glfw::Key::Up) {
                 tail = false;
-                line_offset -= scroll_lines_per_second * delta_time.as_secs_f32();
+                line_offset -= line_offset_increment;
                 if line_offset < 0.0 {
                     line_offset = 0.0;
                 }
             }
             else if can_scroll_down {
                 if self.window.get_key_pressed(glfw::Key::Down) {
-                    line_offset += scroll_lines_per_second * delta_time.as_secs_f32();
+                    line_offset += line_offset_increment;
                 }
             } else {
                 tail = true;
             }
 
             if tail {
-                let buffer = &self.ansi_handler.get_terminal_state().screen_buffer;
-                line_offset = (buffer.len().max(lines_per_screen as usize) - lines_per_screen as usize) as f32;
+                let y_offset = term_state.global_cursor_home[1];
+                line_offset = y_offset as f32;
+                if y_offset < term_state.screen_buffer.len() {
+                    // Add wrap offset
+                    line_offset += term_state.global_cursor_home[0] as f32 / term_state.screen_buffer[y_offset].len() as f32;
+                }
             }
 
             // Render
             can_scroll_down = self.renderer.render(
                 &mut self.primary_font,
                 self.ansi_handler.get_terminal_state(),
-                chars_per_row,
-                lines_per_screen,
+                self.chars_per_line,
+                self.lines_per_screen,
                 line_offset,
                 true,
                 debug_line_numbers,
@@ -168,5 +183,25 @@ impl App {
 
             delta_time = time::Instant::now() - frame_start;
         }
+    }
+
+    fn resize(&mut self) {
+        let pixel_to_char_ratio = 10;
+        self.chars_per_line = self.window.get_width() as u32 / pixel_to_char_ratio;
+
+        self.renderer.update_viewport_size(
+            self.window.get_pixel_width(),
+            self.window.get_pixel_height()
+        );
+
+        self.lines_per_screen = self.renderer.compute_max_screen_lines(
+            &self.primary_font,
+            self.chars_per_line
+        );
+
+        log::info!("CPL: {}, LPS: {}", self.chars_per_line, self.lines_per_screen);
+
+        self.commands.resize(self.lines_per_screen, self.chars_per_line);
+        self.ansi_handler.resize(self.chars_per_line, self.lines_per_screen);
     }
 }

@@ -23,6 +23,10 @@ impl AnsiBuilder {
         self.add_raw(&[b'\r'])
     }
 
+    pub fn add_newline_and_cr(self) -> Self {
+        self.add_carriage_return().add_newline()
+    }
+
     pub fn add_backspace(self) -> Self {
         self.add_raw(&[0x08])
     }
@@ -51,6 +55,26 @@ impl AnsiBuilder {
 
     pub fn reset_cursor_pos(self) -> Self {
         self.set_cursor_pos(1, 1)
+    }
+
+    // Margins
+
+    pub fn set_scroll_margin_y(self, top: u32, bottom: u32) -> Self {
+        self.add_raw_csi(&[top, bottom], None, 'r')
+    }
+
+    pub fn set_scroll_margin_x(self, left: u32, right: u32) -> Self {
+        self.add_raw_csi(&[left, right], None, 's')
+    }
+
+    // Lines
+
+    pub fn insert_lines(self, amount: u32) -> Self {
+        self.add_raw_csi(&[amount], None, 'L')
+    }
+
+    pub fn remove_lines(self, amount: u32) -> Self {
+        self.add_raw_csi(&[amount], None, 'M')
     }
 
     // Raw

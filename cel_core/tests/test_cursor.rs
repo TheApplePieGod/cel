@@ -13,8 +13,7 @@ mod tests {
     fn basic() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("Hello")
-            .add_newline()
-            .add_carriage_return()
+            .add_newline_and_cr()
             .add_text("World")
         );
 
@@ -32,8 +31,7 @@ mod tests {
             .add_text("12345")
             .add_text("67890")
             .add_text("12345")
-            .add_newline()
-            .add_carriage_return()
+            .add_newline_and_cr()
             .add_text("ABCDE")
             .set_cursor_pos(2, 3)
             .add_text("X")
@@ -151,8 +149,7 @@ mod tests {
             .add_text("67")
             .move_cursor_up(1)
             .move_cursor_right(100)
-            .add_carriage_return()
-            .add_newline()
+            .add_newline_and_cr()
             .add_text("H")
         );
 
@@ -168,8 +165,7 @@ mod tests {
     fn carriage_return_2() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("12345")
-            .add_carriage_return()
-            .add_newline()
+            .add_newline_and_cr()
             .add_text("H")
         );
 
@@ -205,6 +201,81 @@ mod tests {
             vec!['1', '2', '3', '4', '5']
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn scroll_region_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("1234567890123") // 3 lines
+            .add_newline_and_cr()
+            .add_text("1234567890123") // 3 lines
+        );
+
+        let final_buffer = vec![
+            vec!['1', '2', '3', '4', '5',
+                 '6', '7', '8', '9', '0',
+                 '1', '2', '3'],
+            vec!['1', '2', '3', '4', '5',
+                 '6', '7', '8', '9', '0',
+                 '1', '2', '3']
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor_home, [5, 0]);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn scroll_region_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .set_scroll_margin_y(2, 4)
+            .add_text("1234567890123") // 3 lines
+            .add_newline_and_cr()
+            .add_text("1234567890123") // 3 lines
+        );
+
+        // Note: these lines *should* stay wrapped, but the current
+        // implementation recomputes the cursor and thus resets the wrap
+        // state. If this changes in the future, now you know why.
+
+        let final_buffer = vec![
+            vec!['1', '2', '3', '4', '5'],
+            vec!['1', '2', '3', '4', '5'],
+            vec!['6', '7', '8', '9', '0'],
+            vec!['1', '2', '3'],
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.margin.top, 1);
+        assert_eq!(state.margin.bottom, 3);
+        assert_eq!(state.global_cursor_home, [0, 0]);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn scroll_region_3() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("1234567890123") // 3 lines
+            .add_newline_and_cr()
+            .add_text("1234567890SAFE") // 3 lines
+            .set_scroll_margin_y(2, 4)
+            .set_cursor_pos(1, 4)
+            .remove_lines(2)
+            .set_cursor_pos(1, 2)
+            .insert_lines(2)
+        );
+
+        let final_buffer = vec![
+            vec!['1', '2', '3', '4', '5',
+                 '6', '7', '8', '9', '0'],
+            vec![],
+            vec![],
+            vec!['1', '2', '3'],
+            vec!['S', 'A', 'F', 'E'],
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.margin.top, 1);
+        assert_eq!(state.margin.bottom, 3);
+        assert_eq!(state.global_cursor_home, [5, 0]);
         assert!(!state.wants_wrap);
     }
 }
