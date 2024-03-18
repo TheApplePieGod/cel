@@ -732,7 +732,7 @@ impl Perform for Performer {
 
     fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
         /*
-        println!(
+        log::debug!(
             "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
             params, intermediates, ignore, c
         );
@@ -741,7 +741,7 @@ impl Perform for Performer {
     }
 
     fn put(&mut self, byte: u8) {
-        //println!("[put] {:02x}", byte);
+        //log::debug!("[put] {:02x}", byte);
         log::debug!("Put [{:?}]", byte as char);
     }
 
@@ -754,7 +754,6 @@ impl Perform for Performer {
 
         // TODO: investigate the bell, seems like it is relevant for many commands
 
-        println!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
         let command = self.parse_osc_command(all_params[0]);
         let params = match all_params.len() {
             1 => vec![],
@@ -775,7 +774,7 @@ impl Perform for Performer {
             },
             */
             _ => {
-                println!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
+                log::debug!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
             }
         }
 
@@ -1071,7 +1070,7 @@ impl Perform for Performer {
                 log::debug!("Scroll margin X: [{:?}, {:?}]", left, right);
             },
             _ => {
-                println!(
+                log::debug!(
                     "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
                     params, intermediates, ignore, c
                 );
@@ -1086,7 +1085,7 @@ impl Perform for Performer {
         match byte {
             b'B' => {},
             _ => {
-                println!(
+                log::debug!(
                     "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
                     intermediates, ignore, byte
                 );

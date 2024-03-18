@@ -47,7 +47,8 @@ pub struct Font {
     glyph_cache: HashMap<char, GlyphData>,
     glyph_lru: LruCache<char, GlyphMetrics>,
     atlas_free_list: u32,
-    atlas_tex: Texture<f32>
+    atlas_tex: Texture<f32>,
+    font_cache: FontCache
 }
 
 impl Default for GlyphData {
@@ -58,7 +59,7 @@ impl Default for GlyphData {
                 atlas_index: 0,
                 atlas_uv: Default::default(),
                 advance: 0.0,
-                glyph_bound: Default::default(),
+                glyph_bound: Bound::new(0.0, 0.0, 1.0, 1.0),
                 atlas_bound: Default::default(),
                 render_type: RenderType::RASTER
             }
@@ -68,12 +69,19 @@ impl Default for GlyphData {
 
 impl Font {
     pub fn new(
-        cache: &FontCache,
         name_list: &Vec<&str>,
     ) -> Result<Self, String> {
+        let font_cache = FontCache::build();
+
+        /*
+        for font in font_cache.list() {
+            log::warn!("Found {}", &font.0.name.as_ref().unwrap_or(&String::new()));
+        }
+        */
+
         let mut font_data = vec![];
         for name in name_list {
-            match Self::load_font_by_name(&cache, &name) {
+            match Self::load_font_by_name(&font_cache, &name) {
                 Ok(data) => font_data.push(data),
                 Err(msg) => log::warn!("Font '{}' failed to load: {}", name, msg)
             }
@@ -100,7 +108,8 @@ impl Font {
             glyph_cache: Default::default(),
             glyph_lru: LruCache::new(NonZeroUsize::new(max_glyphs as usize).unwrap()),
             atlas_free_list: 1, // Spot zero is always empty
-            atlas_tex
+            atlas_tex,
+            font_cache
         })
     }
 
@@ -168,7 +177,8 @@ impl Font {
     fn update_char_in_atlas(&mut self, key: char, atlas_index: u32) -> &GlyphData {
         // TODO: batching for face parsing 
         if !self.glyph_cache.contains_key(&key) {
-            self.glyph_cache.insert(key, self.load_glyph(key));
+            let new_data = self.load_glyph(key);
+            self.glyph_cache.insert(key, new_data);
         }
 
         let glyph_data = self.glyph_cache.get_mut(&key).unwrap();
@@ -205,7 +215,7 @@ impl Font {
         glyph_data
     }
 
-    fn load_glyph(&self, key: char) -> GlyphData {
+    fn load_glyph(&mut self, key: char) -> GlyphData {
         let render_type: RenderType;
         let mut font_index = 0;
         let mut face: Face;
@@ -214,6 +224,19 @@ impl Font {
         let mut glyph_index: Option<GlyphId>;
         loop {
             if font_index >= self.font_data.len() {
+                // Search for new fallback font
+                /*
+                match Self::load_font_by_glyph(&self.font_cache, key) {
+                    Ok(font_data) => {
+                        self.font_data.push(font_data);
+                    },
+                    Err(_) => {
+                        log::warn!("Missing glyph for '{:?}'", key);
+                        return Default::default();
+                    }
+                }
+                */
+
                 log::warn!("Missing glyph for '{:?}'", key);
                 return Default::default();
             }
@@ -358,6 +381,20 @@ impl Font {
         }) {
             Some(res) => Self::load_font_data(&res.path),
             None => Err(format!("Font '{name}' not found!"))
+        }
+    }
+
+    fn load_font_by_glyph(cache: &FontCache, c: char) -> Result<Vec<u8>, String> {
+        // Font cache unicode range is not implemented yet so this function
+        // is useless
+        unimplemented!();
+
+        match cache.query(&FcPattern {
+            unicode_range: [c as usize, c as usize + 1],
+            ..Default::default()
+        }) {
+            Some(res) => Self::load_font_data(&res.path),
+            None => Err(format!("Font with char '{:?}' not found!", c))
         }
     }
 
