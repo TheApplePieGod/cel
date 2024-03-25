@@ -1,4 +1,5 @@
-use std::{mem::size_of, ptr::{null, null_mut}, rc::Rc, cell::RefCell};
+use std::{borrow::{Borrow, BorrowMut}, cell::RefCell, mem::size_of, ptr::{null, null_mut}, rc::Rc};
+use std::time::{Duration, SystemTime};
 use cel_core::ansi::{CursorStyle, TerminalState};
 use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, glchk};
 
@@ -20,6 +21,7 @@ pub struct Renderer {
     quad_vbo: u32,
     width: u32,
     height: u32,
+    font: Rc<RefCell<Font>>
 }
 
 struct RenderConstants {
@@ -33,7 +35,7 @@ struct RenderConstants {
 }
 
 impl Renderer {
-    pub fn new() -> Self {
+    pub fn new(width: i32, height: i32, default_font: Rc<RefCell<Font>>) -> Self {
         // Generate buffers
         let mut quad_vao: u32 = 0;
         let mut quad_vbo: u32 = 0;
@@ -200,14 +202,18 @@ impl Renderer {
             gl::DeleteShader(bg_frag_shader);
         }
 
+        // Set initial viewport
+        unsafe { gl::Viewport(0, 0, width, height) }
+
         Self {
             msdf_program,
             raster_program,
             bg_program,
             quad_vao,
             quad_vbo,
-            width: 0,
-            height: 0
+            width: width as u32,
+            height: height as u32,
+            font: default_font
         }
     }
 
@@ -217,8 +223,8 @@ impl Renderer {
         self.height = height as u32;
     }
 
-    pub fn compute_max_screen_lines(&self, font: &Font, chars_per_line: u32) -> u32 {
-        let rc = self.compute_render_constants(font, chars_per_line);
+    pub fn compute_max_screen_lines(&self, chars_per_line: u32) -> u32 {
+        let rc = self.compute_render_constants(chars_per_line);
         let lines_per_screen = (2.0 / (rc.line_height * rc.char_size_y_screen)).floor();
 
         lines_per_screen as u32
@@ -227,12 +233,11 @@ impl Renderer {
     /// Returns rendered line count and max lines per screen
     pub fn render(
         &mut self,
-        font: &mut Font,
+        screen_offset: &[f32; 2],
         terminal_state: &TerminalState,
         chars_per_line: u32,
         lines_per_screen: u32,
         line_offset: f32,
-        timestamp_seconds: f64,
         wrap: bool,
         debug_line_number: bool,
         debug_show_cursor: bool
@@ -240,8 +245,12 @@ impl Renderer {
         // Setup render state
         let base_x = 0.0; //0.25;
         let base_y = 0.0;
-        let face_metrics = font.get_face_metrics();
-        let rc = self.compute_render_constants(font, chars_per_line);
+        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
+        let rc = self.compute_render_constants(chars_per_line);
+        let timestamp_seconds = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::new(0, 0))
+            .as_secs_f64();
 
         let mut x = base_x;
         let mut y = base_y;
@@ -380,7 +389,8 @@ impl Renderer {
                     continue;
                 }
 
-                let glyph_metrics = &font.get_glyph_data(match debug_line_number {
+                let mut mut_font = self.font.as_ref().borrow_mut();
+                let glyph_metrics = &mut_font.get_glyph_data(match debug_line_number {
                     true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
                     false => c.elem
                 });
@@ -403,10 +413,12 @@ impl Renderer {
                 x += rc.char_root_size;
             }
         }
+
+        let font = self.font.as_ref().borrow();
     
         let model_mat: [f32; 16] = [
-            rc.char_size_x_screen, 0.0, 0.0, 0.0,
-            0.0, rc.char_size_y_screen, 0.0, 0.0,
+            rc.char_size_x_screen, 0.0, 0.0, screen_offset[0],
+            0.0, rc.char_size_y_screen, 0.0, screen_offset[1],
             0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0
         ];
@@ -520,8 +532,8 @@ impl Renderer {
         can_scroll_down
     }
 
-    fn compute_render_constants(&self, font: &Font, chars_per_line: u32) -> RenderConstants {
-        let face_metrics = font.get_face_metrics();
+    fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
+        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let aspect_ratio = self.width as f32 / self.height as f32;
         let char_root_size = face_metrics.space_size;
         let char_size_x_px = self.width as f32 / chars_per_line as f32 / char_root_size;

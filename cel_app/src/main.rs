@@ -2,6 +2,9 @@ mod app;
 mod app_state;
 mod logging;
 mod window;
+mod layout;
+mod input;
+mod terminal_context;
 
 use crate::{app::App, logging::ConsoleLogger};
 

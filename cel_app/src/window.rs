@@ -1,14 +1,24 @@
-use std::{sync::mpsc, thread};
-use glfw::{Action, Context, Key, fail_on_errors, Modifiers};
+
+use std::borrow::{Borrow, BorrowMut};
+use std::cell::RefCell;
+use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
+
+use cel_renderer::renderer::Renderer;
+use glfw::{Context, fail_on_errors};
+
+use crate::app_state::AppState;
+use crate::layout::Layout;
+use crate::input::Input;
 
 pub struct Window {
     glfw_instance: glfw::Glfw,
-    window: glfw::PWindow,
+    window: Rc<RefCell<glfw::PWindow>>,
+    renderer: Rc<RefCell<Renderer>>,
+    layout: Rc<RefCell<Layout>>,
+    input: Input,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
-    key_states: [bool; 512],
-    input_buffer: Vec<u8>,
-    utf8_buffer: [u8; 8],
-    just_resized: bool
+    background_color: [f32; 3],
 }
 
 impl Window {
@@ -32,181 +42,140 @@ impl Window {
         window.set_char_polling(true);
         window.set_char_mods_polling(true);
         window.set_resizable(true);
-
+        
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
         // Disable vsync to decrease latency
         glfw_instance.set_swap_interval(glfw::SwapInterval::None);
 
+        let initial_size_px = window.get_framebuffer_size();
         Self {
             glfw_instance,
-            window,
+            window: Rc::new(RefCell::new(window)),
+            renderer: Rc::new(RefCell::new(Renderer::new(
+                initial_size_px.0,
+                initial_size_px.1,
+                AppState::current().as_ref().borrow().font.clone()
+            ))),
+            layout: Rc::new(RefCell::new(Layout::new())),
+            input: Input::new(),
             event_receiver,
-            key_states: [false; 512],
-            input_buffer: vec![],
-            utf8_buffer: [0; 8],
-            just_resized: false
+            background_color: [0.0, 0.0, 0.0],
         }
     }
 
-    // https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
-    pub fn poll_events(&mut self) {
-        self.just_resized = false;
+    pub fn update(&mut self) {
+        let renderer_ptr = self.renderer.clone();
+        let layout_ptr = self.layout.clone();
+        let window_ptr = self.window.clone();
+        let clear_color = self.background_color;
+        self.window.as_ref().borrow_mut().set_refresh_callback(move |w| {
+            // Update
+            Self::on_resized_wrapper(
+                w.get_size().into(),
+                w.get_framebuffer_size().into(),
+                renderer_ptr.as_ref().borrow_mut().deref_mut(),
+                layout_ptr.as_ref().borrow_mut().deref_mut()
+            );
+
+            // Render
+            Self::render_wrapper(
+                &clear_color,
+                renderer_ptr.as_ref().borrow_mut().deref_mut(),
+                layout_ptr.as_ref().borrow_mut().deref_mut(),
+                window_ptr.as_ref().borrow_mut().deref_mut()
+            );
+        });
+        self.poll_events();
+
+        self.layout.as_ref().borrow_mut().update(&self.input);
+        self.input.clear();
+    }
+
+    pub fn render(&mut self) {
+        Self::render_wrapper(
+            &self.background_color,
+            self.renderer.as_ref().borrow_mut().deref_mut(),
+            self.layout.as_ref().borrow_mut().deref_mut(),
+            self.window.as_ref().borrow_mut().deref_mut(),
+        );
+    }
+
+    pub fn should_close(&self) -> bool { self.window.as_ref().borrow().should_close() }
+    pub fn get_input(&self) -> &Input { &self.input }
+    pub fn get_width(&self) -> i32 { self.window.as_ref().borrow().get_size().0 }
+    pub fn get_height(&self) -> i32 { self.window.as_ref().borrow().get_size().1 }
+    pub fn get_size(&self) -> [i32; 2] { self.window.as_ref().borrow().get_size().into() }
+    pub fn get_pixel_width(&self) -> i32 { self.window.as_ref().borrow().get_framebuffer_size().0 }
+    pub fn get_pixel_height(&self) -> i32 { self.window.as_ref().borrow().get_framebuffer_size().1 }
+    pub fn get_pixel_size(&self) -> [i32; 2] { self.window.as_ref().borrow().get_framebuffer_size().into() }
+    pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
+
+    fn poll_events(&mut self) {
+        let mut resize = false;
 
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
+            if self.input.handle_window_event(&event) {
+                continue;
+            }
+
             match event {
                 glfw::WindowEvent::Size(_, _) => {
-                    self.just_resized = true;
-                },
-                glfw::WindowEvent::Key(key, _, action, mods) => {
-                    if (key as usize) < self.key_states.len() {
-                        let key_state;
-                        match action {
-                            Action::Press | Action::Repeat => {
-                                key_state = true;
-                                self.input_buffer.extend(
-                                    self.encode_input_key(key, mods)
-                                );
-                            },
-                            Action::Release => key_state = false
-                        };
-                        self.key_states[key as usize] = key_state;
-                    }
-                },
-                glfw::WindowEvent::Char(key) => {
-                    self.input_buffer.extend_from_slice(
-                        key.encode_utf8(&mut self.utf8_buffer).as_bytes()
-                    );
+                    resize = true;
                 },
                 _ => {},
             }
         }
+
+        if resize {
+            Self::on_resized_wrapper(
+                self.get_size(),
+                self.get_pixel_size(),
+                self.renderer.as_ref().borrow_mut().deref_mut(),
+                self.layout.as_ref().borrow_mut().deref_mut()
+            )
+        }
     }
 
-    pub fn begin_frame<'a>(&mut self, color: &[f32; 3]) {
+    fn render_wrapper(
+        clear_color: &[f32; 3],
+        renderer: &mut Renderer,
+        layout: &mut Layout,
+        window: &mut glfw::PWindow
+    ) {
+        Self::begin_frame(clear_color);
+        layout.render(renderer);
+        Self::end_frame(window);
+    }
+
+    fn on_resized_wrapper(
+        new_size: [i32; 2],
+        new_pixel_size: [i32; 2],
+        renderer: &mut Renderer,
+        layout: &mut Layout
+    ) {
+        renderer.update_viewport_size(
+            new_pixel_size[0],
+            new_pixel_size[1],
+        );
+        
+        layout.on_window_resized(new_size);
+    }
+
+    fn begin_frame<'a>(clear_color: &[f32; 3]) {
         unsafe {
-            gl::ClearColor(color[0], color[1], color[2], 0.0);
+            gl::ClearColor(
+                clear_color[0],
+                clear_color[1],
+                clear_color[2],
+                0.0
+            );
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
     }
 
-    pub fn end_frame(&mut self) {
-        self.window.swap_buffers();
-        self.input_buffer.clear();
-    }
-
-    pub fn get_handle(&self) -> &glfw::Window { &self.window }
-    pub fn get_mut_handle(&mut self) -> &mut glfw::Window { &mut self.window }
-    pub fn get_width(&self) -> i32 { self.window.get_size().0 }
-    pub fn get_height(&self) -> i32 { self.window.get_size().1 }
-    pub fn get_pixel_width(&self) -> i32 { self.window.get_framebuffer_size().0 }
-    pub fn get_pixel_height(&self) -> i32 { self.window.get_framebuffer_size().1 }
-    pub fn get_key_pressed(&self, key: Key) -> bool { self.key_states[key as usize] }
-    pub fn is_super_down(&self) -> bool { self.get_key_pressed(Key::LeftSuper) || self.get_key_pressed(Key::RightSuper) }
-    pub fn is_shift_down(&self) -> bool { self.get_key_pressed(Key::LeftShift) || self.get_key_pressed(Key::RightShift) }
-    pub fn is_ctrl_down(&self) -> bool { self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) }
-    pub fn is_alt_down(&self) -> bool { self.get_key_pressed(Key::LeftAlt) || self.get_key_pressed(Key::RightAlt) }
-    pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
-    pub fn was_resized(&self) -> bool { self.just_resized }
-    pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
-
-    fn glfw_key_to_ascii(&self, key: Key) -> Option<u8> {
-        let val = key as i32;
-        if val >= 32 && val <= 126 {
-            Some(val as u8)
-        } else {
-            None
-        }
-    }
-
-    // Convert an ascii character to its relative control character (when ctrl is down)
-    fn ascii_to_control(&self, key: u8) -> u8 {
-        match key {
-            b' '  => 0,
-            b'/'  => 31,
-            b'0'  => 48,
-            b'1'  => 49,
-            b'2'  => 0,
-            b'3'  => 27,
-            b'4'  => 28,
-            b'5'  => 29,
-            b'6'  => 30,
-            b'7'  => 31,
-            b'8'  => 127,
-            b'9'  => 57,
-            b'?'  => 127,
-            b'@'  => 0,
-            b'['  => 27,
-            b'\\' => 28,
-            b']'  => 29,
-            b'^'  => 30,
-            b'_'  => 31,
-            b'~'  => 30,
-            b'A'..=b'Z' => key - 64,
-            _ => key
-        }
-    }
-
-    // https://github.com/kovidgoyal/kitty/blob/master/kitty/key_encoding.c#L148
-    // http://www.leonerd.org.uk/hacks/fixterms/
-    fn encode_input_key(&self, key: Key, mods: Modifiers) -> Vec<u8> {
-        let mut result = vec![];
-
-        // TODO: Keypad keys
-        // TODO: https://stackoverflow.com/questions/12382499/looking-for-altleftarrowkey-solution-in-zsh
-        // TODO: https://github.com/kovidgoyal/kitty/issues/838
-
-        match self.glfw_key_to_ascii(key) {
-            Some(mut k) => { // Printable
-                // Do not handle raw characters since the char callback does this 
-                if !mods.is_empty() && mods != Modifiers::Shift {
-                    if mods.contains(Modifiers::Alt) {
-                        result.push(0x1b);
-                    }
-                    if mods.contains(Modifiers::Control) {
-                        k = self.ascii_to_control(k);
-                    }
-                    result.push(k);
-                }
-            },
-            None => 'handled: { // Function character
-                let esc_char = match key {
-                    Key::Up => b'A',
-                    Key::Down => b'B',
-                    Key::Right => b'C',
-                    Key::Left => b'D',
-                    Key::End => b'F',
-                    Key::Home => b'H',
-                    Key::F1 => b'P',
-                    Key::F2 => b'Q',
-                    Key::F3 => b'R',
-                    Key::F4 => b'S',
-                    _ => 0
-                };
-                if esc_char > 0 {
-                    result.extend_from_slice(&[0x1b, b'O', esc_char]);
-                    break 'handled;
-                }
-
-                let esc_char = match key {
-                    Key::Tab => b'\t',
-                    Key::Enter => b'\r',
-                    Key::Escape => 0x1b,
-                    Key::Backspace => 0x7f, // 0x08
-                    Key::Delete => 0x7f,
-                    _ => 0
-                };
-                if esc_char > 0 {
-                    if mods.contains(Modifiers::Alt) {
-                        result.push(0x1b);
-                    }
-                    result.push(esc_char);
-                    break 'handled;
-                }
-            }
-        }
-
-        result
+    fn end_frame(window: &mut glfw::PWindow) {
+        window.swap_buffers();
     }
 }
