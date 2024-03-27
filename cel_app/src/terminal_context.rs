@@ -42,6 +42,11 @@ impl TerminalContext {
         self.widgets.last_mut().unwrap().push_chars(&output[0]);
 
         if did_split {
+            let widget_len = self.widgets.len();
+            if widget_len > 1 {
+                self.widgets[widget_len - 2].set_expanded(false);
+            }
+
             self.widgets.push(TerminalWidget::new());
             self.widgets.last_mut().unwrap().push_chars(&output[1]);
         }

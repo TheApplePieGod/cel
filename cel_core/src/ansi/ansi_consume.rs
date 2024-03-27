@@ -722,7 +722,7 @@ impl Perform for Performer {
                     state.global_cursor[0] -= 1;
                     if state.screen_cursor[0] > 0 {
                         state.screen_cursor[0] -= 1;
-                    } else {
+                    } else if state.screen_cursor[1] > 0 {
                         state.screen_cursor[0] = self.screen_width - 1;
                         state.screen_cursor[1] -= 1;
                     }

@@ -14,6 +14,9 @@ pub struct Input {
     input_buffer: Vec<u8>,
     utf8_buffer: [u8; 8],
     key_states: [(KeyPressState, u64); 512],
+    mouse_pos: [f32; 2],
+    mouse_delta: [f32; 2],
+    scroll_delta: [f32; 2],
     poll_count: u64
 }
 
@@ -23,17 +26,25 @@ impl Input {
             input_buffer: vec![],
             utf8_buffer: [0; 8],
             key_states: [Default::default(); 512],
+            mouse_pos: [0.0, 0.0],
+            mouse_delta: [0.0, 0.0],
+            scroll_delta: [0.0, 0.0],
             poll_count: 0
         }
     }
 
     pub fn poll_events(&mut self) {
         self.poll_count += 1;
+
+        self.scroll_delta = [0.0, 0.0];
+        self.mouse_delta = [0.0, 0.0];
     }
 
     // Returns true if the event was handled
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
-        match event {
+        let og_mouse_pos = self.mouse_pos;
+
+        let handled = match event {
             glfw::WindowEvent::Key(key, _, action, mods) => {
                 if (*key as usize) < self.key_states.len() {
                     let key_state;
@@ -61,8 +72,26 @@ impl Input {
 
                 true
             },
+            glfw::WindowEvent::CursorPos(x, y) => {
+                self.mouse_pos = [*x as f32, *y as f32];
+
+                true
+            },
+            glfw::WindowEvent::Scroll(x, y) => {
+                self.scroll_delta[0] += *x as f32;
+                self.scroll_delta[1] += *y as f32;
+
+                true
+            },
             _ => false,
-        }
+        };
+
+        self.mouse_delta = [
+            self.mouse_pos[0] - og_mouse_pos[0],
+            self.mouse_pos[1] - og_mouse_pos[1]
+        ];
+
+        handled
     }
 
     pub fn clear(&mut self) {
@@ -95,6 +124,9 @@ impl Input {
     pub fn is_ctrl_down(&self) -> bool { self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) }
     pub fn is_alt_down(&self) -> bool { self.get_key_pressed(Key::LeftAlt) || self.get_key_pressed(Key::RightAlt) }
     pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
+    pub fn get_mouse_pos(&self) -> [f32; 2] { self.mouse_pos }
+    pub fn get_mouse_delta(&self) -> [f32; 2] { self.mouse_delta }
+    pub fn get_scroll_delta(&self) -> [f32; 2] { self.scroll_delta }
 
     fn glfw_key_to_ascii(&self, key: Key) -> Option<u8> {
         let val = key as i32;

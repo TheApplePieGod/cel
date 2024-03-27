@@ -41,6 +41,8 @@ impl Window {
         window.set_key_polling(true);
         window.set_char_polling(true);
         window.set_char_mods_polling(true);
+        window.set_cursor_pos_polling(true);
+        window.set_scroll_polling(true);
         window.set_resizable(true);
         
         gl::load_with(|s| window.get_proc_address(s) as *const _);
@@ -92,6 +94,7 @@ impl Window {
         self.poll_events();
 
         self.layout.as_ref().borrow_mut().update(&self.input);
+
         self.input.clear();
     }
 

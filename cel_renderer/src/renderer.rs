@@ -230,7 +230,7 @@ impl Renderer {
         (lines_per_screen * screen_height) as u32
     }
 
-    /// Returns rendered line count and max lines per screen
+    /// Returns rendered line count
     pub fn render(
         &mut self,
         screen_offset: &[f32; 2],
@@ -241,7 +241,7 @@ impl Renderer {
         wrap: bool,
         debug_line_number: bool,
         debug_show_cursor: bool
-    ) -> bool {
+    ) -> u32 {
         // Setup render state
         let base_x = 0.0; //0.25;
         let base_y = 0.0;
@@ -262,6 +262,7 @@ impl Renderer {
         };
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
+        let mut max_line_count = 0;
         let mut prev_bg_color = terminal_state.background_color;
         let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
         let mut raster_vertices: Vec<Vertex> = vec![];
@@ -282,6 +283,8 @@ impl Renderer {
                 can_scroll_down = false;
                 continue;
             }
+
+            max_line_count = rendered_line_count;
 
             // Render cursor
             if should_render_cursor {
@@ -323,6 +326,7 @@ impl Renderer {
 
             for char_idx in start_char..line.len() {
                 if rendered_line_count > lines_per_screen {
+                    max_line_count = lines_per_screen;
                     break 'outer;
                 }
 
@@ -529,7 +533,7 @@ impl Renderer {
             gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
         }
 
-        can_scroll_down
+        max_line_count
     }
 
     pub fn get_pixel_width(&self) -> u32 { self.width }

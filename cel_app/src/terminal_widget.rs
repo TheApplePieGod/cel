@@ -9,6 +9,9 @@ pub struct TerminalWidget {
     line_offset: f32,
     chars_per_line: u32,
     lines_per_screen: u32,
+    last_computed_height: f32,
+
+    expanded: bool,
     wrap: bool,
 
     debug_line_number: bool,
@@ -23,6 +26,9 @@ impl TerminalWidget {
             line_offset: 0.0,
             chars_per_line: 180,
             lines_per_screen: 1,
+            last_computed_height: 0.0,
+
+            expanded: true,
             wrap: true,
 
             debug_line_number: false,
@@ -54,7 +60,7 @@ impl TerminalWidget {
             self.ansi_handler.resize(self.chars_per_line, self.lines_per_screen);
         }
 
-        renderer.render(
+        let rendered_lines = renderer.render(
             &position.offset,
             &self.ansi_handler.get_terminal_state(),
             max_chars,
@@ -64,9 +70,14 @@ impl TerminalWidget {
             self.debug_line_number,
             self.debug_show_cursor
         );
+
+        self.last_computed_height = rendered_lines as f32 / max_lines as f32 * position.max_size[1];
+
+        //log::warn!("LCH: {}, REN {}, MAX {}", self.last_computed_height, rendered_lines, max_lines);
     }
 
-    pub fn get_terminal_size(&self) -> [u32; 2] {
-        [self.chars_per_line, self.lines_per_screen]
-    }
+    pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
+    pub fn get_expanded(&self) -> bool { self.expanded }
+    pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
+    pub fn get_terminal_size(&self) -> [u32; 2] { [self.chars_per_line, self.lines_per_screen] }
 }

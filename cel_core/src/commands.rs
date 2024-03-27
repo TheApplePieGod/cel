@@ -52,11 +52,9 @@ impl Commands {
             //cmd.args(["-c", command]);
             //cmd.args(["-is"]);
             //cmd.args(["-i", "-c", "{}; exec {} -i"]);
-            /*
             cmd.args([
                 "+o", "promptsp",
             ]);
-            */
         }
         cmd.get_argv_mut()[0] = shell.into();
         cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
