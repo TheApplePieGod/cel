@@ -45,7 +45,12 @@ impl TerminalWidget {
         self.ansi_handler.handle_sequence_bytes(chars, false);
     }
 
-    pub fn render(&mut self, renderer: &mut Renderer, position: &LayoutPosition) {
+    pub fn render(
+        &mut self,
+        renderer: &mut Renderer,
+        position: &LayoutPosition,
+        bg_color: Option<[f32; 3]>,
+    ) {
         let width_px = renderer.get_pixel_width() as f32 * position.max_size[0];
         let pixel_to_char_ratio = 18;
         let max_chars = width_px as u32 / pixel_to_char_ratio;
@@ -60,7 +65,13 @@ impl TerminalWidget {
             self.ansi_handler.resize(self.chars_per_line, self.lines_per_screen);
         }
 
-        let rendered_lines = renderer.render(
+        let bg_color = match bg_color {
+            Some(color) => color,
+            None => [0.0, 0.0, 0.0]
+        };
+        self.ansi_handler.set_terminal_color(&bg_color);
+
+        let rendered_lines = renderer.render_terminal(
             &position.offset,
             &self.ansi_handler.get_terminal_state(),
             max_chars,

@@ -50,16 +50,21 @@ impl Window {
         // Disable vsync to decrease latency
         glfw_instance.set_swap_interval(glfw::SwapInterval::None);
 
-        let initial_size_px = window.get_framebuffer_size();
+        let scale = window.get_content_scale();
+        let initial_size_px = window.get_size();
         Self {
             glfw_instance,
             window: Rc::new(RefCell::new(window)),
             renderer: Rc::new(RefCell::new(Renderer::new(
                 initial_size_px.0,
                 initial_size_px.1,
+                scale.into(),
                 AppState::current().as_ref().borrow().font.clone()
             ))),
-            layout: Rc::new(RefCell::new(Layout::new())),
+            layout: Rc::new(RefCell::new(Layout::new(
+                initial_size_px.0,
+                initial_size_px.1
+            ))),
             input: Input::new(),
             event_receiver,
             background_color: [0.0, 0.0, 0.0],
@@ -76,7 +81,8 @@ impl Window {
             Self::on_resized_wrapper(
                 w.get_size().into(),
                 w.get_framebuffer_size().into(),
-                renderer_ptr.as_ref().borrow_mut().deref_mut()
+                renderer_ptr.as_ref().borrow_mut().deref_mut(),
+                layout_ptr.as_ref().borrow_mut().deref_mut()
             );
 
             // Glitchy
@@ -140,7 +146,8 @@ impl Window {
             Self::on_resized_wrapper(
                 self.get_size(),
                 self.get_pixel_size(),
-                self.renderer.as_ref().borrow_mut().deref_mut()
+                self.renderer.as_ref().borrow_mut().deref_mut(),
+                self.layout.as_ref().borrow_mut().deref_mut()
             )
         }
     }
@@ -159,12 +166,15 @@ impl Window {
     fn on_resized_wrapper(
         new_size: [i32; 2],
         new_pixel_size: [i32; 2],
-        renderer: &mut Renderer
+        renderer: &mut Renderer,
+        layout: &mut Layout
     ) {
         renderer.update_viewport_size(
             new_pixel_size[0],
             new_pixel_size[1],
         );
+
+        layout.on_window_resized(new_size);
     }
 
     fn begin_frame<'a>(clear_color: &[f32; 3]) {

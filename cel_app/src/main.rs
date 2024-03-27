@@ -6,6 +6,7 @@ mod layout;
 mod input;
 mod terminal_context;
 mod terminal_widget;
+mod button;
 
 use crate::{app::App, logging::ConsoleLogger};
 

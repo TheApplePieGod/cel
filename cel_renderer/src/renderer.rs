@@ -21,6 +21,7 @@ pub struct Renderer {
     quad_vbo: u32,
     width: u32,
     height: u32,
+    scale: [f32; 2],
     font: Rc<RefCell<Font>>
 }
 
@@ -35,7 +36,12 @@ struct RenderConstants {
 }
 
 impl Renderer {
-    pub fn new(width: i32, height: i32, default_font: Rc<RefCell<Font>>) -> Self {
+    pub fn new(
+        width: i32,
+        height: i32,
+        scale: [f32; 2],
+        default_font: Rc<RefCell<Font>>
+    ) -> Self {
         // Generate buffers
         let mut quad_vao: u32 = 0;
         let mut quad_vbo: u32 = 0;
@@ -96,8 +102,8 @@ impl Renderer {
                 vec2 g = unpackHalf2x16(inColor.g);
                 vec2 b = unpackHalf2x16(inColor.b);
 
-                gl_Position = model * vec4(pos.x, pos.y, 0.0, 1.0)
-                    + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
+                gl_Position = model * vec4(pos.x, -pos.y, 0.0, 1.0)
+                    + vec4(-1.f, 0.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = vec3(r.x, g.x, b.x);
                 bgColor = vec3(r.y, g.y, b.y);
@@ -202,10 +208,7 @@ impl Renderer {
             gl::DeleteShader(bg_frag_shader);
         }
 
-        // Set initial viewport
-        unsafe { gl::Viewport(0, 0, width, height) }
-
-        Self {
+        let mut obj = Self {
             msdf_program,
             raster_program,
             bg_program,
@@ -213,25 +216,38 @@ impl Renderer {
             quad_vbo,
             width: width as u32,
             height: height as u32,
+            scale,
             font: default_font
-        }
+        };
+
+        // Set initial viewport
+        obj.update_viewport_size(width, height);
+
+        obj
+    }
+
+    pub fn update_scale(&mut self, scale: [f32; 2]) {
+        self.scale = scale;
+        self.update_viewport_size(self.width as i32, self.height as i32);
     }
 
     pub fn update_viewport_size(&mut self, width: i32, height: i32) {
-        unsafe { gl::Viewport(0, 0, width, height) }
+        let scaled_width = (width as f32 * self.scale[0]) as i32;
+        let scaled_height = (height as f32 * self.scale[1]) as i32;
+        unsafe { gl::Viewport(0, 0, scaled_width, scaled_height) }
         self.width = width as u32;
         self.height = height as u32;
     }
 
     pub fn compute_max_lines(&self, chars_per_line: u32, screen_height: f32) -> u32 {
         let rc = self.compute_render_constants(chars_per_line);
-        let lines_per_screen = (2.0 / (rc.line_height * rc.char_size_y_screen)).floor();
+        let lines_per_screen = (1.0 / (rc.line_height * rc.char_size_y_screen)).floor();
 
         (lines_per_screen * screen_height) as u32
     }
 
     /// Returns rendered line count
-    pub fn render(
+    pub fn render_terminal(
         &mut self,
         screen_offset: &[f32; 2],
         terminal_state: &TerminalState,
@@ -253,7 +269,7 @@ impl Renderer {
             .as_secs_f64();
 
         let mut x = base_x;
-        let mut y = base_y;
+        let mut y = base_y - rc.line_height;
         let mut should_render_cursor = match debug_show_cursor {
             true => true,
             false => terminal_state.cursor_state.visible && (
@@ -277,7 +293,7 @@ impl Renderer {
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
             rendered_line_count += 1;
             x = base_x;
-            y -= rc.line_height;
+            y += rc.line_height;
 
             if line_idx >= terminal_state.screen_buffer.len() {
                 can_scroll_down = false;
@@ -302,7 +318,7 @@ impl Renderer {
                     };
                     let pos_min = [
                         base_x + (cursor[0] % chars_per_line as usize) as f32 * rc.char_root_size,
-                        y - rc.line_height * (cursor[0] / chars_per_line as usize) as f32
+                        y + rc.line_height * (cursor[0] / chars_per_line as usize) as f32
                     ];
                     Self::push_quad(
                         &[0.0, 0.0, 0.0],
@@ -333,9 +349,10 @@ impl Renderer {
                 let max_x = rc.char_root_size * chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
+                    max_line_count += 1;
                     rendered_line_count += 1;
                     x = base_x;
-                    y -= rc.line_height;
+                    y += rc.line_height;
                 }
 
                 let c = line[char_idx];
@@ -382,8 +399,8 @@ impl Renderer {
                         bg_color,
                         &[0.0, 0.0],
                         &[0.0, 0.0],
-                        &[base_x, y - rc.line_height * lines_per_screen as f32],
-                        &[max_x, y],
+                        &[base_x, y + rc.line_height],
+                        &[max_x, y + rc.line_height * lines_per_screen as f32],
                         &mut bg_vertices
                     );
                 }
@@ -393,158 +410,123 @@ impl Renderer {
                     continue;
                 }
 
-                let mut mut_font = self.font.as_ref().borrow_mut();
-                let glyph_metrics = &mut_font.get_glyph_data(match debug_line_number {
+                let char_to_draw = match debug_line_number {
                     true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
                     false => c.elem
-                });
-                let glyph_bound = &glyph_metrics.glyph_bound;
-                let atlas_uv = &glyph_metrics.atlas_uv;
-
-                Self::push_quad(
+                };
+                self.push_char_quad(
+                    char_to_draw,
+                    &face_metrics,
                     fg_color,
                     bg_color,
-                    &[atlas_uv.left, atlas_uv.top],
-                    &[atlas_uv.right, atlas_uv.bottom],
-                    &[x + glyph_bound.left, y + glyph_bound.bottom + face_metrics.descender],
-                    &[x + glyph_bound.right, y + glyph_bound.top + face_metrics.descender],
-                    match glyph_metrics.render_type {
-                        RenderType::MSDF => &mut msdf_vertices,
-                        RenderType::RASTER => &mut raster_vertices
-                    }
+                    &[x, y],
+                    &mut msdf_vertices,
+                    &mut raster_vertices
                 );
 
                 x += rc.char_root_size;
             }
         }
 
-        let font = self.font.as_ref().borrow();
-    
-        let model_mat: [f32; 16] = [
-            rc.char_size_x_screen, 0.0, 0.0, 0.0,
-            0.0, rc.char_size_y_screen, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            screen_offset[0] * 2.0, screen_offset[1] * 2.0, 0.0, 1.0
-        ];
-
-        unsafe {
-            gl::Enable(gl::CULL_FACE);
-            gl::CullFace(gl::BACK);
-        }
-
-        // Render background quads
-        unsafe {
-            let vertices = &bg_vertices;
-
-            // Bind program data
-            gl::UseProgram(self.bg_program);
-            gl::BindVertexArray(self.quad_vao);
-
-            // Update vertex data
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
-            gl::BufferSubData(
-                gl::ARRAY_BUFFER,
-                0,
-                (size_of::<Vertex>() * vertices.len()) as isize,
-                vertices.as_ptr() as _
-            );
-
-            // Set global model matrix (column major)
-            gl::UniformMatrix4fv(gl::GetUniformLocation(
-                self.bg_program,
-                "model\0".as_ptr() as *const i8
-            ), 1, gl::FALSE, model_mat.as_ptr());
-
-            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
-        }
-
-        // Render MSDF
-        unsafe {
-            let vertices = &msdf_vertices;
-
-            // Bind program data
-            gl::UseProgram(self.msdf_program);
-            gl::BindVertexArray(self.quad_vao);
-
-            // Update vertex data
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
-            gl::BufferSubData(
-                gl::ARRAY_BUFFER,
-                0,
-                (size_of::<Vertex>() * vertices.len()) as isize,
-                vertices.as_ptr() as _
-            );
-
-            // Bind atlas tex
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
-            gl::Uniform1i(gl::GetUniformLocation(
-                self.msdf_program,
-                b"atlasTex\0".as_ptr() as _
-            ), 0);
-
-            // Set pixel range
-            let pixel_range = rc.char_size_x_px / font.get_glyph_size() as f32 * font.get_pixel_range();
-            gl::Uniform1f(gl::GetUniformLocation(
-                self.msdf_program,
-                b"pixelRange\0".as_ptr() as _
-            ), pixel_range);
-
-            // Set global model matrix (column major)
-            gl::UniformMatrix4fv(gl::GetUniformLocation(
-                self.msdf_program,
-                "model\0".as_ptr() as *const i8
-            ), 1, gl::FALSE, model_mat.as_ptr());
-
-            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
-        }
-
-        // Render raster
-        unsafe {
-            let vertices = &raster_vertices;
-
-            // Bind program data
-            gl::UseProgram(self.raster_program);
-            gl::BindVertexArray(self.quad_vao);
-
-            // Update vertex data
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
-            gl::BufferSubData(
-                gl::ARRAY_BUFFER,
-                0,
-                (size_of::<Vertex>() * vertices.len()) as isize,
-                vertices.as_ptr() as _
-            );
-
-            // Bind atlas tex
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, font.get_atlas_tex().get_id());
-            gl::Uniform1i(gl::GetUniformLocation(
-                self.raster_program,
-                b"atlasTex\0".as_ptr() as _
-            ), 0);
-
-            // Set global model matrix (column major)
-            gl::UniformMatrix4fv(gl::GetUniformLocation(
-                self.raster_program,
-                "model\0".as_ptr() as *const i8
-            ), 1, gl::FALSE, model_mat.as_ptr());
-
-            gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32);
-        }
+        self.draw_text_vertices(
+            &rc,
+            &screen_offset,
+            &bg_vertices,
+            &msdf_vertices,
+            &raster_vertices
+        );
 
         max_line_count
     }
 
+    pub fn draw_quad(
+        &self,
+        screen_offset: &[f32; 2],
+        bg_size_screen: &[f32; 2],
+        bg_color: &[f32; 3],
+    ) {
+        let mut bg_vertices: Vec<Vertex> = vec![];
+
+        // Draw background, separately from text
+        let bg_model_mat: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            screen_offset[0], screen_offset[1], 0.0, 1.0
+        ];
+        Self::push_quad(
+            &[0.0, 0.0, 0.0],
+            bg_color,
+            &[0.0, 0.0],
+            &[0.0, 0.0],
+            &[0.0, 0.0],
+            &bg_size_screen,
+            &mut bg_vertices
+        );
+        self.draw_background_vertices(&bg_vertices, &bg_model_mat);
+    }
+
+    // Origin top left to bottom right
+    pub fn draw_text(
+        &mut self,
+        screen_offset: &[f32; 2],
+        bg_size_screen: &[f32; 2],
+        fg_color: &[f32; 3],
+        bg_color: &[f32; 3],
+        text: &str
+    ) {
+        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
+        let rc = self.compute_render_constants(150);
+
+        let mut x = 0.0;
+        let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
+        let mut raster_vertices: Vec<Vertex> = vec![];
+
+        for c in text.chars() {
+            if c.is_whitespace() || c == '\0' {
+                x += rc.char_root_size;
+                continue;
+            }
+
+            self.push_char_quad(
+                c,
+                &face_metrics,
+                fg_color,
+                bg_color,
+                &[x, -rc.line_height],
+                &mut msdf_vertices,
+                &mut raster_vertices
+            );
+
+            x += rc.char_root_size;
+        }
+
+        self.draw_quad(screen_offset, bg_size_screen, bg_color);
+
+        // Draw text, centered on background
+        let centered_offset = [
+            screen_offset[0] + (bg_size_screen[0] - x * rc.char_size_x_screen * 0.5) * 0.5,
+            screen_offset[1] - (bg_size_screen[1] - rc.line_height * rc.char_size_y_screen * 0.5) * 0.5,
+        ];
+        self.draw_text_vertices(
+            &rc,
+            &centered_offset,
+            &vec![],
+            &msdf_vertices,
+            &raster_vertices
+        );
+    }
+
     pub fn get_pixel_width(&self) -> u32 { self.width }
     pub fn get_pixel_height(&self) -> u32 { self.height }
+    pub fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
 
     fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let aspect_ratio = self.width as f32 / self.height as f32;
         let char_root_size = face_metrics.space_size;
         let char_size_x_px = self.width as f32 / chars_per_line as f32 / char_root_size;
-        let char_size_x_screen = 2.0 * (char_size_x_px / self.width as f32);
+        let char_size_x_screen = char_size_x_px / self.width as f32;
 
         RenderConstants {
             aspect_ratio,
@@ -557,6 +539,7 @@ impl Renderer {
         }
     }
 
+    // Min: TL, max: BR
     fn push_quad(
         fg_color: &[f32; 3],
         bg_color: &[f32; 3],
@@ -573,22 +556,22 @@ impl Renderer {
         ];
 
         let tr = Vertex {
-            position: Util::pack_floats(pos_max[0], pos_max[1]),
+            position: Util::pack_floats(pos_max[0], pos_min[1]),
             tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
             color
         };
         let br = Vertex {
-            position: Util::pack_floats(pos_max[0], pos_min[1]),
+            position: Util::pack_floats(pos_max[0], pos_max[1]),
             tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
             color
         };
         let bl = Vertex {
-            position: Util::pack_floats(pos_min[0], pos_min[1]),
+            position: Util::pack_floats(pos_min[0], pos_max[1]),
             tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
             color
         };
         let tl = Vertex {
-            position: Util::pack_floats(pos_min[0], pos_max[1]),
+            position: Util::pack_floats(pos_min[0], pos_min[1]),
             tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
             color
         };
@@ -599,6 +582,211 @@ impl Renderer {
         vertices.push(tl);
         vertices.push(bl);
         vertices.push(br);
+    }
+
+    fn push_char_quad(
+        &mut self,
+        c: char,
+        metrics: &FaceMetrics,
+        fg_color: &[f32; 3],
+        bg_color: &[f32; 3],
+        pos: &[f32; 2], // In character space
+        msdf_vertices: &mut Vec<Vertex>,
+        raster_vertices: &mut Vec<Vertex>
+    ) {
+        let mut mut_font = self.font.as_ref().borrow_mut();
+        let glyph_metrics = &mut_font.get_glyph_data(c);
+        let glyph_bound = &glyph_metrics.glyph_bound;
+        let atlas_uv = &glyph_metrics.atlas_uv;
+
+        Self::push_quad(
+            fg_color,
+            bg_color,
+            &[atlas_uv.left, atlas_uv.top],
+            &[atlas_uv.right, atlas_uv.bottom],
+            &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
+            &[pos[0] + glyph_bound.right, pos[1] + 1.0 - glyph_bound.bottom],
+            match glyph_metrics.render_type {
+                RenderType::MSDF => msdf_vertices,
+                RenderType::RASTER => raster_vertices
+            }
+        );
+    }
+
+    fn compute_pixel_range(&self, size_px: f32) -> f32 {
+        let font = self.font.as_ref().borrow();
+        size_px / font.get_glyph_size() as f32 * font.get_pixel_range()
+    }
+
+    fn draw_text_vertices(
+        &self,
+        rc: &RenderConstants,
+        screen_offset: &[f32; 2],
+        bg_vertices: &Vec<Vertex>,
+        msdf_vertices: &Vec<Vertex>,
+        raster_vertices: &Vec<Vertex>,
+    ) {
+        let pixel_range = self.compute_pixel_range(rc.char_size_x_px);
+        let model_mat: [f32; 16] = [
+            rc.char_size_x_screen, 0.0, 0.0, 0.0,
+            0.0, rc.char_size_y_screen, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            screen_offset[0], screen_offset[1], 0.0, 1.0
+        ];
+
+        self.enable_backface_culling();
+        if !bg_vertices.is_empty() {
+            self.draw_background_vertices(&bg_vertices, &model_mat);
+        }
+        if !msdf_vertices.is_empty() {
+            self.draw_msdf_vertices(&msdf_vertices, &model_mat, pixel_range);
+        }
+        if !raster_vertices.is_empty() {
+            self.draw_raster_vertices(&raster_vertices, &model_mat);
+        }
+    }
+
+    fn draw_msdf_vertices(
+        &self,
+        vertices: &[Vertex],
+        model: &[f32; 16],
+        pixel_range: f32
+    ) {
+        let font = self.font.as_ref().borrow();
+
+        // Bind program data
+        unsafe {
+            gl::UseProgram(self.msdf_program);
+            gl::BindVertexArray(self.quad_vao);
+        }
+
+        // Update vertex data
+        self.update_buffer_data(self.quad_vbo, gl::ARRAY_BUFFER, vertices);
+
+        // Bind atlas tex
+        self.bind_texture(self.msdf_program, font.get_atlas_tex().get_id(), 0, "atlasTex");
+
+        // Set pixel range
+        unsafe {
+            gl::Uniform1f(self.get_uniform_location(self.msdf_program, "pixelRange"), pixel_range);
+        }
+
+        // Set global model matrix (column major)
+        unsafe {
+            // Flip translation y
+            let mut transformed = model.clone();
+            transformed[13] *= -1.0;
+            gl::UniformMatrix4fv(
+                self.get_uniform_location(self.msdf_program, "model"),
+                1, gl::FALSE, transformed.as_ptr()
+            );
+        }
+
+        self.draw(vertices);
+    }
+
+    fn draw_raster_vertices(&self, vertices: &[Vertex], model: &[f32; 16]) {
+        let font = self.font.as_ref().borrow();
+
+        // Bind program data
+        unsafe {
+            gl::UseProgram(self.raster_program);
+            gl::BindVertexArray(self.quad_vao);
+        }
+
+        // Update vertex data
+        self.update_buffer_data(self.quad_vbo, gl::ARRAY_BUFFER, vertices);
+
+        // Bind atlas tex
+        self.bind_texture(self.raster_program, font.get_atlas_tex().get_id(), 0, "atlasTex");
+
+        // Set global model matrix (column major)
+        unsafe {
+            // Flip translation y
+            let mut transformed = model.clone();
+            transformed[13] *= -1.0;
+            gl::UniformMatrix4fv(
+                self.get_uniform_location(self.raster_program, "model"),
+                1, gl::FALSE, transformed.as_ptr()
+            );
+        }
+
+        self.draw(vertices);
+    }
+
+    fn draw_background_vertices(&self, vertices: &[Vertex], model: &[f32; 16]) {
+        // Bind program data
+        unsafe {
+            gl::UseProgram(self.bg_program);
+            gl::BindVertexArray(self.quad_vao);
+        }
+
+        // Update vertex data
+        self.update_buffer_data(self.quad_vbo, gl::ARRAY_BUFFER, vertices);
+
+        // Set global model matrix (column major)
+        unsafe {
+            // Flip translation y
+            let mut transformed = model.clone();
+            transformed[13] *= -1.0;
+            gl::UniformMatrix4fv(
+                self.get_uniform_location(self.bg_program, "model"),
+                1, gl::FALSE, transformed.as_ptr()
+            );
+        }
+
+        self.draw(vertices);
+    }
+
+    fn enable_backface_culling(&self) {
+        unsafe {
+            gl::Enable(gl::CULL_FACE);
+            gl::CullFace(gl::BACK);
+        }
+    }
+
+    fn draw<T>(&self, vertices: &[T]) {
+        unsafe { gl::DrawArrays(gl::TRIANGLES, 0, vertices.len() as i32) }
+    }
+
+    fn bind_buffer(&self, buffer_id: u32, buffer_type: gl::types::GLenum) {
+        unsafe { gl::BindBuffer(buffer_type, buffer_id) }
+    }
+
+    fn update_buffer_data<T>(
+        &self,
+        buffer_id: u32,
+        buffer_type: gl::types::GLenum,
+        data: &[T]
+    ) {
+        self.bind_buffer(buffer_id, buffer_type);
+        unsafe {
+            gl::BufferSubData(
+                buffer_type, 0,
+                (size_of::<T>() * data.len()) as isize,
+                data.as_ptr() as _
+            );
+        }
+        self.bind_buffer(0, buffer_type);
+    }
+
+    fn get_uniform_location(&self, program_id: u32, name: &str) -> i32 {
+        let terminated_string = format!("{name}\0");
+        unsafe {
+            gl::GetUniformLocation(
+                program_id,
+                terminated_string.as_ptr() as _
+            )
+        }
+    }
+
+    fn bind_texture(&self, program_id: u32, tex_id: u32, tex_idx: u32, uniform_name: &str) {
+        let uniform_location = self.get_uniform_location(program_id, uniform_name);
+        unsafe {
+            gl::ActiveTexture(gl::TEXTURE0 + tex_idx);
+            gl::BindTexture(gl::TEXTURE_2D, tex_id);
+            gl::Uniform1i(uniform_location, tex_idx as i32);
+        }
     }
 
     fn compile_shader(shader_type: u32, source: &[u8]) -> Result<u32, String> {

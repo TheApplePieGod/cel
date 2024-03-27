@@ -20,10 +20,6 @@ impl TerminalContext {
         }
     }
 
-    pub fn send_input(&mut self, slice: &[u8]) {
-        self.input_buffer.extend_from_slice(slice);
-    }
-
     pub fn update(&mut self, input: &Input) {
         self.handle_user_io(input);
         self.handle_process_io();
