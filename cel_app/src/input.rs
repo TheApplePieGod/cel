@@ -27,10 +27,12 @@ impl Input {
         }
     }
 
+    pub fn poll_events(&mut self) {
+        self.poll_count += 1;
+    }
+
     // Returns true if the event was handled
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
-        self.poll_count += 1;
-
         match event {
             glfw::WindowEvent::Key(key, _, action, mods) => {
                 if (*key as usize) < self.key_states.len() {

@@ -96,7 +96,7 @@ impl Renderer {
                 vec2 g = unpackHalf2x16(inColor.g);
                 vec2 b = unpackHalf2x16(inColor.b);
 
-                gl_Position = model * vec4(pos, 0.0, 1.0)
+                gl_Position = model * vec4(pos.x, pos.y, 0.0, 1.0)
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = vec3(r.x, g.x, b.x);
@@ -223,11 +223,11 @@ impl Renderer {
         self.height = height as u32;
     }
 
-    pub fn compute_max_screen_lines(&self, chars_per_line: u32) -> u32 {
+    pub fn compute_max_lines(&self, chars_per_line: u32, screen_height: f32) -> u32 {
         let rc = self.compute_render_constants(chars_per_line);
         let lines_per_screen = (2.0 / (rc.line_height * rc.char_size_y_screen)).floor();
 
-        lines_per_screen as u32
+        (lines_per_screen * screen_height) as u32
     }
 
     /// Returns rendered line count and max lines per screen
@@ -417,10 +417,10 @@ impl Renderer {
         let font = self.font.as_ref().borrow();
     
         let model_mat: [f32; 16] = [
-            rc.char_size_x_screen, 0.0, 0.0, screen_offset[0],
-            0.0, rc.char_size_y_screen, 0.0, screen_offset[1],
+            rc.char_size_x_screen, 0.0, 0.0, 0.0,
+            0.0, rc.char_size_y_screen, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0
+            screen_offset[0] * 2.0, screen_offset[1] * 2.0, 0.0, 1.0
         ];
 
         unsafe {
@@ -531,6 +531,9 @@ impl Renderer {
 
         can_scroll_down
     }
+
+    pub fn get_pixel_width(&self) -> u32 { self.width }
+    pub fn get_pixel_height(&self) -> u32 { self.height }
 
     fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();

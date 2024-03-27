@@ -11,6 +11,10 @@ impl AnsiHandler {
         }
     }
 
+    pub fn handle_byte(&mut self, byte: u8) {
+        self.state_machine.advance(&mut self.performer, byte);
+    }
+
     pub fn handle_sequence_bytes(
         &mut self,
         seq: &[u8],
@@ -348,7 +352,7 @@ impl Performer {
                 let buffer_lines = buffer[cursor[1]].len() / (self.screen_width + 1);
                 let cursor_lines = cursor[0] / self.screen_width;
 
-                (buffer_lines - cursor_lines) as u32
+                (buffer_lines - cursor_lines.min(buffer_lines)) as u32
             }
         }
     }

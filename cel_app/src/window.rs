@@ -74,9 +74,12 @@ impl Window {
             Self::on_resized_wrapper(
                 w.get_size().into(),
                 w.get_framebuffer_size().into(),
-                renderer_ptr.as_ref().borrow_mut().deref_mut(),
-                layout_ptr.as_ref().borrow_mut().deref_mut()
+                renderer_ptr.as_ref().borrow_mut().deref_mut()
             );
+
+            // Glitchy
+            //let dummy_input = Input::new();
+            //layout_ptr.as_ref().borrow_mut().update(&dummy_input);
 
             // Render
             Self::render_wrapper(
@@ -114,6 +117,8 @@ impl Window {
     fn poll_events(&mut self) {
         let mut resize = false;
 
+        self.input.poll_events();
+
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             if self.input.handle_window_event(&event) {
@@ -132,8 +137,7 @@ impl Window {
             Self::on_resized_wrapper(
                 self.get_size(),
                 self.get_pixel_size(),
-                self.renderer.as_ref().borrow_mut().deref_mut(),
-                self.layout.as_ref().borrow_mut().deref_mut()
+                self.renderer.as_ref().borrow_mut().deref_mut()
             )
         }
     }
@@ -152,15 +156,12 @@ impl Window {
     fn on_resized_wrapper(
         new_size: [i32; 2],
         new_pixel_size: [i32; 2],
-        renderer: &mut Renderer,
-        layout: &mut Layout
+        renderer: &mut Renderer
     ) {
         renderer.update_viewport_size(
             new_pixel_size[0],
             new_pixel_size[1],
         );
-        
-        layout.on_window_resized(new_size);
     }
 
     fn begin_frame<'a>(clear_color: &[f32; 3]) {
