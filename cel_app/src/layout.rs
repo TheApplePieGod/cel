@@ -55,7 +55,7 @@ impl Layout {
                 [1.0 - button_size[0], local_offset]
             );
             let hovered = button.is_hovered(input);
-            //log::warn!("{}", hovered);
+            log::warn!("{}", hovered);
         });
 
         //let speed_factor = 1.0;
@@ -110,7 +110,7 @@ impl Layout {
                 button_size,
                 [1.0 - button_size[0], local_offset]
             );
-            //button.render(renderer, "✘")
+            button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
         });
 
         // Lock scrolling to the last widget

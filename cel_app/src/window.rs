@@ -43,6 +43,7 @@ impl Window {
         window.set_char_mods_polling(true);
         window.set_cursor_pos_polling(true);
         window.set_scroll_polling(true);
+        window.set_content_scale_polling(true);
         window.set_resizable(true);
         
         gl::load_with(|s| window.get_proc_address(s) as *const _);
@@ -80,7 +81,6 @@ impl Window {
             // Update
             Self::on_resized_wrapper(
                 w.get_size().into(),
-                w.get_framebuffer_size().into(),
                 renderer_ptr.as_ref().borrow_mut().deref_mut(),
                 layout_ptr.as_ref().borrow_mut().deref_mut()
             );
@@ -121,6 +121,7 @@ impl Window {
     pub fn get_pixel_width(&self) -> i32 { self.window.as_ref().borrow().get_framebuffer_size().0 }
     pub fn get_pixel_height(&self) -> i32 { self.window.as_ref().borrow().get_framebuffer_size().1 }
     pub fn get_pixel_size(&self) -> [i32; 2] { self.window.as_ref().borrow().get_framebuffer_size().into() }
+    pub fn get_scale(&self) -> [f32; 2] { self.window.as_ref().borrow().get_content_scale().into() }
     pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
 
     fn poll_events(&mut self) {
@@ -138,6 +139,9 @@ impl Window {
                 glfw::WindowEvent::Size(_, _) => {
                     resize = true;
                 },
+                glfw::WindowEvent::ContentScale(_, _) => {
+                    self.renderer.as_ref().borrow_mut().update_scale(self.get_scale());
+                },
                 _ => {},
             }
         }
@@ -145,7 +149,6 @@ impl Window {
         if resize {
             Self::on_resized_wrapper(
                 self.get_size(),
-                self.get_pixel_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
                 self.layout.as_ref().borrow_mut().deref_mut()
             )
@@ -165,15 +168,10 @@ impl Window {
 
     fn on_resized_wrapper(
         new_size: [i32; 2],
-        new_pixel_size: [i32; 2],
         renderer: &mut Renderer,
         layout: &mut Layout
     ) {
-        renderer.update_viewport_size(
-            new_pixel_size[0],
-            new_pixel_size[1],
-        );
-
+        renderer.update_viewport_size(new_size[0], new_size[1]);
         layout.on_window_resized(new_size);
     }
 

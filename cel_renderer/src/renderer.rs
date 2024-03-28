@@ -84,6 +84,7 @@ impl Renderer {
             out vec3 bgColor;
 
             uniform mat4 model;
+            uniform vec2 scale;
 
             uint half2float(uint h) {
                 return ((h & uint(0x8000)) << uint(16)) | ((( h & uint(0x7c00)) + uint(0x1c000)) << uint(13)) | ((h & uint(0x03ff)) << uint(13));
@@ -102,8 +103,15 @@ impl Renderer {
                 vec2 g = unpackHalf2x16(inColor.g);
                 vec2 b = unpackHalf2x16(inColor.b);
 
-                gl_Position = model * vec4(pos.x, -pos.y, 0.0, 1.0)
-                    + vec4(-1.f, 0.f, 0.f, 0.f); // Move origin to top left 
+                mat4 scalingMat = mat4(
+                    scale[0], 0.0, 0.0, 0.0,
+                    0.0, -scale[1], 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0
+                );
+
+                gl_Position = scalingMat * model * vec4(pos, 0.0, 1.0)
+                    + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = vec3(r.x, g.x, b.x);
                 bgColor = vec3(r.y, g.y, b.y);
@@ -493,7 +501,7 @@ impl Renderer {
                 &face_metrics,
                 fg_color,
                 bg_color,
-                &[x, -rc.line_height],
+                &[x, 0.0],
                 &mut msdf_vertices,
                 &mut raster_vertices
             );
@@ -505,8 +513,8 @@ impl Renderer {
 
         // Draw text, centered on background
         let centered_offset = [
-            screen_offset[0] + (bg_size_screen[0] - x * rc.char_size_x_screen * 0.5) * 0.5,
-            screen_offset[1] - (bg_size_screen[1] - rc.line_height * rc.char_size_y_screen * 0.5) * 0.5,
+            screen_offset[0] + (bg_size_screen[0] - x * rc.char_size_x_screen) * 0.5,
+            screen_offset[1] + (bg_size_screen[1] - rc.line_height * rc.char_size_y_screen) * 0.5,
         ];
         self.draw_text_vertices(
             &rc,
@@ -517,8 +525,8 @@ impl Renderer {
         );
     }
 
-    pub fn get_pixel_width(&self) -> u32 { self.width }
-    pub fn get_pixel_height(&self) -> u32 { self.height }
+    pub fn get_width(&self) -> u32 { self.width }
+    pub fn get_height(&self) -> u32 { self.height }
     pub fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
 
     fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
@@ -615,7 +623,8 @@ impl Renderer {
 
     fn compute_pixel_range(&self, size_px: f32) -> f32 {
         let font = self.font.as_ref().borrow();
-        size_px / font.get_glyph_size() as f32 * font.get_pixel_range()
+        let max_scale = self.scale[0].max(self.scale[1]);
+        size_px * max_scale / font.get_glyph_size() as f32 * font.get_pixel_range()
     }
 
     fn draw_text_vertices(
@@ -671,16 +680,7 @@ impl Renderer {
             gl::Uniform1f(self.get_uniform_location(self.msdf_program, "pixelRange"), pixel_range);
         }
 
-        // Set global model matrix (column major)
-        unsafe {
-            // Flip translation y
-            let mut transformed = model.clone();
-            transformed[13] *= -1.0;
-            gl::UniformMatrix4fv(
-                self.get_uniform_location(self.msdf_program, "model"),
-                1, gl::FALSE, transformed.as_ptr()
-            );
-        }
+        self.bind_vertex_shader_data(self.msdf_program, model);
 
         self.draw(vertices);
     }
@@ -700,16 +700,7 @@ impl Renderer {
         // Bind atlas tex
         self.bind_texture(self.raster_program, font.get_atlas_tex().get_id(), 0, "atlasTex");
 
-        // Set global model matrix (column major)
-        unsafe {
-            // Flip translation y
-            let mut transformed = model.clone();
-            transformed[13] *= -1.0;
-            gl::UniformMatrix4fv(
-                self.get_uniform_location(self.raster_program, "model"),
-                1, gl::FALSE, transformed.as_ptr()
-            );
-        }
+        self.bind_vertex_shader_data(self.raster_program, model);
 
         self.draw(vertices);
     }
@@ -724,18 +715,27 @@ impl Renderer {
         // Update vertex data
         self.update_buffer_data(self.quad_vbo, gl::ARRAY_BUFFER, vertices);
 
+        self.bind_vertex_shader_data(self.bg_program, model);
+
+        self.draw(vertices);
+    }
+
+    fn bind_vertex_shader_data(&self, program_id: u32, model: &[f32; 16]) {
         // Set global model matrix (column major)
         unsafe {
-            // Flip translation y
-            let mut transformed = model.clone();
-            transformed[13] *= -1.0;
             gl::UniformMatrix4fv(
-                self.get_uniform_location(self.bg_program, "model"),
-                1, gl::FALSE, transformed.as_ptr()
+                self.get_uniform_location(program_id, "model"),
+                1, gl::FALSE, model.as_ptr()
             );
         }
 
-        self.draw(vertices);
+        // Set content scale
+        unsafe {
+            gl::Uniform2fv(
+                self.get_uniform_location(program_id, "scale"),
+                1, self.scale.as_ptr()
+            );
+        }
     }
 
     fn enable_backface_culling(&self) {

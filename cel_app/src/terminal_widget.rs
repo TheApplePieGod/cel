@@ -51,7 +51,7 @@ impl TerminalWidget {
         position: &LayoutPosition,
         bg_color: Option<[f32; 3]>,
     ) {
-        let width_px = renderer.get_pixel_width() as f32 * position.max_size[0];
+        let width_px = renderer.get_width() as f32 * position.max_size[0];
         let pixel_to_char_ratio = 18;
         let max_chars = width_px as u32 / pixel_to_char_ratio;
         let max_lines = renderer.compute_max_lines(max_chars, position.max_size[1]);
