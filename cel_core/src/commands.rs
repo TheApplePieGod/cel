@@ -53,7 +53,7 @@ impl Commands {
             //cmd.args(["-is"]);
             //cmd.args(["-i", "-c", "{}; exec {} -i"]);
             cmd.args([
-                "+o", "promptsp",
+                "+o", "promptsp", "+o", "histignorespace"
             ]);
         }
         cmd.get_argv_mut()[0] = shell.into();
@@ -63,10 +63,10 @@ impl Commands {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
-        writer.write_all("CEL_PROMPT_ID=0\r".as_bytes());
-        writer.write_all("PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"'\r".as_bytes());
-        writer.write_all("precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());
-        writer.write_all("PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'\r".as_bytes());
+        writer.write_all(" CEL_PROMPT_ID=0\r".as_bytes());
+        writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"'\r".as_bytes());
+        writer.write_all(" precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());
+        writer.write_all(" PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'\r".as_bytes());
 
         //writer.write_all(b"ls -la\r\n\0");
 
@@ -190,7 +190,7 @@ impl Commands {
         self.prompt_id += 1;
 
         self.writer.write_all(format!(
-            "CEL_PROMPT_ID={}\r",
+            " CEL_PROMPT_ID={}\r",
             self.prompt_id
         ).as_bytes());
     }
