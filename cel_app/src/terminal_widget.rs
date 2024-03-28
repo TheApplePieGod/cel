@@ -69,12 +69,13 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         input: &Input,
         position: &LayoutPosition,
+        default_height: f32,
         bg_color: Option<[f32; 3]>,
     ) {
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
 
-        self.render_background(renderer, position, &bg_color);
-        self.render_terminal(renderer, position, &bg_color);
+        self.render_background(renderer, position, default_height, &bg_color);
+        self.render_terminal(renderer, position, default_height, &bg_color);
         self.render_overlay(input, renderer, position);
     }
 
@@ -90,11 +91,12 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
+        default_height: f32,
         bg_color: &[f32; 3]
     ) {
         renderer.draw_quad(
             &position.offset,
-            &[1.0, self.get_last_computed_height().max(position.max_size[1])],
+            &[1.0, self.get_last_computed_height().max(default_height)],
             &bg_color
         );
     }
@@ -103,10 +105,11 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
+        default_height: f32,
         bg_color: &[f32; 3]
     ) {
         let width_px = renderer.get_width() as f32 * position.max_size[0];
-        let pixel_to_char_ratio = 18;
+        let pixel_to_char_ratio = 10;
         let max_chars = width_px as u32 / pixel_to_char_ratio;
         let max_lines = renderer.compute_max_lines(max_chars, position.max_size[1]);
 
@@ -132,7 +135,9 @@ impl TerminalWidget {
             self.debug_show_cursor
         );
 
-        self.last_computed_height = rendered_lines as f32 / max_lines as f32 * position.max_size[1];
+        self.last_computed_height = (
+            rendered_lines as f32 / max_lines as f32 * position.max_size[1]
+        ).max(default_height);
     }
 
     fn render_overlay(

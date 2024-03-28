@@ -30,8 +30,8 @@ impl Layout {
             scroll_offset: 0.0,
             context: TerminalContext::new(),
 
-            widget_height_px: 100.0,
-            widget_gap_px: 10.0,
+            widget_height_px: 54.0,
+            widget_gap_px: 5.0,
         }
     }
 
@@ -51,6 +51,7 @@ impl Layout {
         let bg_color: [f32; 3] = [0.1, 0.1, 0.2];
         let widget_height = self.widget_height_px / self.height as f32;
 
+        let mut primary_rendered = false;
         let mut rendered_count = 0;
         let mut last_offset = 0.0;
         self.map_onscreen_widgets(|ctx, local_offset, global_offset| {
@@ -60,6 +61,7 @@ impl Layout {
             };
 
             // Render terminal widget
+            primary_rendered |= ctx.get_primary();
             last_offset = global_offset;
             rendered_count += 1;
             ctx.render(
@@ -69,13 +71,14 @@ impl Layout {
                     offset: [0.0, local_offset],
                     max_size: [1.0, max_size],
                 },
+                widget_height,
                 Some(bg_color)
             );
         });
 
         // Lock scrolling to the last widget
         self.scroll_offset = self.scroll_offset.min(last_offset);
-        self.can_scroll_down = rendered_count > 1;
+        self.can_scroll_down = rendered_count > 1 || !primary_rendered;
     }
 
     pub fn on_window_resized(&mut self, new_size: [i32; 2]) {

@@ -8,7 +8,7 @@ use crate::texture::Texture;
 
 pub type FontCache = FcFontCache;
 
-const ATLAS_SIZE: u32 = 2048;
+const ATLAS_SIZE: u32 = 1024;
 const MSDF_SIZE: u32 = 32;
 const MSDF_RANGE: f32 = 4.0;
 
