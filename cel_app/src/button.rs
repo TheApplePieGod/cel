@@ -8,6 +8,7 @@ pub struct Button {
     offset: [f32; 2]
 }
 
+// Immediate mode button
 impl Button {
     // Origin is top left (0, 0), positive y is down
     pub fn new_px(size: [f32; 2], offset: [f32; 2]) -> Self {
@@ -38,7 +39,6 @@ impl Button {
     ) {
         let width = renderer.get_width() as f32;
         let height = renderer.get_height() as f32;
-        log::warn!("{}", self.size[0] / width);
         renderer.draw_text(
             &[self.offset[0] / width, self.offset[1] / height],
             &[self.size[0] / width, self.size[1] / height],
@@ -53,5 +53,9 @@ impl Button {
 
         x >= self.offset[0] && x <= self.offset[0] + self.size[0] &&
         y >= self.offset[1] && y <= self.offset[1] + self.size[1]
+    }
+
+    pub fn is_clicked(&self, input: &Input, button: glfw::MouseButton) -> bool {
+        self.is_hovered(input) && input.get_mouse_just_released(button)
     }
 }

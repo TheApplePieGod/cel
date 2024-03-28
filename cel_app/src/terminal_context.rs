@@ -43,6 +43,8 @@ impl TerminalContext {
                 self.widgets[widget_len - 2].set_expanded(false);
             }
 
+            self.widgets.last_mut().unwrap().set_primary(false);
+
             self.widgets.push(TerminalWidget::new());
             self.widgets.last_mut().unwrap().push_chars(&output[1]);
         }

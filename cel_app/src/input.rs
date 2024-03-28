@@ -1,7 +1,7 @@
-use glfw::{Action, Key, Modifiers, WindowEvent};
+use glfw::{Action, Key, Modifiers, MouseButton, WindowEvent};
 
 #[derive(Default, Copy, Clone, PartialEq, Eq)]
-pub enum KeyPressState {
+pub enum PressState {
     #[default]
     Released,
     Pressed,
@@ -13,7 +13,8 @@ pub enum KeyPressState {
 pub struct Input {
     input_buffer: Vec<u8>,
     utf8_buffer: [u8; 8],
-    key_states: [(KeyPressState, u64); 512],
+    key_states: [(PressState, u64); 512],
+    mouse_states: [(PressState, u64); 16],
     mouse_pos: [f32; 2],
     mouse_delta: [f32; 2],
     scroll_delta: [f32; 2],
@@ -26,6 +27,7 @@ impl Input {
             input_buffer: vec![],
             utf8_buffer: [0; 8],
             key_states: [Default::default(); 512],
+            mouse_states: [Default::default(); 16],
             mouse_pos: [0.0, 0.0],
             mouse_delta: [0.0, 0.0],
             scroll_delta: [0.0, 0.0],
@@ -46,21 +48,15 @@ impl Input {
 
         let handled = match event {
             glfw::WindowEvent::Key(key, _, action, mods) => {
-                if (*key as usize) < self.key_states.len() {
-                    let key_state;
-                    match action {
-                        Action::Press | Action::Repeat => {
-                            key_state = match action {
-                                Action::Repeat => KeyPressState::Repeat,
-                                _ => KeyPressState::JustPressed,
-                            };
-                            self.input_buffer.extend(
-                                self.encode_input_key(*key, *mods)
-                            );
-                        },
-                        Action::Release => key_state = KeyPressState::JustReleased
-                    };
-                    self.key_states[*key as usize] = (key_state, self.poll_count);
+                if Self::handle_input_press(
+                    *key as usize,
+                    &mut self.key_states,
+                    &action,
+                    self.poll_count
+                ) {
+                    self.input_buffer.extend(
+                        self.encode_input_key(*key, *mods)
+                    );
                 }
 
                 true
@@ -69,6 +65,18 @@ impl Input {
                 self.input_buffer.extend_from_slice(
                     key.encode_utf8(&mut self.utf8_buffer).as_bytes()
                 );
+
+                true
+            },
+            glfw::WindowEvent::MouseButton(button, action, mods) => {
+                if Self::handle_input_press(
+                    *button as usize,
+                    &mut self.mouse_states,
+                    &action,
+                    self.poll_count
+                ) {
+                    // TODO: mouse encoding
+                }
 
                 true
             },
@@ -100,23 +108,44 @@ impl Input {
 
     pub fn get_key_pressed(&self, key: Key) -> bool {
         match self.key_states[key as usize].0 {
-            KeyPressState::JustPressed | KeyPressState::Repeat => true,
+            PressState::JustPressed | PressState::Repeat => true,
             _ => false
         }
     }
 
     pub fn get_key_just_pressed(&self, key: Key) -> bool {
         let state = &self.key_states[key as usize];
-        state.0 == KeyPressState::JustPressed && state.1 == self.poll_count
+        state.0 == PressState::JustPressed && state.1 == self.poll_count
     }
 
     pub fn get_key_released(&self, key: Key) -> bool {
-        self.key_states[key as usize].0 == KeyPressState::JustReleased
+        self.key_states[key as usize].0 == PressState::JustReleased
     }
 
-    pub fn get_key_just_just_released(&self, key: Key) -> bool {
+    pub fn get_key_just_released(&self, key: Key) -> bool {
         let state = &self.key_states[key as usize];
-        state.0 == KeyPressState::JustReleased && state.1 == self.poll_count
+        state.0 == PressState::JustReleased && state.1 == self.poll_count
+    }
+
+    pub fn get_mouse_down(&self, button: MouseButton) -> bool {
+        match self.mouse_states[button as usize].0 {
+            PressState::JustPressed | PressState::Repeat => true,
+            _ => false
+        }
+    }
+
+    pub fn get_mouse_just_pressed(&self, button: MouseButton) -> bool {
+        let state = &self.mouse_states[button as usize];
+        state.0 == PressState::JustPressed && state.1 == self.poll_count
+    }
+
+    pub fn get_mouse_up(&self, button: MouseButton) -> bool {
+        self.mouse_states[button as usize].0 == PressState::JustReleased
+    }
+
+    pub fn get_mouse_just_released(&self, button: MouseButton) -> bool {
+        let state = &self.mouse_states[button as usize];
+        state.0 == PressState::JustReleased && state.1 == self.poll_count
     }
 
     pub fn is_super_down(&self) -> bool { self.get_key_pressed(Key::LeftSuper) || self.get_key_pressed(Key::RightSuper) }
@@ -127,6 +156,33 @@ impl Input {
     pub fn get_mouse_pos(&self) -> [f32; 2] { self.mouse_pos }
     pub fn get_mouse_delta(&self) -> [f32; 2] { self.mouse_delta }
     pub fn get_scroll_delta(&self) -> [f32; 2] { self.scroll_delta }
+
+    // Returns true if the input was a press and the input buffer should be extended
+    fn handle_input_press(
+        id: usize,
+        states: &mut [(PressState, u64)],
+        action: &Action,
+        poll_count: u64
+    ) -> bool {
+        let mut press = false;
+        if id < states.len() {
+            let new_state;
+            match action {
+                Action::Press | Action::Repeat => {
+                    new_state = match action {
+                        Action::Repeat => PressState::Repeat,
+                        _ => PressState::JustPressed,
+                    };
+
+                    press = true;
+                },
+                Action::Release => new_state = PressState::JustReleased
+            };
+            states[id] = (new_state, poll_count);
+        }
+
+        press
+    }
 
     fn glfw_key_to_ascii(&self, key: Key) -> Option<u8> {
         let val = key as i32;

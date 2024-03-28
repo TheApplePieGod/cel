@@ -16,7 +16,7 @@ pub struct Window {
     window: Rc<RefCell<glfw::PWindow>>,
     renderer: Rc<RefCell<Renderer>>,
     layout: Rc<RefCell<Layout>>,
-    input: Input,
+    input: Rc<RefCell<Input>>,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
     background_color: [f32; 3],
 }
@@ -41,6 +41,7 @@ impl Window {
         window.set_key_polling(true);
         window.set_char_polling(true);
         window.set_char_mods_polling(true);
+        window.set_mouse_button_polling(true);
         window.set_cursor_pos_polling(true);
         window.set_scroll_polling(true);
         window.set_content_scale_polling(true);
@@ -66,16 +67,17 @@ impl Window {
                 initial_size_px.0,
                 initial_size_px.1
             ))),
-            input: Input::new(),
+            input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.0, 0.0, 0.0],
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn update_and_render(&mut self) {
         let renderer_ptr = self.renderer.clone();
         let layout_ptr = self.layout.clone();
         let window_ptr = self.window.clone();
+        let input_ptr = self.input.clone();
         let clear_color = self.background_color;
         self.window.as_ref().borrow_mut().set_refresh_callback(move |w| {
             // Update
@@ -94,27 +96,31 @@ impl Window {
                 &clear_color,
                 renderer_ptr.as_ref().borrow_mut().deref_mut(),
                 layout_ptr.as_ref().borrow_mut().deref_mut(),
-                window_ptr.as_ref().borrow_mut().deref_mut()
+                window_ptr.as_ref().borrow_mut().deref_mut(),
+                input_ptr.as_ref().borrow().deref()
             );
         });
+
         self.poll_events();
 
-        self.layout.as_ref().borrow_mut().update(&self.input);
+        // Update layout
+        self.layout.as_ref().borrow_mut().update(
+            self.input.as_ref().borrow().deref()
+        );
 
-        self.input.clear();
-    }
-
-    pub fn render(&mut self) {
+        // Render
         Self::render_wrapper(
             &self.background_color,
             self.renderer.as_ref().borrow_mut().deref_mut(),
             self.layout.as_ref().borrow_mut().deref_mut(),
             self.window.as_ref().borrow_mut().deref_mut(),
+            self.input.as_ref().borrow().deref()
         );
+
+        self.input.as_ref().borrow_mut().clear();
     }
 
     pub fn should_close(&self) -> bool { self.window.as_ref().borrow().should_close() }
-    pub fn get_input(&self) -> &Input { &self.input }
     pub fn get_width(&self) -> i32 { self.window.as_ref().borrow().get_size().0 }
     pub fn get_height(&self) -> i32 { self.window.as_ref().borrow().get_size().1 }
     pub fn get_size(&self) -> [i32; 2] { self.window.as_ref().borrow().get_size().into() }
@@ -127,11 +133,11 @@ impl Window {
     fn poll_events(&mut self) {
         let mut resize = false;
 
-        self.input.poll_events();
+        self.input.as_ref().borrow_mut().poll_events();
 
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
-            if self.input.handle_window_event(&event) {
+            if self.input.as_ref().borrow_mut().handle_window_event(&event) {
                 continue;
             }
 
@@ -159,10 +165,11 @@ impl Window {
         clear_color: &[f32; 3],
         renderer: &mut Renderer,
         layout: &mut Layout,
-        window: &mut glfw::PWindow
+        window: &mut glfw::PWindow,
+        input: &Input
     ) {
         Self::begin_frame(clear_color);
-        layout.render(renderer);
+        layout.render(renderer, input);
         Self::end_frame(window);
     }
 

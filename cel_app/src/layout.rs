@@ -1,6 +1,5 @@
 use cel_renderer::renderer::Renderer;
 
-use crate::button::Button;
 use crate::terminal_context::TerminalContext;
 use crate::input::Input;
 use crate::terminal_widget::TerminalWidget;
@@ -20,7 +19,6 @@ pub struct Layout {
 
     widget_height_px: f32,
     widget_gap_px: f32,
-    button_size_px: f32,
 }
 
 impl Layout {
@@ -34,30 +32,13 @@ impl Layout {
 
             widget_height_px: 100.0,
             widget_gap_px: 10.0,
-            button_size_px: 15.0,
         }
     }
 
     pub fn update(&mut self, input: &Input) {
         self.context.update(input);
 
-        let aspect = self.get_aspect();
-        let screen_size = [self.width as f32, self.height as f32];
-        let button_size = [
-            self.button_size_px / self.width as f32,
-            self.button_size_px / self.width as f32 * aspect
-        ];
-        self.map_onscreen_widgets(|_, local_offset, _| {
-            // Close 
-            let button = Button::new_screen(
-                screen_size,
-                button_size,
-                [1.0 - button_size[0], local_offset]
-            );
-            let hovered = button.is_hovered(input);
-            log::warn!("{}", hovered);
-        });
-
+        // Update scroll
         //let speed_factor = 1.0;
         let speed_factor = 0.01;
         let scroll = input.get_scroll_delta()[1];
@@ -66,16 +47,10 @@ impl Layout {
         }
     }
 
-    pub fn render(&mut self, renderer: &mut Renderer) {
+    pub fn render(&mut self, renderer: &mut Renderer, input: &Input) {
         let bg_color: [f32; 3] = [0.1, 0.1, 0.2];
         let widget_height = self.widget_height_px / self.height as f32;
 
-        let aspect = self.get_aspect();
-        let screen_size = [self.width as f32, self.height as f32];
-        let button_size = [
-            self.button_size_px / self.width as f32,
-            self.button_size_px / self.width as f32 * aspect
-        ];
         let mut rendered_count = 0;
         let mut last_offset = 0.0;
         self.map_onscreen_widgets(|ctx, local_offset, global_offset| {
@@ -84,33 +59,18 @@ impl Layout {
                 false => widget_height
             };
 
-            // Draw background
-            renderer.draw_quad(
-                &[0.0, local_offset],
-                &[1.0, ctx.get_last_computed_height().max(widget_height)],
-                &bg_color
-            );
-
             // Render terminal widget
             last_offset = global_offset;
             rendered_count += 1;
             ctx.render(
                 renderer,
+                input,
                 &LayoutPosition {
                     offset: [0.0, local_offset],
                     max_size: [1.0, max_size],
                 },
                 Some(bg_color)
             );
-
-            // Overlay buttons
-
-            let button = Button::new_screen(
-                screen_size,
-                button_size,
-                [1.0 - button_size[0], local_offset]
-            );
-            button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
         });
 
         // Lock scrolling to the last widget
@@ -123,7 +83,7 @@ impl Layout {
         self.height = new_size[1] as u32;
     }
 
-    fn get_aspect(&self) -> f32 { self.width as f32 / self.height as f32 }
+    fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
 
     fn map_onscreen_widgets(
         &mut self,
@@ -136,6 +96,10 @@ impl Layout {
         let mut rendered_count = 0;
         let mut cur_offset = 0.0;
         for (i, ctx) in self.context.get_widgets().iter_mut().enumerate() {
+            if ctx.get_closed() {
+                continue;
+            }
+
             let last_height = ctx.get_last_computed_height();
             let start_offset = cur_offset - self.scroll_offset;
             let end_offset = start_offset + last_height;

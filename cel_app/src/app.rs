@@ -26,8 +26,7 @@ impl App {
         while AppState::current().borrow().running && !self.window.should_close() {
             let frame_start = time::Instant::now();
 
-            self.window.update();
-            self.window.render();
+            self.window.update_and_render();
 
             // Handle input
             // TODO: kinda scuffed

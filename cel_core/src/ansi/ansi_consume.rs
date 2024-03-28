@@ -50,6 +50,10 @@ impl AnsiHandler {
     pub fn consume_output_stream(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.performer.output_stream)
     }
+
+    pub fn reset(&mut self) {
+        self.performer.terminal_state = Default::default();
+    }
 }
 
 impl Performer {
