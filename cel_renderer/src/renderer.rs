@@ -257,8 +257,8 @@ impl Renderer {
     /// Returns rendered line count
     pub fn render_terminal(
         &mut self,
-        screen_offset: &[f32; 2],
         terminal_state: &TerminalState,
+        screen_offset: &[f32; 2],
         chars_per_line: u32,
         lines_per_screen: u32,
         line_offset: f32,
@@ -267,14 +267,14 @@ impl Renderer {
         debug_show_cursor: bool
     ) -> u32 {
         // Setup render state
-        let base_x = 0.0; //0.25;
-        let base_y = 0.0;
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let rc = self.compute_render_constants(chars_per_line);
         let timestamp_seconds = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::new(0, 0))
             .as_secs_f64();
+        let base_x = 0.0;
+        let base_y = 0.0;
 
         let mut x = base_x;
         let mut y = base_y - rc.line_height;
@@ -302,13 +302,6 @@ impl Renderer {
             rendered_line_count += 1;
             x = base_x;
             y += rc.line_height;
-
-            if line_idx >= terminal_state.screen_buffer.len() {
-                can_scroll_down = false;
-                continue;
-            }
-
-            max_line_count = rendered_line_count;
 
             // Render cursor
             if should_render_cursor {
@@ -339,6 +332,13 @@ impl Renderer {
                     );
                 }
             }
+
+            if line_idx >= terminal_state.screen_buffer.len() {
+                can_scroll_down = false;
+                continue;
+            }
+
+            max_line_count = rendered_line_count;
 
             let line = &terminal_state.screen_buffer[line_idx];
             let line_occupancy = line.len() / chars_per_line as usize + 1;

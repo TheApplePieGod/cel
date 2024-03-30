@@ -63,10 +63,12 @@ impl Commands {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
+        writer.write_all(" TERMINFO=\r".as_bytes());
+        writer.write_all(" TERM=xterm-256color\r".as_bytes());
         writer.write_all(" CEL_PROMPT_ID=0\r".as_bytes());
         writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"'\r".as_bytes());
         writer.write_all(" precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());
-        writer.write_all(" PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'\r".as_bytes());
+        writer.write_all(" PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'$PROMPT\r".as_bytes());
 
         //writer.write_all(b"ls -la\r\n\0");
 
@@ -115,6 +117,7 @@ impl Commands {
         let mut output_idx = 0;
         while let Ok(v) = self.io_rx.try_recv() {
             for byte in v {
+                //log::warn!("{:?}", byte as char);
                 match self.shell_state {
                     ShellState::Init | ShellState::Ready if byte == 0x1d
                         => self.shell_state = ShellState::StartSequenceA,

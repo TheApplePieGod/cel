@@ -31,7 +31,7 @@ impl Layout {
             context: TerminalContext::new(),
 
             widget_height_px: 54.0,
-            widget_gap_px: 5.0,
+            widget_gap_px: 3.0,
         }
     }
 

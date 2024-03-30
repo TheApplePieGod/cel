@@ -82,6 +82,7 @@ impl Performer {
         result
     }
 
+    // Code is [0, 7], assumes weight is already considered
     fn parse_4_bit_color(weight: ColorWeight, code: u16) -> [f32; 3] {
         let factor: f32 = match weight {
             ColorWeight::Normal => 0.5,
@@ -107,12 +108,34 @@ impl Performer {
         }
     }
 
-    fn parse_8_bit_color(rgb: &[u16]) -> [f32; 3] {
+    fn parse_8_bit_color(code: u16) -> [f32; 3] {
+        match code {
+            0..=7 => Self::parse_4_bit_color(ColorWeight::Normal, code),
+            8..=15 => Self::parse_4_bit_color(ColorWeight::Bold, code - 8),
+            16..=231 => {
+                // RGB cube colors
+                let base_id = code - 16;
+                let r = ((base_id / 36) % 6) as f32 * 0.2;
+                let g = ((base_id / 6) % 6) as f32 * 0.2;
+                let b = (base_id % 6) as f32 * 0.2;
+                [r, g, b]
+            },
+            232..=255 => {
+                // Grayscale ramp
+                let gray_value = ((code - 232) as f32) * (1.0 / 24.0);
+                [gray_value; 3]
+            }
+            _ => [0.0, 0.0, 0.0]
+        }
+    }
+
+    fn parse_rgb_color(rgb: &[u16]) -> [f32; 3] {
         let rgb: [u16; 3] = rgb.try_into().unwrap_or([0, 0, 0]);
         rgb.map(|c| c as f32 / 255.0)
     }
 
     fn parse_color_escape(&mut self, params: &Vec<u16>) {
+        // TODO: check that params are in range
         let state = &mut self.terminal_state.color_state;
         let mut extended_mode = 0;
         for (i, code) in params.iter().enumerate() {
@@ -121,11 +144,22 @@ impl Performer {
                 1 => state.weight = ColorWeight::Bold,
                 2 => match extended_mode {
                     38 => {
-                        state.foreground = Some(Self::parse_8_bit_color(&params[(i + 1)..]));
+                        state.foreground = Some(Self::parse_rgb_color(&params[(i + 1)..]));
                         return;
                     },
                     48 => {
-                        state.background = Some(Self::parse_8_bit_color(&params[(i + 1)..]));
+                        state.background = Some(Self::parse_rgb_color(&params[(i + 1)..]));
+                        return;
+                    },
+                    _ => state.weight = ColorWeight::Faint,
+                },
+                5 => match extended_mode {
+                    38 => {
+                        state.foreground = Some(Self::parse_8_bit_color(params[i + 1]));
+                        return;
+                    },
+                    48 => {
+                        state.background = Some(Self::parse_8_bit_color(params[i + 1]));
                         return;
                     },
                     _ => state.weight = ColorWeight::Faint,
@@ -409,6 +443,9 @@ impl Performer {
             }
         }
 
+        // Make sure we have at least one character that will fill in the background
+        self.try_insert_whitespace();
+
         /*
         log::debug!(
             "[erase] Global: {:?} -> {:?}",
@@ -624,12 +661,56 @@ impl Performer {
 
         log::debug!("[deactivate_alternate_screen_buffer]");
     }
+
+    fn put_char_at_cursor(&mut self, c: char, overwrite: bool) {
+        let state = &mut self.terminal_state;
+
+        while state.global_cursor[1] >= state.screen_buffer.len() {
+            state.screen_buffer.push(vec![]);
+        }
+        let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
+        while state.global_cursor[0] >= buffer_line.len() {
+            buffer_line.push(Default::default());
+        }
+
+        if buffer_line[state.global_cursor[0]].elem != '\0' && !overwrite {
+            return;
+        }
+
+        buffer_line[state.global_cursor[0]] = ScreenBufferElement {
+            elem: c,
+            fg_color: state.color_state.foreground,
+            bg_color: state.color_state.background
+        };
+    }
+
+    fn try_insert_whitespace(&mut self) {
+        // Attempt to insert a whitespace at the current cursor position. Only do this
+        // if the cursor is not at the end of the line. The goal of this is to add a blank
+        // character so that if the background color was changed immediately before a
+        // newline was inserted, the renderer will correctly adjust the rest of the line
+        // to be the correct color since there will be a whitespace character with the
+        // new color
+        let state = &mut self.terminal_state;
+        if state.wants_wrap || state.screen_cursor[0] == self.screen_width {
+            return;
+        }
+
+        // Add char without modifying the cursor
+        // Don't put anything if there is already a char there
+        self.put_char_at_cursor(' ', false);
+
+        log::debug!(
+            "[try_insert_whitespace] Screen: {:?}, Global: {:?}",
+            self.terminal_state.screen_cursor,
+            self.terminal_state.global_cursor
+        );
+    }
 }
 
 // TO ADD:
 // - OSC commands (color query, window name, font, etc)
 // - Cursor modes
-// - Alternate screen buffer
 // - Mouse modes (1000-1034)
 // - Origin mode
 
@@ -645,24 +726,11 @@ impl Perform for Performer {
             self.advance_screen_cursor_with_scroll();
         }
 
-        let state = &mut self.terminal_state;
-
-        while state.global_cursor[1] >= state.screen_buffer.len() {
-            state.screen_buffer.push(vec![]);
-        }
-        let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
-        while state.global_cursor[0] >= buffer_line.len() {
-            buffer_line.push(Default::default());
-        }
-
-        buffer_line[state.global_cursor[0]] = ScreenBufferElement {
-            elem: c,
-            fg_color: state.color_state.foreground,
-            bg_color: state.color_state.background
-        };
+        self.put_char_at_cursor(c, true);
 
         // Check for wrap. If we want to wrap, update the state accordingly. Otherwise,
         // update the cursor directly
+        let state = &mut self.terminal_state;
         let wrap = state.screen_cursor[0] + 1 >= self.screen_width;
         if wrap {
             state.wants_wrap = true;
@@ -690,6 +758,7 @@ impl Perform for Performer {
             b'\n' => {
                 let old_global = self.terminal_state.global_cursor;
 
+                self.try_insert_whitespace();
                 self.terminal_state.wants_wrap = false;
                 self.terminal_state.global_cursor = self.get_cursor_pos_next_line(
                     &self.terminal_state.global_cursor
@@ -708,6 +777,7 @@ impl Perform for Performer {
             b'\r' => {
                 let old_global = self.terminal_state.global_cursor;
 
+                self.try_insert_whitespace();
                 self.terminal_state.wants_wrap = false;
                 self.terminal_state.global_cursor = self.get_cursor_pos_sol();
                 self.terminal_state.screen_cursor[0] = 0;
@@ -987,13 +1057,12 @@ impl Perform for Performer {
             },
             'm' => { // Graphics
                 self.parse_color_escape(&params);
-                /*
-                log::debug!(
+
+                log::trace!(
                     "Graphics [{:?}] -> {:?}",
                     params,
                     self.terminal_state.color_state
                 );
-                */
             },
             'n' => { // Device status report
                 let state = &mut self.terminal_state;
@@ -1088,6 +1157,11 @@ impl Perform for Performer {
                 );
             }
         }
+
+                log::debug!(
+                    "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
+                    params, intermediates, ignore, c
+                );
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {

@@ -49,9 +49,9 @@ impl TerminalWidget {
         self.ansi_handler.consume_output_stream()
     }
 
-    pub fn push_chars(&mut self, chars: &[u8]) {
+    pub fn push_chars(&mut self, chars: &[u8], stop_early: bool) -> Option<u32> {
         //self.char_buffer.push(char);
-        self.ansi_handler.handle_sequence_bytes(chars, false);
+        self.ansi_handler.handle_sequence_bytes(chars, stop_early)
     }
 
     pub fn close(&mut self) {
@@ -108,9 +108,11 @@ impl TerminalWidget {
         default_height: f32,
         bg_color: &[f32; 3]
     ) {
+        let padding_px = 20.0;
+        let padding = padding_px / renderer.get_width() as f32;
         let width_px = renderer.get_width() as f32 * position.max_size[0];
         let pixel_to_char_ratio = 10;
-        let max_chars = width_px as u32 / pixel_to_char_ratio;
+        let max_chars = (width_px - 2.0 * padding_px) as u32 / pixel_to_char_ratio;
         let max_lines = renderer.compute_max_lines(max_chars, position.max_size[1]);
 
         if max_chars != self.chars_per_line || max_lines != self.lines_per_screen {
@@ -124,9 +126,13 @@ impl TerminalWidget {
 
         self.ansi_handler.set_terminal_color(&bg_color);
 
+        let padded_offset = [
+            position.offset[0] + padding,
+            position.offset[1]
+        ];
         let rendered_lines = renderer.render_terminal(
-            &position.offset,
             &self.ansi_handler.get_terminal_state(),
+            &padded_offset,
             max_chars,
             max_lines,
             self.line_offset,
@@ -154,14 +160,16 @@ impl TerminalWidget {
         ];
 
         // Close button
-        let button = Button::new_screen(
-            screen_size,
-            button_size,
-            [1.0 - button_size[0], position.offset[1]]
-        );
-        button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
-        if button.is_clicked(input, MouseButton::Button1) {
-            self.close();
+        if !self.primary {
+            let button = Button::new_screen(
+                screen_size,
+                button_size,
+                [1.0 - button_size[0], position.offset[1]]
+            );
+            button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
+            if button.is_clicked(input, MouseButton::Button1) {
+                self.close();
+            }
         }
     }
 }
