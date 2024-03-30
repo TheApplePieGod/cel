@@ -308,7 +308,14 @@ impl Renderer {
                 continue;
             }
             if y_pos_screen > 1.0 + rc.char_size_y_screen * max_offscreen_lines {
-                break;
+                if line_idx >= terminal_state.screen_buffer.len() {
+                    break;
+                }
+
+                // TODO: should break here, but the rendered line count gets messed
+                // up which breaks other things
+                max_line_count = rendered_line_count;
+                continue;
             }
 
             // Render cursor

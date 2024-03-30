@@ -69,7 +69,7 @@ impl Window {
             ))),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
-            background_color: [0.0, 0.0, 0.0],
+            background_color: [0.05, 0.05, 0.1],
         }
     }
 
@@ -169,7 +169,7 @@ impl Window {
         input: &Input
     ) {
         Self::begin_frame(clear_color);
-        layout.render(renderer, input);
+        layout.render(Some(*clear_color), renderer, input);
         Self::end_frame(window);
     }
 

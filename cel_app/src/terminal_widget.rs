@@ -75,6 +75,7 @@ impl TerminalWidget {
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
 
         self.render_background(renderer, position, default_height, &bg_color);
+        self.render_divider(renderer, position);
         self.render_terminal(renderer, position, default_height, &bg_color);
         self.render_overlay(input, renderer, position);
     }
@@ -98,6 +99,20 @@ impl TerminalWidget {
             &position.offset,
             &[1.0, self.get_last_computed_height().max(default_height)],
             &bg_color
+        );
+    }
+
+    fn render_divider(
+        &mut self,
+        renderer: &mut Renderer,
+        position: &LayoutPosition
+    ) {
+        let size_px = 1.0;
+        let size = size_px / renderer.get_height() as f32;
+        renderer.draw_quad(
+            &[position.offset[0], position.offset[1] - size * 2.0],
+            &[1.0, size],
+            &[0.933, 0.388, 0.321]
         );
     }
 
@@ -151,7 +166,6 @@ impl TerminalWidget {
         self.last_computed_height = (
             rendered_lines as f32 * line_size_screen
         )
-         .max(self.last_computed_height) // Raw never smaller than the previous height
          .max(default_height)            // At least the default height
          .min(position.max_size[1]);     // At most the max screen size
     }

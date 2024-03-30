@@ -47,8 +47,12 @@ impl Layout {
         }
     }
 
-    pub fn render(&mut self, renderer: &mut Renderer, input: &Input) {
-        let bg_color: [f32; 3] = [0.1, 0.1, 0.2];
+    pub fn render(
+        &mut self,
+        bg_color: Option<[f32; 3]>,
+        renderer: &mut Renderer,
+        input: &Input
+    ) {
         let widget_height = self.widget_height_px / self.height as f32;
 
         let mut last_local_offset = 0.0;
@@ -72,7 +76,7 @@ impl Layout {
                     max_size: [1.0, max_size],
                 },
                 widget_height,
-                Some(bg_color)
+                bg_color
             );
         });
 
