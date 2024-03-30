@@ -273,8 +273,8 @@ impl Renderer {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::new(0, 0))
             .as_secs_f64();
-        let base_x = 0.0;
-        let base_y = 0.0;
+        let base_x = screen_offset[0] / rc.char_size_x_screen;
+        let base_y = screen_offset[1] / rc.char_size_y_screen;
         let mut x = base_x;
         let mut y = base_y - rc.line_height;
         let mut should_render_cursor = match debug_show_cursor {
@@ -302,15 +302,29 @@ impl Renderer {
             x = base_x;
             y += rc.line_height;
 
-            let max_offscreen_lines = 4.0;
-            let y_pos_screen = (y * rc.char_size_y_screen) + screen_offset[1];
+            let max_offscreen_lines = 10.0;
+            let y_pos_screen = (y * rc.char_size_y_screen);// + screen_offset[1];
             if y_pos_screen < 0.0 - rc.char_size_y_screen * max_offscreen_lines {
+                // Account for the size of wrapped offscreen lines 
+                if line_idx < terminal_state.screen_buffer.len() {
+                    let line = &terminal_state.screen_buffer[line_idx];
+                    let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
+                    rendered_line_count += line_occupancy;
+                    y += rc.line_height * line_occupancy as f32;
+                }
+                max_line_count = rendered_line_count;
                 continue;
             }
             if y_pos_screen > 1.0 + rc.char_size_y_screen * max_offscreen_lines {
                 if line_idx >= terminal_state.screen_buffer.len() {
                     break;
                 }
+
+                // Account for the size of wrapped offscreen lines 
+                let line = &terminal_state.screen_buffer[line_idx];
+                let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
+                rendered_line_count += line_occupancy;
+                y += rc.line_height * line_occupancy as f32;
 
                 // TODO: should break here, but the rendered line count gets messed
                 // up which breaks other things
@@ -453,7 +467,7 @@ impl Renderer {
 
         self.draw_text_vertices(
             &rc,
-            &screen_offset,
+            &[0.0, 0.0],
             &bg_vertices,
             &msdf_vertices,
             &raster_vertices

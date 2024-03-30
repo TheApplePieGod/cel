@@ -17,6 +17,7 @@ pub struct TerminalWidget {
     expanded: bool,
     wrap: bool,
 
+    char_size_px: f32,
     button_size_px: f32,
 
     debug_line_number: bool,
@@ -38,6 +39,7 @@ impl TerminalWidget {
             expanded: true,
             wrap: true,
 
+            char_size_px: 10.0,
             button_size_px: 20.0,
 
             debug_line_number: false,
@@ -126,8 +128,7 @@ impl TerminalWidget {
         let padding_px = 20.0;
         let padding = padding_px / renderer.get_width() as f32;
         let width_px = renderer.get_width() as f32 * position.max_size[0];
-        let pixel_to_char_ratio = 10;
-        let max_chars = (width_px - 2.0 * padding_px) as u32 / pixel_to_char_ratio;
+        let max_chars = ((width_px - 2.0 * padding_px) / self.char_size_px) as u32;
         let num_screen_lines = renderer.compute_max_lines(max_chars, 1.0);
         let line_size_screen = 1.0 / num_screen_lines as f32;
         let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
@@ -162,12 +163,12 @@ impl TerminalWidget {
             self.debug_show_cursor
         );
 
-        //log::warn!("RL: {}, {}", rendered_lines, line_size);
+        //log::warn!("RL: {}", rendered_lines);
         self.last_computed_height = (
             rendered_lines as f32 * line_size_screen
         )
-         .max(default_height)            // At least the default height
-         .min(position.max_size[1]);     // At most the max screen size
+         .max(default_height)
+         .min(position.max_size[1]);
     }
 
     fn render_overlay(
