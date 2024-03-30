@@ -58,6 +58,7 @@ pub struct Margin {
 #[derive(Clone)]
 pub struct TerminalState {
     pub screen_buffer: ScreenBuffer,
+    pub alt_screen_buffer_state: BufferState,
     pub cursor_state: CursorState,
     pub color_state: ColorState,
     pub background_color: [f32; 3], // Default background color to reset to
@@ -84,9 +85,6 @@ struct Performer {
     // State associated with one specific 'terminal' / 'buffer'
     pub terminal_state: TerminalState,
     pub saved_terminal_state: TerminalState,
-
-    // Global state
-    pub alt_screen_buffer_state: BufferState,
 }
 
 pub struct AnsiHandler {
@@ -122,6 +120,7 @@ impl Default for TerminalState {
     fn default() -> Self {
         Self {
             screen_buffer: Default::default(),
+            alt_screen_buffer_state: BufferState::Enabled,
             cursor_state: Default::default(),
             color_state: Default::default(),
             background_color: [0.0, 0.0, 0.0],
@@ -144,8 +143,6 @@ impl Default for Performer {
 
             terminal_state: Default::default(),
             saved_terminal_state: Default::default(),
-
-            alt_screen_buffer_state: BufferState::Enabled,
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::{borrow::{Borrow, BorrowMut}, cell::RefCell, mem::size_of, ptr::{null, null_mut}, rc::Rc};
+use std::{cell::RefCell, mem::size_of, ptr::{null, null_mut}, rc::Rc};
 use std::time::{Duration, SystemTime};
 use cel_core::ansi::{CursorStyle, TerminalState};
 use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, glchk};
@@ -277,12 +277,11 @@ impl Renderer {
         let base_y = screen_offset[1] / rc.char_size_y_screen;
         let mut x = base_x;
         let mut y = base_y - rc.line_height;
-        let mut should_render_cursor = match debug_show_cursor {
-            true => true,
-            false => terminal_state.cursor_state.visible && (
-                        !terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5
-                     )
-        };
+        let mut should_render_cursor = debug_show_cursor || (
+            terminal_state.cursor_state.visible && (
+                !terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5
+            )
+        );
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
         let mut max_line_count = 0;

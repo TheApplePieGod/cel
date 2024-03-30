@@ -1,4 +1,4 @@
-use cel_core::ansi::AnsiHandler;
+use cel_core::ansi::{AnsiHandler, BufferState};
 use cel_renderer::renderer::Renderer;
 use glfw::MouseButton;
 
@@ -133,7 +133,14 @@ impl TerminalWidget {
         let line_size_screen = 1.0 / num_screen_lines as f32;
         let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
         let max_terminal_lines = num_screen_lines.min(num_actual_lines);
-        let max_render_lines = num_actual_lines;
+
+        // Cap max render lines based on the alt screen buffer. Here, the state can
+        // never be larger than the screen, so never render more than we are supposed
+        // to, otherwise dead cells may become visible after resizing
+        let max_render_lines = match self.ansi_handler.get_terminal_state().alt_screen_buffer_state {
+            BufferState::Active => max_terminal_lines,
+            _ => num_actual_lines
+        };
 
         if max_chars != self.chars_per_line || max_terminal_lines != self.lines_per_screen {
             self.chars_per_line = max_chars;

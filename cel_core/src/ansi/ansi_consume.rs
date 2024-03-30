@@ -646,6 +646,8 @@ impl Performer {
             self.screen_height as u32
         );
 
+        self.terminal_state.alt_screen_buffer_state = BufferState::Active;
+
         log::debug!("[activate_alternate_screen_buffer]");
     }
 
@@ -1015,29 +1017,26 @@ impl Perform for Performer {
                         match params[0] {
                             25 => self.terminal_state.cursor_state.visible = enabled,
                             1046 => match enabled {
-                                true => match self.alt_screen_buffer_state {
+                                true => match self.terminal_state.alt_screen_buffer_state {
                                     BufferState::Active => {}
                                     BufferState::Enabled => {}
-                                    BufferState::Disabled => self.alt_screen_buffer_state = BufferState::Enabled
+                                    BufferState::Disabled => self.terminal_state.alt_screen_buffer_state = BufferState::Enabled
                                 }
-                                false => match self.alt_screen_buffer_state {
+                                false => match self.terminal_state.alt_screen_buffer_state {
                                     BufferState::Active => {
-                                        self.alt_screen_buffer_state = BufferState::Disabled;
                                         self.deactivate_alternate_screen_buffer();
                                     },
-                                    BufferState::Enabled => self.alt_screen_buffer_state = BufferState::Disabled,
+                                    BufferState::Enabled => self.terminal_state.alt_screen_buffer_state = BufferState::Disabled,
                                     BufferState::Disabled => {}
                                 }
                             }
                             // These should technically do different things, but this implementation  
                             // always saves & restores the cursor so we can just treat them as the same
-                            1047 | 1049 => match self.alt_screen_buffer_state {
+                            1047 | 1049 => match self.terminal_state.alt_screen_buffer_state {
                                 BufferState::Active if !enabled => {
-                                    self.alt_screen_buffer_state = BufferState::Enabled;
                                     self.deactivate_alternate_screen_buffer();
                                 },
                                 BufferState::Enabled if enabled => {
-                                    self.alt_screen_buffer_state = BufferState::Active;
                                     self.activate_alternate_screen_buffer();
                                 }
                                 BufferState::Disabled => {}
