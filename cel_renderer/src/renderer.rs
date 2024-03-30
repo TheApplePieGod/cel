@@ -275,7 +275,6 @@ impl Renderer {
             .as_secs_f64();
         let base_x = 0.0;
         let base_y = 0.0;
-
         let mut x = base_x;
         let mut y = base_y - rc.line_height;
         let mut should_render_cursor = match debug_show_cursor {
@@ -302,6 +301,15 @@ impl Renderer {
             rendered_line_count += 1;
             x = base_x;
             y += rc.line_height;
+
+            let max_offscreen_lines = 4.0;
+            let y_pos_screen = (y * rc.char_size_y_screen) + screen_offset[1];
+            if y_pos_screen < 0.0 - rc.char_size_y_screen * max_offscreen_lines {
+                continue;
+            }
+            if y_pos_screen > 1.0 + rc.char_size_y_screen * max_offscreen_lines {
+                break;
+            }
 
             // Render cursor
             if should_render_cursor {

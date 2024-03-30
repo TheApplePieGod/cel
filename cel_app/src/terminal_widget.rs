@@ -113,11 +113,15 @@ impl TerminalWidget {
         let width_px = renderer.get_width() as f32 * position.max_size[0];
         let pixel_to_char_ratio = 10;
         let max_chars = (width_px - 2.0 * padding_px) as u32 / pixel_to_char_ratio;
-        let max_lines = renderer.compute_max_lines(max_chars, position.max_size[1]);
+        let num_screen_lines = renderer.compute_max_lines(max_chars, 1.0);
+        let line_size_screen = 1.0 / num_screen_lines as f32;
+        let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
+        let max_terminal_lines = num_screen_lines.min(num_actual_lines);
+        let max_render_lines = num_actual_lines;
 
-        if max_chars != self.chars_per_line || max_lines != self.lines_per_screen {
+        if max_chars != self.chars_per_line || max_terminal_lines != self.lines_per_screen {
             self.chars_per_line = max_chars;
-            self.lines_per_screen = max_lines;
+            self.lines_per_screen = max_terminal_lines;
 
             //log::info!("CPL: {}, LPS: {}", self.chars_per_line, self.lines_per_screen);
 
@@ -126,24 +130,30 @@ impl TerminalWidget {
 
         self.ansi_handler.set_terminal_color(&bg_color);
 
+        /*
         let padded_offset = [
             position.offset[0] + padding,
             position.offset[1]
         ];
+        */
         let rendered_lines = renderer.render_terminal(
             &self.ansi_handler.get_terminal_state(),
-            &padded_offset,
+            &position.offset,
             max_chars,
-            max_lines,
+            max_render_lines,
             self.line_offset,
             self.wrap,
             self.debug_line_number,
             self.debug_show_cursor
         );
 
+        //log::warn!("RL: {}, {}", rendered_lines, line_size);
         self.last_computed_height = (
-            rendered_lines as f32 / max_lines as f32 * position.max_size[1]
-        ).max(default_height);
+            rendered_lines as f32 * line_size_screen
+        )
+         .max(self.last_computed_height) // Raw never smaller than the previous height
+         .max(default_height)            // At least the default height
+         .min(position.max_size[1]);     // At most the max screen size
     }
 
     fn render_overlay(
