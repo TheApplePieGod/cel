@@ -52,6 +52,10 @@ impl AnsiHandler {
         std::mem::take(&mut self.performer.output_stream)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.performer.is_empty
+    }
+
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
     }
@@ -743,6 +747,10 @@ impl Perform for Performer {
             // Advance the cursor
             state.global_cursor[0] += 1;
             state.screen_cursor[0] += 1;
+        }
+
+        if !c.is_whitespace() {
+            self.is_empty = false;
         }
 
         log::trace!(

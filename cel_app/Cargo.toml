@@ -1,5 +1,6 @@
 [package]
 name = "cel_app"
+description = "cel terminal"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,3 +11,8 @@ chrono = "0.4"
 glfw = "0.54"
 gl = "0.10"
 log = "0.4"
+
+[package.metadata.bundle]
+name = "cel"
+identifier = "com.theapplepiegod.cel"
+osx_minimum_system_version="10.11"

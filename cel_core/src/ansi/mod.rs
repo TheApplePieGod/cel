@@ -86,6 +86,7 @@ struct Performer {
     pub screen_width: usize,
     pub screen_height: usize,
     pub output_stream: Vec<u8>,
+    pub is_empty: bool,
     action_performed: bool,
 
     // State associated with one specific 'terminal' / 'buffer'
@@ -93,7 +94,7 @@ struct Performer {
     pub saved_terminal_state: TerminalState,
 
     // Global state
-    ignore_print: bool
+    ignore_print: bool,
 }
 
 pub struct AnsiHandler {
@@ -138,6 +139,7 @@ impl Default for Performer {
             screen_width: 1,
             screen_height: 1,
             output_stream: vec![],
+            is_empty: true,
             action_performed: false,
 
             terminal_state: Default::default(),

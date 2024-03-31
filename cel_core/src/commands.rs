@@ -66,7 +66,7 @@ impl Commands {
         writer.write_all(" TERMINFO=\r".as_bytes());
         writer.write_all(" TERM=tmux-256color\r".as_bytes());
         writer.write_all(" CEL_PROMPT_ID=0\r".as_bytes());
-        writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"'\r".as_bytes());
+        writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"; CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1))'\r".as_bytes());
         writer.write_all(" precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());
         writer.write_all(" PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'$PROMPT\r".as_bytes());
 
@@ -76,6 +76,7 @@ impl Commands {
         thread::spawn(move || {
             let mut buf: Vec<u8> = vec![0; 1024];
             loop {
+                // Blocking (pretty sure)
                 match reader.read(&mut buf) {
                     Ok(n) => if n > 0 {
                         let _ = tx.send(Vec::from(&buf[0..n]));
@@ -97,7 +98,7 @@ impl Commands {
 
             shell_state: ShellState::Init,
             parsing_id: String::new(),
-            prompt_id: 0,
+            prompt_id: 2,
         }
     }
 
@@ -192,9 +193,11 @@ impl Commands {
     fn set_next_split(&mut self) {
         self.prompt_id += 1;
 
+        /*
         self.writer.write_all(format!(
             " CEL_PROMPT_ID={}\r",
             self.prompt_id
         ).as_bytes());
+        */
     }
 }

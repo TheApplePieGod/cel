@@ -82,6 +82,7 @@ impl TerminalWidget {
         self.render_overlay(input, renderer, position);
     }
 
+    pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_expanded(&self) -> bool { self.expanded }

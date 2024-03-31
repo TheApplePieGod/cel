@@ -40,6 +40,10 @@ impl Layout {
 
         any_event |= self.context.update(input);
 
+        if self.context.just_split() {
+            self.scroll_offset = 0.0;
+        }
+
         // Update scroll
         //let speed_factor = 1.0;
         let speed_factor = 0.01;
@@ -106,7 +110,7 @@ impl Layout {
         let widget_gap = self.widget_gap_px / self.height as f32;
         let mut cur_offset = 1.0;
         for ctx in self.context.get_widgets().iter_mut().rev() {
-            if ctx.get_closed() {
+            if ctx.get_closed() || ctx.is_empty() {
                 continue;
             }
 

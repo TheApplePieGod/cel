@@ -10,6 +10,7 @@ pub struct TerminalContext {
     input_buffer: Vec<u8>,
     output_buffer: Vec<u8>,
     max_sequences_to_process: u32,
+    just_split: bool,
 
     debug_discrete_processing: bool
 }
@@ -23,6 +24,7 @@ impl TerminalContext {
             input_buffer: vec![],
             output_buffer: vec![],
             max_sequences_to_process: 0,
+            just_split: false,
 
             debug_discrete_processing: false
         }
@@ -38,6 +40,7 @@ impl TerminalContext {
     }
 
     pub fn get_widgets(&mut self) -> &mut Vec<TerminalWidget> { &mut self.widgets }
+    pub fn just_split(&self) -> bool { self.just_split }
 
     fn handle_user_io(&mut self, input: &Input) -> bool {
         self.input_buffer.extend_from_slice(input.get_input_buffer());
@@ -104,6 +107,7 @@ impl TerminalContext {
             self.widgets.push(TerminalWidget::new());
             self.widgets.last_mut().unwrap().push_chars(&output[1], false);
         }
+        self.just_split = did_split;
 
         let last_widget = self.widgets.last_mut().unwrap();
         let last_widget_size = last_widget.get_terminal_size();
