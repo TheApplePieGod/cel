@@ -95,7 +95,7 @@ mod tests {
 
         let final_buffer = vec![
             vec!['.', '4'],
-            vec!['.', '1', ' '],
+            vec!['.', '1',],
             vec!['3', '.', '2'],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
@@ -215,7 +215,7 @@ mod tests {
         let final_buffer = vec![
             vec!['1', '2', '3', '4', '5',
                  '6', '7', '8', '9', '0',
-                 '1', '2', '3', ' '],
+                 '1', '2', '3',],
             vec!['1', '2', '3', '4', '5',
                  '6', '7', '8', '9', '0',
                  '1', '2', '3']
@@ -269,7 +269,7 @@ mod tests {
                  '6', '7', '8', '9', '0'],
             vec![],
             vec![],
-            vec!['1', '2', '3', ' '],
+            vec!['1', '2', '3',],
             vec!['S', 'A', 'F', 'E'],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);

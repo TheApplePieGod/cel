@@ -200,36 +200,19 @@ impl Performer {
             // log::warn!("Line {}", cur_global[1]);
 
             // TODO: this could definitely be optimized
-            let line = &state.screen_buffer[cur_global[1]];
-            for char_idx in cur_global[0]..line.len() {
-                // Handle wrap only when we have a character to place there
-                if cur_screen[0] >= self.screen_width {
-                    cur_screen[0] = 0;
-                    cur_screen[1] += 1;
-                }
+            let line_count = self.get_remaining_wrapped_line_count(&cur_global) + 1;
+            let mut char_idx = cur_global[0];
+            for _ in 0..line_count {
+                let cur_screen_y = cur_screen[1];
 
-                // log::warn!("{}", line[char_idx].elem);
-
-                if cur_screen[1] == target_screen[1] {
+                if cur_screen_y == target_screen[1] {
                     return [
-                        char_idx + (target_screen[0] - cur_screen[0]),
+                        (char_idx as i32 + (target_screen[0] as i32 - cur_screen[0] as i32)) as usize,
                         cur_global[1]
                     ];
                 }
 
-                cur_screen[0] += 1;
-            }
-
-            // Should only happen if line is empty
-            if cur_screen[1] == target_screen[1] {
-                return [
-                    target_screen[0] - cur_screen[0],
-                    cur_global[1]
-                ];
-            }
-
-            let is_wrapped = cur_screen[0] == 0 && (line.len().max(1) / self.screen_width) != 0;
-            if  !is_wrapped {
+                char_idx += self.screen_width;
                 cur_screen[1] += 1;
             }
 
@@ -251,6 +234,8 @@ impl Performer {
     fn set_cursor_pos_absolute(&mut self, screen_pos: &Cursor) {
         let old_screen = self.terminal_state.screen_cursor;
         let old_global = self.terminal_state.global_cursor;
+
+        // TODO: could optimize if the new position is after the old position
 
         let clamped_pos = self.clamp_screen_cursor(screen_pos);
         self.terminal_state.global_cursor = self.get_cursor_pos_absolute(&clamped_pos);

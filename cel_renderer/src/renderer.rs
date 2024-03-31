@@ -309,6 +309,8 @@ impl Renderer {
                     let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
                     rendered_line_count += line_occupancy;
                     y += rc.line_height * line_occupancy as f32;
+                } else {
+                    break;
                 }
                 max_line_count = rendered_line_count;
                 continue;

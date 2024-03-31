@@ -39,7 +39,7 @@ impl TerminalWidget {
             expanded: true,
             wrap: true,
 
-            char_size_px: 10.0,
+            char_size_px: 8.0,
             button_size_px: 20.0,
 
             debug_line_number: false,

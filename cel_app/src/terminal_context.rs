@@ -81,7 +81,7 @@ impl TerminalContext {
         if did_split {
             let widget_len = self.widgets.len();
             if widget_len > 1 {
-                self.widgets[widget_len - 2].set_expanded(false);
+                //self.widgets[widget_len - 2].set_expanded(false);
             }
 
             self.widgets.last_mut().unwrap().set_primary(false);
