@@ -346,7 +346,6 @@ impl Performer {
 
     /// Computes the global cursor pos directly below the supplied cursor
     fn get_cursor_pos_next_line(&self, cursor: &Cursor) -> Cursor {
-        let state = &self.terminal_state;
         let keep_line = self.get_remaining_wrapped_line_count(cursor) > 0;
         if keep_line {
             [cursor[0] + self.screen_width, cursor[1]]
@@ -357,19 +356,21 @@ impl Performer {
 
     /// Computes the global cursor pos directly above the supplied cursor
     fn get_cursor_pos_prev_line(&self, cursor: &Cursor) -> Cursor {
-        let state = &self.terminal_state;
         if cursor[1] == 0 {
             return *cursor;
         }
 
         let cur_wrap = cursor[0] % self.screen_width;
-        if cur_wrap == 0 {
+        let cur_line = cursor[0] / self.screen_width;
+        if cur_line == 0 {
+            // Move cursor to wrapped end of previous line
             let prev_line_count = self.get_total_wrapped_line_count(&[0, cursor[1] - 1]);
             [
                 (prev_line_count - 1) as usize * self.screen_width + cur_wrap,
                 cursor[1] - 1
             ]
         } else {
+            // Subtract wrap from this line
             [cursor[0] - self.screen_width, cursor[1]]
         }
     }
@@ -443,9 +444,6 @@ impl Performer {
             }
         }
 
-        // Make sure we have at least one character that will fill in the background
-        self.try_insert_whitespace();
-
         /*
         log::debug!(
             "[erase] Global: {:?} -> {:?}",
@@ -489,18 +487,29 @@ impl Performer {
             // Scroll the region with scrollback by updating the reference [0, 0]
             // position in screen space
 
-            let home_still_wrapped = match state.global_cursor_home[1]  < state.screen_buffer.len() {
+            let home_still_wrapped = match state.global_cursor_home[1] < state.screen_buffer.len() {
                 true => {
                     let global_line = &state.screen_buffer[state.global_cursor_home[1]];
-                    state.global_cursor_home[0] + self.screen_width < global_line.len()
+                    match up {
+                        true => state.global_cursor_home[0] + self.screen_width < global_line.len(),
+                        false => state.global_cursor_home[1] >= self.screen_width
+                    }
                 }
                 false => false
             };
             if home_still_wrapped {
-                self.terminal_state.global_cursor_home[0] += self.screen_width;
+                if up {
+                    self.terminal_state.global_cursor_home[0] += self.screen_width;
+                } else {
+                    self.terminal_state.global_cursor_home[0] -= self.screen_width;
+                }
             } else {
                 self.terminal_state.global_cursor_home[0] = 0;
-                self.terminal_state.global_cursor_home[1] += 1;
+                if up {
+                    self.terminal_state.global_cursor_home[1] += 1;
+                } else if self.terminal_state.global_cursor_home[1] > 0 {
+                    self.terminal_state.global_cursor_home[1] -= 1;
+                }
             }
 
             false
@@ -606,16 +615,18 @@ impl Performer {
     }
 
     /// Advance the screen cursor y by one, potentially scrolling the region if necessary
-    fn advance_screen_cursor_with_scroll(&mut self) {
+    fn advance_screen_cursor_with_scroll(&mut self, down: bool) {
         let state = &self.terminal_state;
         let old_screen = state.screen_cursor;
         let old_home = state.global_cursor_home;
         let old_global = state.global_cursor;
 
-        if state.screen_cursor[1] < state.margin.bottom {
+        if down && state.screen_cursor[1] < state.margin.bottom {
             self.terminal_state.screen_cursor[1] += 1;
+        } else if !down && state.screen_cursor[1] < state.margin.bottom {
+            self.terminal_state.screen_cursor[1] -= 1;
         } else {
-            if self.scroll_region(true, state.margin) {
+            if self.scroll_region(down, state.margin) {
                 // After messing with the buffer state, recompute the correct global
                 // cursor absolutely rather than trying to use deltas to figure out
                 // how it should change. This could work in the future, but it's very
@@ -629,10 +640,11 @@ impl Performer {
         }
 
         log::debug!(
-            "[advance_screen_cursor_with_scroll] Screen: {:?} -> {:?}, Global: {:?} -> {:?}, Home: {:?} -> {:?}",
+            "[advance_screen_cursor_with_scroll] Screen: {:?} -> {:?}, Global: {:?} -> {:?}, Home: {:?} -> {:?}, down={}",
             old_screen, self.terminal_state.screen_cursor,
             old_global, self.terminal_state.global_cursor,
-            old_home, self.terminal_state.global_cursor_home
+            old_home, self.terminal_state.global_cursor_home,
+            down
         );
     }
 
@@ -685,29 +697,6 @@ impl Performer {
             bg_color: state.color_state.background
         };
     }
-
-    fn try_insert_whitespace(&mut self) {
-        // Attempt to insert a whitespace at the current cursor position. Only do this
-        // if the cursor is not at the end of the line. The goal of this is to add a blank
-        // character so that if the background color was changed immediately before a
-        // newline was inserted, the renderer will correctly adjust the rest of the line
-        // to be the correct color since there will be a whitespace character with the
-        // new color
-        let state = &mut self.terminal_state;
-        if state.wants_wrap || state.screen_cursor[0] == self.screen_width {
-            return;
-        }
-
-        // Add char without modifying the cursor
-        // Don't put anything if there is already a char there
-        self.put_char_at_cursor(' ', false);
-
-        log::debug!(
-            "[try_insert_whitespace] Screen: {:?}, Global: {:?}",
-            self.terminal_state.screen_cursor,
-            self.terminal_state.global_cursor
-        );
-    }
 }
 
 // TO ADD:
@@ -718,6 +707,10 @@ impl Performer {
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
+        if self.ignore_print {
+            return;
+        }
+
         self.action_performed = true;
 
         // Handle wrapping only when we place a character
@@ -725,7 +718,7 @@ impl Perform for Performer {
             self.terminal_state.screen_cursor[0] = 0;
             self.terminal_state.global_cursor[0] += 1;
             self.terminal_state.wants_wrap = false;
-            self.advance_screen_cursor_with_scroll();
+            self.advance_screen_cursor_with_scroll(true);
         }
 
         self.put_char_at_cursor(c, true);
@@ -754,19 +747,17 @@ impl Perform for Performer {
 
     fn execute(&mut self, byte: u8) {
         self.action_performed = true;
-        log::debug!("Exec [{:?}]", byte as char);
 
         match byte {
             b'\n' => {
                 let old_global = self.terminal_state.global_cursor;
 
-                self.try_insert_whitespace();
                 self.terminal_state.wants_wrap = false;
                 self.terminal_state.global_cursor = self.get_cursor_pos_next_line(
                     &self.terminal_state.global_cursor
                 );
 
-                self.advance_screen_cursor_with_scroll();
+                self.advance_screen_cursor_with_scroll(true);
 
                 /*
                 log::debug!(
@@ -779,7 +770,6 @@ impl Perform for Performer {
             b'\r' => {
                 let old_global = self.terminal_state.global_cursor;
 
-                self.try_insert_whitespace();
                 self.terminal_state.wants_wrap = false;
                 self.terminal_state.global_cursor = self.get_cursor_pos_sol();
                 self.terminal_state.screen_cursor[0] = 0;
@@ -1156,11 +1146,6 @@ impl Perform for Performer {
                 );
             }
         }
-
-                log::debug!(
-                    "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
-                    params, intermediates, ignore, c
-                );
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
@@ -1169,6 +1154,26 @@ impl Perform for Performer {
 
         match byte {
             b'B' => {},
+            b'M' => { // Reverse index
+                let old_global = self.terminal_state.global_cursor;
+
+                self.terminal_state.wants_wrap = false;
+                self.terminal_state.global_cursor = self.get_cursor_pos_prev_line(
+                    &self.terminal_state.global_cursor
+                );
+
+                self.advance_screen_cursor_with_scroll(false);
+
+                log::debug!(
+                    "[reverse_index] Global: {:?} -> {:?}",
+                    old_global,
+                    self.terminal_state.global_cursor
+                );
+            },
+            // Special sequences generated by the screen-256color term we are claiming
+            // to be. Everything inside can be ignored.
+            0x6b => self.ignore_print = true,
+            0x5c => self.ignore_print = false,
             _ => {
                 log::debug!(
                     "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",

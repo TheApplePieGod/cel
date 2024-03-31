@@ -36,4 +36,13 @@ impl Util {
         let hb = half::f16::from_f32(b);
         ((hb.to_bits() as u32) << 16) | (ha.to_bits() as u32)
     }
+
+    pub fn unpack_floats(packed: u32) -> (f32, f32) {
+        let mask: u32 = 0xFFFF;
+        let ha_bits = (packed & mask) as u16;
+        let hb_bits = ((packed >> 16) & mask) as u16;
+        let a = half::f16::from_bits(ha_bits).to_f32();
+        let b = half::f16::from_bits(hb_bits).to_f32();
+        (a, b)
+    }
 }

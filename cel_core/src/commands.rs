@@ -64,7 +64,7 @@ impl Commands {
         let mut writer = pair.master.take_writer().unwrap();
 
         writer.write_all(" TERMINFO=\r".as_bytes());
-        writer.write_all(" TERM=xterm-256color\r".as_bytes());
+        writer.write_all(" TERM=screen-256color\r".as_bytes());
         writer.write_all(" CEL_PROMPT_ID=0\r".as_bytes());
         writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"'\r".as_bytes());
         writer.write_all(" precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());

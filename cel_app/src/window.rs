@@ -70,6 +70,7 @@ impl Window {
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
+            //background_color: [0.0, 0.0, 0.0],
         }
     }
 
@@ -87,9 +88,12 @@ impl Window {
                 layout_ptr.as_ref().borrow_mut().deref_mut()
             );
 
-            // Glitchy
-            //let dummy_input = Input::new();
-            //layout_ptr.as_ref().borrow_mut().update(&dummy_input);
+            // !Glitchy!
+            /*
+            layout_ptr.as_ref().borrow_mut().update(
+                input_ptr.as_ref().borrow().deref()
+            );
+            */
 
             // Render
             Self::render_wrapper(

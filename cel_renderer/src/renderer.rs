@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use cel_core::ansi::{CursorStyle, TerminalState};
 use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, glchk};
 
-const MAX_CHARACTERS: u32 = 20000;
+const MAX_CHARACTERS: u32 = 50000;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -285,7 +285,6 @@ impl Renderer {
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
         let mut max_line_count = 0;
-        let mut prev_bg_color = terminal_state.background_color;
         let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
         let mut raster_vertices: Vec<Vertex> = vec![];
         let mut bg_vertices: Vec<Vertex> = vec![];
@@ -376,6 +375,9 @@ impl Renderer {
                 start_char = (line_occupancy as f32 * wrap_offset) as usize * chars_per_line as usize;
             }
 
+            // Store bg color per line for optimization
+            let mut prev_bg_color = terminal_state.background_color;
+
             for char_idx in start_char..line.len() {
                 if rendered_line_count > lines_per_screen {
                     max_line_count = lines_per_screen;
@@ -389,6 +391,7 @@ impl Renderer {
                     rendered_line_count += 1;
                     x = base_x;
                     y += rc.line_height;
+                    prev_bg_color = terminal_state.background_color;
                 }
 
                 let c = line[char_idx];
@@ -396,49 +399,28 @@ impl Renderer {
                 // TODO: store in separate buffer?
                 let fg_color = c.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
                 let bg_color = c.bg_color.as_ref().unwrap_or(&terminal_state.background_color);
-
                 if bg_color[0] != prev_bg_color[0] ||
                    bg_color[1] != prev_bg_color[1] ||
                    bg_color[2] != prev_bg_color[2]
                 {
                     // Set the background color.
                     // We do this by comparing with the previously set background color.
-                    // If it changes, we need to update all the next cells with this color,
-                    // even ones with no text. Thus, we cannot simply rely on the background
-                    // of each character. So, we push two quads, one that goes to the end of
-                    // the line and one that goes down the rest of the screen. This will optimize
-                    // the majority case when background does not change that often. Worst case,
-                    // background changes every character and we push 2n background quads.
-                    // Unfortunately, we have to check this for every whitespace as well in case the 
-                    // background color changes.
+                    // If it changes, push a new quad. Otherwiwse, we can extend the previous
+                    // quad to save vertices.
 
                     prev_bg_color = *bg_color;
 
-                    // TODO: we can drastically simplify this because we don't need most of this info
-
-                    // Quad extends to end of line
                     Self::push_quad(
                         fg_color,
                         bg_color,
                         &[0.0, 0.0],
                         &[0.0, 0.0],
                         &[x, y],
-                        &[max_x, y + rc.line_height],
+                        &[x + rc.char_root_size, y + rc.line_height],
                         &mut bg_vertices
                     );
-
-                    // Quad extends fully below, excluding this line
-                    // Should probably do some math so y does not go below the screen
-                    // but it's fine
-                    Self::push_quad(
-                        fg_color,
-                        bg_color,
-                        &[0.0, 0.0],
-                        &[0.0, 0.0],
-                        &[base_x, y + rc.line_height],
-                        &[max_x, y + rc.line_height * lines_per_screen as f32],
-                        &mut bg_vertices
-                    );
+                } else if c.bg_color.is_some() {
+                    Self::extend_previous_quad(x + rc.char_root_size, &mut bg_vertices);
                 }
 
                 if c.elem.is_whitespace() || c.elem == '\0' {
@@ -573,6 +555,28 @@ impl Renderer {
             char_size_y_screen: char_size_x_screen * aspect_ratio,
             line_height: 1.0 + face_metrics.descender
         }
+    }
+
+    // Assumes the last vertices were created by push_quad
+    fn extend_previous_quad(new_x: f32, vertices: &mut Vec<Vertex>) {
+        let vert_len = vertices.len();
+        if vert_len < 6 {
+            return;
+        }
+
+        // TODO: indexing so we don't have to do this twice
+
+        let br = &mut vertices[vert_len - 5];
+        let br_y = Util::unpack_floats(br.position).1;
+        br.position = Util::pack_floats(new_x, br_y);
+
+        let tr = &mut vertices[vert_len - 4];
+        let tr_y = Util::unpack_floats(tr.position).1;
+        tr.position = Util::pack_floats(new_x, tr_y);
+
+        let br = &mut vertices[vert_len - 1];
+        let br_y = Util::unpack_floats(br.position).1;
+        br.position = Util::pack_floats(new_x, br_y);
     }
 
     // Min: TL, max: BR

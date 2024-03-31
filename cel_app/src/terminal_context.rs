@@ -38,6 +38,10 @@ impl TerminalContext {
     fn handle_user_io(&mut self, input: &Input) {
         self.input_buffer.extend_from_slice(input.get_input_buffer());
 
+        if input.get_key_just_pressed(glfw::Key::F1) {
+            self.debug_discrete_processing = !self.debug_discrete_processing;
+        }
+
         self.max_sequences_to_process = std::u32::MAX;
         if self.debug_discrete_processing {
             self.max_sequences_to_process = 0;

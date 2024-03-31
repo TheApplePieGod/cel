@@ -85,6 +85,9 @@ struct Performer {
     // State associated with one specific 'terminal' / 'buffer'
     pub terminal_state: TerminalState,
     pub saved_terminal_state: TerminalState,
+
+    // Global state
+    ignore_print: bool
 }
 
 pub struct AnsiHandler {
@@ -143,6 +146,8 @@ impl Default for Performer {
 
             terminal_state: Default::default(),
             saved_terminal_state: Default::default(),
+
+            ignore_print: false
         }
     }
 }
