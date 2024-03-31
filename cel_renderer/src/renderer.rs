@@ -9,7 +9,7 @@ const MAX_CHARACTERS: u32 = 50000;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Vertex {
-    pub position: u32,   // x, y
+    pub position: [f32; 2],   // x, y
     pub tex_coord: u32,  // u, v
     pub flags: StyleFlags,
     pub color: [u32; 3],  // r, g, b (fg, bg)
@@ -64,10 +64,10 @@ impl Renderer {
 
             // VAO attributes
             let vert_stride = size_of::<Vertex>() as i32;
-            let pos_stride = size_of::<u32>() as i32;
+            let pos_stride = size_of::<f32>() as i32 * 2;
             let coord_stride = size_of::<u32>() as i32 + pos_stride;
             let flags_stride = size_of::<StyleFlags>() as i32 + coord_stride;
-            gl::VertexAttribPointer(0, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, null());
+            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vert_stride, null());
             gl::VertexAttribPointer(1, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, pos_stride as _);
             gl::VertexAttribPointer(2, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, coord_stride as _);
             gl::VertexAttribPointer(3, 3, gl::UNSIGNED_INT, gl::FALSE, vert_stride, flags_stride as _);
@@ -80,7 +80,7 @@ impl Renderer {
         let vert_shader_source = b"
             #version 400 core
 
-            layout (location = 0) in uint inPos;
+            layout (location = 0) in vec2 inPos;
             layout (location = 1) in uint inTexCoord;
             layout (location = 2) in uint inFlags;
             layout (location = 3) in uvec3 inColor;
@@ -104,7 +104,6 @@ impl Renderer {
 
             void main()
             {
-                vec2 pos = unpackHalf2x16(inPos);
                 vec2 coord = unpackHalf2x16(inTexCoord);
                 vec2 r = unpackHalf2x16(inColor.r);
                 vec2 g = unpackHalf2x16(inColor.g);
@@ -118,7 +117,7 @@ impl Renderer {
                     0.0, 0.0, 0.0, 1.0
                 );
 
-                gl_Position = scalingMat * model * vec4(pos, 0.0, 1.0)
+                gl_Position = scalingMat * model * vec4(inPos, 0.0, 1.0)
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = vec3(r.x, g.x, b.x);
@@ -585,16 +584,13 @@ impl Renderer {
         // TODO: indexing so we don't have to do this twice
 
         let br = &mut vertices[vert_len - 5];
-        let br_y = Util::unpack_floats(br.position).1;
-        br.position = Util::pack_floats(new_x, br_y);
+        br.position[0] = new_x;
 
         let tr = &mut vertices[vert_len - 4];
-        let tr_y = Util::unpack_floats(tr.position).1;
-        tr.position = Util::pack_floats(new_x, tr_y);
+        tr.position[0] = new_x;
 
         let br = &mut vertices[vert_len - 1];
-        let br_y = Util::unpack_floats(br.position).1;
-        br.position = Util::pack_floats(new_x, br_y);
+        br.position[0] = new_x;
     }
 
     // Min: TL, max: BR
@@ -615,25 +611,25 @@ impl Renderer {
         ];
 
         let tr = Vertex {
-            position: Util::pack_floats(pos_max[0], pos_min[1]),
+            position: [pos_max[0], pos_min[1]],
             tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
             color,
             flags
         };
         let br = Vertex {
-            position: Util::pack_floats(pos_max[0], pos_max[1]),
+            position: [pos_max[0], pos_max[1]],
             tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
             color,
             flags
         };
         let bl = Vertex {
-            position: Util::pack_floats(pos_min[0], pos_max[1]),
+            position: [pos_min[0], pos_max[1]],
             tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
             color,
             flags
         };
         let tl = Vertex {
-            position: Util::pack_floats(pos_min[0], pos_min[1]),
+            position: [pos_min[0], pos_min[1]],
             tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
             color,
             flags
