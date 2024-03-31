@@ -1,6 +1,7 @@
 use std::{cell::RefCell, mem::size_of, ptr::{null, null_mut}, rc::Rc};
 use std::time::{Duration, SystemTime};
-use cel_core::ansi::{CursorStyle, TerminalState};
+use cel_core::ansi::{CursorStyle, StyleFlags, TerminalState};
+
 use crate::{font::{Font, FaceMetrics, RenderType}, util::Util, glchk};
 
 const MAX_CHARACTERS: u32 = 50000;
@@ -10,7 +11,8 @@ const MAX_CHARACTERS: u32 = 50000;
 pub struct Vertex {
     pub position: u32,   // x, y
     pub tex_coord: u32,  // u, v
-    pub color: [u32; 3]  // r, g, b (fg, bg)
+    pub flags: StyleFlags,
+    pub color: [u32; 3],  // r, g, b (fg, bg)
 }
 
 pub struct Renderer {
@@ -64,12 +66,15 @@ impl Renderer {
             let vert_stride = size_of::<Vertex>() as i32;
             let pos_stride = size_of::<u32>() as i32;
             let coord_stride = size_of::<u32>() as i32 + pos_stride;
+            let flags_stride = size_of::<StyleFlags>() as i32 + coord_stride;
             gl::VertexAttribPointer(0, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, null());
             gl::VertexAttribPointer(1, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, pos_stride as _);
-            gl::VertexAttribPointer(2, 3, gl::UNSIGNED_INT, gl::FALSE, vert_stride, coord_stride as _);
+            gl::VertexAttribPointer(2, 1, gl::UNSIGNED_INT, gl::FALSE, vert_stride, coord_stride as _);
+            gl::VertexAttribPointer(3, 3, gl::UNSIGNED_INT, gl::FALSE, vert_stride, flags_stride as _);
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
             gl::EnableVertexAttribArray(2);
+            gl::EnableVertexAttribArray(3);
         }
 
         let vert_shader_source = b"
@@ -77,11 +82,13 @@ impl Renderer {
 
             layout (location = 0) in uint inPos;
             layout (location = 1) in uint inTexCoord;
-            layout (location = 2) in uvec3 inColor;
+            layout (location = 2) in uint inFlags;
+            layout (location = 3) in uvec3 inColor;
 
             out vec2 texCoord;
             out vec3 fgColor;
             out vec3 bgColor;
+            flat out uint flags;
 
             uniform mat4 model;
             uniform vec2 scale;
@@ -103,6 +110,7 @@ impl Renderer {
                 vec2 g = unpackHalf2x16(inColor.g);
                 vec2 b = unpackHalf2x16(inColor.b);
 
+                // TODO: make this a uniform
                 mat4 scalingMat = mat4(
                     scale[0], 0.0, 0.0, 0.0,
                     0.0, -scale[1], 0.0, 0.0,
@@ -115,6 +123,7 @@ impl Renderer {
                 texCoord = coord;
                 fgColor = vec3(r.x, g.x, b.x);
                 bgColor = vec3(r.y, g.y, b.y);
+                flags = inFlags;
             }
         \0";
 
@@ -124,6 +133,7 @@ impl Renderer {
             in vec2 texCoord;
             in vec3 fgColor;
             in vec3 bgColor;
+            flat in uint flags;
 
             out vec4 fragColor;
 
@@ -136,8 +146,9 @@ impl Renderer {
 
             void main()
             {
+                float sdFactor = 1.0 + (flags & 1U) * 0.15 - (flags & 2U) * 0.05;
                 vec4 msd = texture(atlasTex, texCoord);
-                float sd = Median(msd.r, msd.g, msd.b, msd.a);
+                float sd = Median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
                 
@@ -357,6 +368,7 @@ impl Renderer {
                         &[0.0, 0.0],
                         &pos_min,
                         &[pos_min[0] + rc.char_root_size * width, pos_min[1] + rc.line_height * height],
+                        StyleFlags::default(),
                         &mut raster_vertices
                     );
                 }
@@ -399,8 +411,8 @@ impl Renderer {
                 let c = line[char_idx];
 
                 // TODO: store in separate buffer?
-                let fg_color = c.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
-                let bg_color = c.bg_color.as_ref().unwrap_or(&terminal_state.background_color);
+                let fg_color = c.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                let bg_color = c.style.bg_color.as_ref().unwrap_or(&terminal_state.background_color);
                 if bg_color[0] != prev_bg_color[0] ||
                    bg_color[1] != prev_bg_color[1] ||
                    bg_color[2] != prev_bg_color[2]
@@ -419,9 +431,10 @@ impl Renderer {
                         &[0.0, 0.0],
                         &[x, y],
                         &[x + rc.char_root_size, y + rc.line_height],
+                        StyleFlags::default(),
                         &mut bg_vertices
                     );
-                } else if c.bg_color.is_some() {
+                } else if c.style.bg_color.is_some() {
                     Self::extend_previous_quad(x + rc.char_root_size, &mut bg_vertices);
                 }
 
@@ -440,6 +453,7 @@ impl Renderer {
                     fg_color,
                     bg_color,
                     &[x, y],
+                    c.style.flags,
                     &mut msdf_vertices,
                     &mut raster_vertices
                 );
@@ -481,6 +495,7 @@ impl Renderer {
             &[0.0, 0.0],
             &[0.0, 0.0],
             &bg_size_screen,
+            StyleFlags::default(),
             &mut bg_vertices
         );
         self.draw_background_vertices(&bg_vertices, &bg_model_mat);
@@ -514,6 +529,7 @@ impl Renderer {
                 fg_color,
                 bg_color,
                 &[x, 0.0],
+                StyleFlags::default(),
                 &mut msdf_vertices,
                 &mut raster_vertices
             );
@@ -589,6 +605,7 @@ impl Renderer {
         uv_max: &[f32; 2],
         pos_min: &[f32; 2],
         pos_max: &[f32; 2],
+        flags: StyleFlags,
         vertices: &mut Vec<Vertex>
     ) {
         let color = [
@@ -600,22 +617,26 @@ impl Renderer {
         let tr = Vertex {
             position: Util::pack_floats(pos_max[0], pos_min[1]),
             tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
-            color
+            color,
+            flags
         };
         let br = Vertex {
             position: Util::pack_floats(pos_max[0], pos_max[1]),
             tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
-            color
+            color,
+            flags
         };
         let bl = Vertex {
             position: Util::pack_floats(pos_min[0], pos_max[1]),
             tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
-            color
+            color,
+            flags
         };
         let tl = Vertex {
             position: Util::pack_floats(pos_min[0], pos_min[1]),
             tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
-            color
+            color,
+            flags
         };
 
         vertices.push(tl);
@@ -633,6 +654,7 @@ impl Renderer {
         fg_color: &[f32; 3],
         bg_color: &[f32; 3],
         pos: &[f32; 2], // In character space
+        flags: StyleFlags,
         msdf_vertices: &mut Vec<Vertex>,
         raster_vertices: &mut Vec<Vertex>
     ) {
@@ -648,6 +670,7 @@ impl Renderer {
             &[atlas_uv.right, atlas_uv.bottom],
             &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
             &[pos[0] + glyph_bound.right, pos[1] + 1.0 - glyph_bound.bottom],
+            flags,
             match glyph_metrics.render_type {
                 RenderType::MSDF => msdf_vertices,
                 RenderType::RASTER => raster_vertices

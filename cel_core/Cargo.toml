@@ -7,3 +7,4 @@ edition = "2021"
 log = { version = "0.4", features = ["release_max_level_info"] }
 portable-pty = "0.8.1"
 vte = "0.13.0"
+bitflags = "2.5.0"

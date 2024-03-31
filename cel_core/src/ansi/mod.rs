@@ -1,4 +1,5 @@
 use vte::Parser;
+use bitflags::bitflags;
 
 pub use self::ansi_produce::*;
 pub use self::ansi_consume::*;
@@ -24,25 +25,30 @@ pub struct CursorState {
     pub blinking: bool
 }
 
-#[derive(Clone, Copy)]
-pub enum ColorWeight {
-    Normal,
-    Bold,
-    Faint
+bitflags! {
+    #[derive(Copy, Clone, Default)]
+    pub struct StyleFlags: u32 {
+        const Bold = 1 << 0;
+        const Faint = 1 << 1;
+        const Blink = 1 << 2;
+        const Italic = 1 << 3;
+        const Underline = 1 << 4;
+        const Invisible = 1 << 5;
+        const CrossedOut = 1 << 6;
+    }
 }
 
-#[derive(Clone, Copy)]
-pub struct ColorState {
-    pub foreground: Option<Color>,
-    pub background: Option<Color>,
-    pub weight: ColorWeight
+#[derive(Clone, Copy, Default)]
+pub struct StyleState {
+    pub flags: StyleFlags,
+    pub fg_color: Option<Color>,
+    pub bg_color: Option<Color>
 }
 
 #[derive(Default, Clone, Copy)]
 pub struct ScreenBufferElement {
     pub elem: char,
-    pub fg_color: Option<Color>, // TODO: move this out
-    pub bg_color: Option<Color> // TODO: move this out
+    pub style: StyleState
 }
 
 pub type ScreenBuffer = Vec<Vec<ScreenBufferElement>>;
@@ -60,7 +66,7 @@ pub struct TerminalState {
     pub screen_buffer: ScreenBuffer,
     pub alt_screen_buffer_state: BufferState,
     pub cursor_state: CursorState,
-    pub color_state: ColorState,
+    pub style_state: StyleState,
     pub background_color: [f32; 3], // Default background color to reset to
     pub margin: Margin,
     pub wants_wrap: bool,
@@ -109,23 +115,13 @@ impl Default for CursorState {
     }
 }
 
-impl Default for ColorState{
-    fn default() -> Self {
-        Self {
-            foreground: None,
-            background: None,
-            weight: ColorWeight::Normal
-        }
-    }
-}
-
 impl Default for TerminalState {
     fn default() -> Self {
         Self {
             screen_buffer: Default::default(),
             alt_screen_buffer_state: BufferState::Enabled,
             cursor_state: Default::default(),
-            color_state: Default::default(),
+            style_state: Default::default(),
             background_color: [0.0, 0.0, 0.0],
             margin: Default::default(),
             wants_wrap: false,

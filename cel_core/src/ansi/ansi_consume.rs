@@ -1,3 +1,4 @@
+use bitflags::Flags;
 use vte::{Parser, Params, Perform};
 use std::fmt;
 
@@ -83,35 +84,42 @@ impl Performer {
     }
 
     // Code is [0, 7], assumes weight is already considered
-    fn parse_4_bit_color(weight: ColorWeight, code: u16) -> [f32; 3] {
-        let factor: f32 = match weight {
-            ColorWeight::Normal => 0.5,
-            ColorWeight::Bold => 1.0,
-            ColorWeight::Faint => 0.25
+    fn parse_4_bit_color(style_flags: StyleFlags, code: u16) -> [f32; 3] {
+        let factor: f32 = if style_flags.contains(StyleFlags::Bold) {
+            1.0
+        } else if style_flags.contains(StyleFlags::Faint) {
+            0.25
+        } else {
+            0.5
         };
+
         let one = (code & 1) as f32 * factor;
         let two = ((code & 2) >> 1) as f32 * factor;
         let four = ((code & 4) >> 2) as f32 * factor;
         match code {
             1..=6 => [one, two, four],
-            0     => match weight {
-                ColorWeight::Normal => [0.0, 0.0, 0.0],
-                ColorWeight::Bold => [0.5, 0.5, 0.5],
-                ColorWeight::Faint => [0.25, 0.25, 0.25]
-            },
-            7     => match weight {
-                ColorWeight::Normal => [0.75, 0.75, 0.75],
-                ColorWeight::Bold => [1.0, 1.0, 1.0],
-                ColorWeight::Faint => [0.5, 0.5, 0.5]
-            }
+            0 => if style_flags.contains(StyleFlags::Bold) {
+                    [0.5, 0.5, 0.5]
+                } else if style_flags.contains(StyleFlags::Faint) {
+                    [0.25, 0.25, 0.25]
+                } else {
+                    [0.0, 0.0, 0.0]
+                },
+            7 => if style_flags.contains(StyleFlags::Bold) {
+                    [1.0, 1.0, 1.0]
+                } else if style_flags.contains(StyleFlags::Faint) {
+                    [0.5, 0.5, 0.5]
+                } else {
+                    [0.75, 0.75, 0.75]
+                },
             _ => [0.0, 0.0, 0.0]
         }
     }
 
     fn parse_8_bit_color(code: u16) -> [f32; 3] {
         match code {
-            0..=7 => Self::parse_4_bit_color(ColorWeight::Normal, code),
-            8..=15 => Self::parse_4_bit_color(ColorWeight::Bold, code - 8),
+            0..=7 => Self::parse_4_bit_color(StyleFlags::default(), code),
+            8..=15 => Self::parse_4_bit_color(StyleFlags::Bold, code - 8),
             16..=231 => {
                 // RGB cube colors
                 let base_id = code - 16;
@@ -134,45 +142,63 @@ impl Performer {
         rgb.map(|c| c as f32 / 255.0)
     }
 
-    fn parse_color_escape(&mut self, params: &Vec<u16>) {
+    fn parse_graphics_escape(&mut self, params: &Vec<u16>) {
         // TODO: check that params are in range
-        let state = &mut self.terminal_state.color_state;
+        let state = &mut self.terminal_state.style_state;
         let mut extended_mode = 0;
         for (i, code) in params.iter().enumerate() {
             match code {
                 0 => *state = Default::default(),
-                1 => state.weight = ColorWeight::Bold,
+                1 => {
+                    state.flags.insert(StyleFlags::Bold);
+                    state.flags.remove(StyleFlags::Faint);
+                }
                 2 => match extended_mode {
                     38 => {
-                        state.foreground = Some(Self::parse_rgb_color(&params[(i + 1)..]));
+                        state.fg_color = Some(Self::parse_rgb_color(&params[(i + 1)..]));
                         return;
                     },
                     48 => {
-                        state.background = Some(Self::parse_rgb_color(&params[(i + 1)..]));
+                        state.bg_color = Some(Self::parse_rgb_color(&params[(i + 1)..]));
                         return;
                     },
-                    _ => state.weight = ColorWeight::Faint,
+                    _ => {
+                        state.flags.insert(StyleFlags::Faint);
+                        state.flags.remove(StyleFlags::Bold);
+                    }
                 },
+                3 => state.flags.insert(StyleFlags::Italic),
+                4 => state.flags.insert(StyleFlags::Underline),
                 5 => match extended_mode {
                     38 => {
-                        state.foreground = Some(Self::parse_8_bit_color(params[i + 1]));
+                        state.fg_color = Some(Self::parse_8_bit_color(params[i + 1]));
                         return;
                     },
                     48 => {
-                        state.background = Some(Self::parse_8_bit_color(params[i + 1]));
+                        state.bg_color = Some(Self::parse_8_bit_color(params[i + 1]));
                         return;
                     },
-                    _ => state.weight = ColorWeight::Faint,
+                    _ => state.flags.insert(StyleFlags::Blink)
                 },
-                22 => state.weight = ColorWeight::Normal,
-                30..=37 => state.foreground = Some(Self::parse_4_bit_color(state.weight, code - 30)),
-                40..=47 => state.background = Some(Self::parse_4_bit_color(state.weight, code - 40)),
-                90..=97   => state.foreground = Some(Self::parse_4_bit_color(ColorWeight::Bold, code - 90)),
-                100..=107 => state.background = Some(Self::parse_4_bit_color(ColorWeight::Bold, code - 100)),
+                8 => state.flags.insert(StyleFlags::Invisible),
+                9 => state.flags.insert(StyleFlags::CrossedOut),
+                22 => {
+                    state.flags.remove(StyleFlags::Bold);
+                    state.flags.remove(StyleFlags::Faint);
+                },
+                23 => state.flags.remove(StyleFlags::Italic),
+                24 => state.flags.remove(StyleFlags::Underline),
+                25 => state.flags.remove(StyleFlags::Blink),
+                28 => state.flags.remove(StyleFlags::Invisible),
+                29 => state.flags.remove(StyleFlags::CrossedOut),
+                30..=37 => state.fg_color = Some(Self::parse_4_bit_color(state.flags, code - 30)),
+                40..=47 => state.bg_color = Some(Self::parse_4_bit_color(state.flags, code - 40)),
+                90..=97   => state.fg_color = Some(Self::parse_4_bit_color(state.flags | StyleFlags::Bold, code - 90)),
+                100..=107 => state.bg_color = Some(Self::parse_4_bit_color(state.flags | StyleFlags::Bold, code - 100)),
                 38 => extended_mode = 38,
-                39 => state.foreground = None,
+                39 => state.fg_color = None,
                 48 => extended_mode = 48,
-                49 => state.background = None,
+                49 => state.bg_color = None,
                 _ => {}
             }
         }
@@ -678,8 +704,7 @@ impl Performer {
 
         buffer_line[state.global_cursor[0]] = ScreenBufferElement {
             elem: c,
-            fg_color: state.color_state.foreground,
-            bg_color: state.color_state.background
+            style: state.style_state
         };
     }
 }
@@ -1030,12 +1055,12 @@ impl Perform for Performer {
                 );
             },
             'm' => { // Graphics
-                self.parse_color_escape(&params);
+                self.parse_graphics_escape(&params);
 
                 log::trace!(
                     "Graphics [{:?}] -> {:?}",
                     params,
-                    self.terminal_state.color_state
+                    self.terminal_state.style_state
                 );
             },
             'n' => { // Device status report
@@ -1169,14 +1194,15 @@ impl Perform for Performer {
     }
 }
 
-impl fmt::Debug for ColorState {
+impl fmt::Debug for StyleState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ColorState: ")?;
-        match self.foreground {
+        write!(f, "StyleState: ")?;
+        write!(f, "Style<>")?;
+        match self.fg_color {
             Some(c) => write!(f, "FG<{}, {}, {}>, ", c[0], c[1], c[2])?,
             None => write!(f, "FG<None>")?
         };
-        match self.background {
+        match self.bg_color {
             Some(c) => write!(f, "BG<{}, {}, {}>, ", c[0], c[1], c[2])?,
             None => write!(f, "BG<None>")?
         };
@@ -1189,8 +1215,7 @@ impl fmt::Debug for ScreenBufferElement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SBufElem: ")?;
         write!(f, "C: {:?}, ", self.elem)?;
-        write!(f, "FG: {:?}, ", self.fg_color)?;
-        write!(f, "BG: {:?}", self.bg_color)?;
+        write!(f, "STY: {:?}, ", self.style)?;
         Ok(())
     }
 }
