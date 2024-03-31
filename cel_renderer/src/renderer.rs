@@ -610,26 +610,31 @@ impl Renderer {
             Util::pack_floats(fg_color[2], bg_color[2])
         ];
 
+        let shear_amount = match flags.contains(StyleFlags::Italic) {
+            true => 0.075,
+            false => 0.0
+        };
+
         let tr = Vertex {
-            position: [pos_max[0], pos_min[1]],
+            position: [pos_max[0] + shear_amount, pos_min[1]],
             tex_coord: Util::pack_floats(uv_max[0], uv_min[1]),
             color,
             flags
         };
         let br = Vertex {
-            position: [pos_max[0], pos_max[1]],
+            position: [pos_max[0] - shear_amount, pos_max[1]],
             tex_coord: Util::pack_floats(uv_max[0], uv_max[1]),
             color,
             flags
         };
         let bl = Vertex {
-            position: [pos_min[0], pos_max[1]],
+            position: [pos_min[0] - shear_amount, pos_max[1]],
             tex_coord: Util::pack_floats(uv_min[0], uv_max[1]),
             color,
             flags
         };
         let tl = Vertex {
-            position: [pos_min[0], pos_min[1]],
+            position: [pos_min[0] + shear_amount, pos_min[1]],
             tex_coord: Util::pack_floats(uv_min[0], uv_min[1]),
             color,
             flags

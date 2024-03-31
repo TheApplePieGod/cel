@@ -319,10 +319,10 @@ impl Font {
         // Convert pixel units to normalized units
         let scale = face.units_per_em() as f32;
         let glyph_bound = Bound::new(
-            bound.left as f32 / scale,
-            bound.bottom as f32 / scale,
-            bound.right as f32 / scale,
-            bound.top as f32 / scale
+            bound.left as f32 / scale - 0.001,
+            bound.bottom as f32 / scale + 0.001,
+            bound.right as f32 / scale + 0.001,
+            bound.top as f32 / scale - 0.001
         );
 
         // Cursed math that I don't fully understand but basically this is
