@@ -1,8 +1,8 @@
 
-use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
+use std::time::Instant;
 
 use cel_renderer::renderer::Renderer;
 use glfw::{Context, fail_on_errors};
@@ -19,6 +19,7 @@ pub struct Window {
     input: Rc<RefCell<Input>>,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
     background_color: [f32; 3],
+    last_update_time: Instant
 }
 
 impl Window {
@@ -71,6 +72,7 @@ impl Window {
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
             //background_color: [0.0, 0.0, 0.0],
+            last_update_time: Instant::now()
         }
     }
 
@@ -105,21 +107,33 @@ impl Window {
             );
         });
 
-        self.poll_events();
+        let mut any_event = false;
+
+        any_event |= self.poll_events();
 
         // Update layout
-        self.layout.as_ref().borrow_mut().update(
+        any_event |= self.layout.as_ref().borrow_mut().update(
             self.input.as_ref().borrow().deref()
         );
 
+        if any_event {
+            self.last_update_time = Instant::now();
+        }
+
         // Render
-        Self::render_wrapper(
-            &self.background_color,
-            self.renderer.as_ref().borrow_mut().deref_mut(),
-            self.layout.as_ref().borrow_mut().deref_mut(),
-            self.window.as_ref().borrow_mut().deref_mut(),
-            self.input.as_ref().borrow().deref()
-        );
+        let time_dist = (Instant::now() - self.last_update_time).as_secs_f32();
+        let recently_updated = time_dist <= 3.0;
+        if recently_updated {
+            Self::render_wrapper(
+                &self.background_color,
+                self.renderer.as_ref().borrow_mut().deref_mut(),
+                self.layout.as_ref().borrow_mut().deref_mut(),
+                self.window.as_ref().borrow_mut().deref_mut(),
+                self.input.as_ref().borrow().deref()
+            );
+        } else {
+            std::thread::sleep(std::time::Duration::new(0, 50e6 as u32));
+        }
 
         self.input.as_ref().borrow_mut().clear();
     }
@@ -134,7 +148,8 @@ impl Window {
     pub fn get_scale(&self) -> [f32; 2] { self.window.as_ref().borrow().get_content_scale().into() }
     pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
 
-    fn poll_events(&mut self) {
+    fn poll_events(&mut self) -> bool {
+        let mut any_event = false;
         let mut resize = false;
 
         self.input.as_ref().borrow_mut().poll_events();
@@ -142,14 +157,17 @@ impl Window {
         self.glfw_instance.poll_events();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             if self.input.as_ref().borrow_mut().handle_window_event(&event) {
+                any_event = true;
                 continue;
             }
 
             match event {
                 glfw::WindowEvent::Size(_, _) => {
+                    any_event = true;
                     resize = true;
                 },
                 glfw::WindowEvent::ContentScale(_, _) => {
+                    any_event = true;
                     self.renderer.as_ref().borrow_mut().update_scale(self.get_scale());
                 },
                 _ => {},
@@ -161,8 +179,10 @@ impl Window {
                 self.get_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
                 self.layout.as_ref().borrow_mut().deref_mut()
-            )
+            );
         }
+
+        any_event
     }
 
     fn render_wrapper(

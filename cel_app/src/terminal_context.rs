@@ -28,17 +28,24 @@ impl TerminalContext {
         }
     }
 
-    pub fn update(&mut self, input: &Input) {
-        self.handle_user_io(input);
-        self.handle_process_io();
+    pub fn update(&mut self, input: &Input) -> bool {
+        let mut any_event = false;
+
+        any_event |= self.handle_user_io(input);
+        any_event |= self.handle_process_io();
+
+        any_event
     }
 
     pub fn get_widgets(&mut self) -> &mut Vec<TerminalWidget> { &mut self.widgets }
 
-    fn handle_user_io(&mut self, input: &Input) {
+    fn handle_user_io(&mut self, input: &Input) -> bool {
         self.input_buffer.extend_from_slice(input.get_input_buffer());
 
+        let mut any_event = false;
+
         if input.get_key_just_pressed(glfw::Key::F1) {
+            any_event |= true;
             self.debug_discrete_processing = !self.debug_discrete_processing;
         }
 
@@ -47,21 +54,29 @@ impl TerminalContext {
             self.max_sequences_to_process = 0;
 
             if input.get_key_just_pressed(glfw::Key::F10) {
+                any_event |= true;
                 self.max_sequences_to_process = 1;
             } else if input.get_key_just_pressed(glfw::Key::F11) {
+                any_event |= true;
                 self.max_sequences_to_process = 10;
             } else if input.get_key_just_pressed(glfw::Key::F12) {
+                any_event |= true;
                 self.max_sequences_to_process = 100;
             } else if input.get_key_just_pressed(glfw::Key::F5) {
+                any_event |= true;
                 self.max_sequences_to_process = std::u32::MAX;
             }
         }
+
+        any_event
     }
 
-    fn handle_process_io(&mut self) {
+    fn handle_process_io(&mut self) -> bool {
         let did_split = self.commands.poll_io();
-
         let output = self.commands.get_output();
+
+        let any_event = self.commands.get_output()[0].len() > 0 || self.commands.get_output()[1].len() > 0;
+
         self.output_buffer.extend_from_slice(&output[0]);
         for _ in 0..self.max_sequences_to_process {
             match self.widgets.last_mut().unwrap().push_chars(
@@ -103,5 +118,7 @@ impl TerminalContext {
         self.commands.clear_output();
 
         self.input_buffer.clear();
+
+        any_event
     }
 }

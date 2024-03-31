@@ -35,16 +35,23 @@ impl Layout {
         }
     }
 
-    pub fn update(&mut self, input: &Input) {
-        self.context.update(input);
+    pub fn update(&mut self, input: &Input) -> bool {
+        let mut any_event = false;
+
+        any_event |= self.context.update(input);
 
         // Update scroll
         //let speed_factor = 1.0;
         let speed_factor = 0.01;
         let scroll = input.get_scroll_delta()[1];
         if scroll < 0.0 || self.can_scroll_up {
+            if scroll < 0.0 {
+                any_event |= true;
+            }
             self.scroll_offset = (self.scroll_offset - scroll * speed_factor).min(0.0);
         }
+
+        any_event
     }
 
     pub fn render(
