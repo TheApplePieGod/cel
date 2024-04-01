@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 cel_core = { verison = "0.1.0", path = "../cel_core" }
 cel_renderer = { verison = "0.1.0", path = "../cel_renderer" }
+cli-clipboard = "0.4"
 chrono = "0.4"
 glfw = "0.54"
 gl = "0.10"

@@ -1,4 +1,5 @@
 use glfw::{Action, Key, Modifiers, MouseButton, WindowEvent};
+use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
 #[derive(Default, Copy, Clone, PartialEq, Eq)]
 pub enum PressState {
@@ -11,6 +12,7 @@ pub enum PressState {
 }
 
 pub struct Input {
+    clipboard_context: Option<ClipboardContext>,
     input_buffer: Vec<u8>,
     utf8_buffer: [u8; 8],
     key_states: [(PressState, u64); 512],
@@ -23,7 +25,16 @@ pub struct Input {
 
 impl Input {
     pub fn new() -> Self {
+        let clipboard_context = match ClipboardContext::new() {
+            Ok(ctx) => Some(ctx),
+            Err(err) => {
+                log::error!("Failed to initialize clipboard context: {}", err);
+                None
+            }
+        };
+
         Self {
+            clipboard_context,
             input_buffer: vec![],
             utf8_buffer: [0; 8],
             key_states: [Default::default(); 512],
@@ -54,6 +65,25 @@ impl Input {
                     &action,
                     self.poll_count
                 ) {
+                    #[cfg(target_os = "macos")]
+                    let modifier_key = Modifiers::Super;
+                    #[cfg(not(target_os = "macos"))]
+                    let modifier_key = Modifiers::Control;
+
+                    if mods.contains(modifier_key) {
+                        match *key {
+                            Key::V if self.clipboard_context.is_some() => { // Paste
+                                match self.clipboard_context.as_mut().unwrap().get_contents() {
+                                    Ok(contents) => self.input_buffer.extend(contents.as_bytes()),
+                                    Err(_) => {}
+                                }
+
+                                return true
+                            },
+                            _ => {}
+                        }
+                    }
+
                     self.input_buffer.extend(
                         self.encode_input_key(*key, *mods)
                     );
