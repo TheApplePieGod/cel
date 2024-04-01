@@ -1,8 +1,13 @@
-use cel_core::ansi::{AnsiHandler, BufferState};
+use cel_core::ansi::{self, AnsiHandler, BufferState};
 use cel_renderer::renderer::Renderer;
-use glfw::MouseButton;
 
 use crate::{button::Button, input::Input, layout::LayoutPosition};
+
+const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
+    (ansi::MouseButton::Mouse1, glfw::MouseButton::Button1),
+    (ansi::MouseButton::Mouse2, glfw::MouseButton::Button2),
+    (ansi::MouseButton::Mouse3, glfw::MouseButton::Button3)
+];
 
 pub struct TerminalWidget {
     char_buffer: Vec<u8>,
@@ -10,6 +15,7 @@ pub struct TerminalWidget {
     line_offset: f32,
     chars_per_line: u32,
     lines_per_screen: u32,
+    last_rendered_lines: u32,
     last_computed_height: f32,
 
     primary: bool,
@@ -32,6 +38,7 @@ impl TerminalWidget {
             line_offset: 0.0,
             chars_per_line: 180,
             lines_per_screen: 1,
+            last_rendered_lines: 0,
             last_computed_height: 0.0,
 
             primary: true,
@@ -74,8 +81,9 @@ impl TerminalWidget {
         default_height: f32,
         bg_color: Option<[f32; 3]>,
     ) {
-        let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
+        self.update_mouse_input(renderer, input, position);
 
+        let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
         self.render_background(renderer, position, default_height, &bg_color);
         self.render_divider(renderer, position);
         self.render_terminal(renderer, position, default_height, &bg_color);
@@ -90,6 +98,75 @@ impl TerminalWidget {
     pub fn get_primary(&self) -> bool { self.primary }
     pub fn set_primary(&mut self, primary: bool) { self.primary = primary }
     pub fn get_terminal_size(&self) -> [u32; 2] { [self.chars_per_line, self.lines_per_screen] }
+
+    fn update_mouse_input(
+        &mut self,
+        renderer: &Renderer,
+        input: &Input,
+        position: &LayoutPosition
+    ) {
+        if !self.primary {
+            return;
+        }
+
+        // Compute the target cell based on the mouse position and widget position
+
+        let mouse_pos_px = input.get_mouse_pos();
+        let mouse_pos_screen = [
+            mouse_pos_px[0] / renderer.get_width() as f32,
+            mouse_pos_px[1] / renderer.get_height() as f32,
+        ];
+        let mouse_pos_widget = [
+            (mouse_pos_screen[0] - position.offset[0]) / position.max_size[0],
+            (mouse_pos_screen[1] - position.offset[1]) / self.last_computed_height,
+        ];
+
+        let widget_row = (self.last_rendered_lines as f32 * mouse_pos_widget[1]) as i32;
+        let screen_row =
+            widget_row +
+            self.lines_per_screen.min(self.last_rendered_lines) as i32 -
+            self.last_rendered_lines as i32;
+
+        if screen_row < 0 || screen_row > self.lines_per_screen as i32 {
+            return;
+        }
+
+        let screen_col = (self.chars_per_line as f32 * mouse_pos_widget[0]) as i32;
+
+        if screen_col < 0 || screen_col > self.chars_per_line as i32 {
+            return;
+        }
+
+        let cursor = [screen_col as usize, screen_row as usize];
+        let mut flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
+        if input.is_shift_down() {
+            flags.insert(ansi::KeyboardModifierFlags::Shift);
+        }
+        if input.is_super_down() {
+            flags.insert(ansi::KeyboardModifierFlags::Meta);
+        }
+        if input.is_ctrl_down() {
+            flags.insert(ansi::KeyboardModifierFlags::Control);
+        }
+
+        for entry in MOUSE_BUTTON_MAPPING {
+            self.ansi_handler.handle_mouse_button(
+                entry.0,
+                input.get_mouse_down(entry.1),
+                flags,
+                &cursor
+            );
+        }
+
+        let scroll_scale = 4.0 / self.char_size_px; // Empirical
+        let scroll_delta = input.get_scroll_delta();
+        self.ansi_handler.handle_scroll(
+            scroll_delta[0] * scroll_scale,
+            scroll_delta[1] * scroll_scale,
+            flags,
+            &cursor
+        );
+    }
 
     fn render_background(
         &mut self,
@@ -180,6 +257,9 @@ impl TerminalWidget {
         )
          .max(default_height)
          .min(position.max_size[1]);
+
+        // Set the rendered lines based on the height rather than the actual amount of lines
+        self.last_rendered_lines = (self.last_computed_height / line_size_screen) as u32;
     }
 
     fn render_overlay(
@@ -203,7 +283,7 @@ impl TerminalWidget {
                 [1.0 - button_size[0], position.offset[1]]
             );
             button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
-            if button.is_clicked(input, MouseButton::Button1) {
+            if button.is_clicked(input, glfw::MouseButton::Button1) {
                 self.close();
             }
         }

@@ -11,6 +11,41 @@ pub type Color = [f32; 3];
 pub type Cursor = [usize; 2];
 type SignedCursor = [isize; 2];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+    Mouse1 = 0,
+    Mouse2 = 2, // Flipped????
+    Mouse3 = 1,
+    Mouse4 = 64, // Wheel up
+    Mouse5 = 65,  // Wheel down
+    Mouse6 = 66, // Wheel left
+    Mouse7 = 67,  // Wheel right
+}
+
+bitflags! {
+    #[derive(Copy, Clone, Default)]
+    pub struct KeyboardModifierFlags: u32 {
+        const Shift = 4;
+        const Meta = 8;
+        const Control = 16;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MouseMode {
+    Default,
+    UTF8,
+    SGR
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseTrackingMode {
+    Disabled,
+    Default,
+    ButtonEvent,
+    AnyEvent
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum CursorStyle {
     Block,
@@ -73,6 +108,8 @@ pub struct TerminalState {
     pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
     pub global_cursor: Cursor,
     pub screen_cursor: Cursor,
+    pub mouse_mode: MouseMode,
+    pub mouse_tracking_mode: MouseTrackingMode,
 }
 
 #[derive(Clone, Copy)]
@@ -100,6 +137,10 @@ struct Performer {
 pub struct AnsiHandler {
     performer: Performer,
     state_machine: Parser,
+
+    // Store last cell / press state for mouse buttons
+    mouse_states: [(Cursor, bool); 256],
+    scroll_states: [f32; 2]
 }
 
 pub struct AnsiBuilder {
@@ -128,7 +169,9 @@ impl Default for TerminalState {
             wants_wrap: false,
             global_cursor_home: [0, 0],
             global_cursor: [0, 0],
-            screen_cursor: [0, 0]
+            screen_cursor: [0, 0],
+            mouse_mode: MouseMode::Default,
+            mouse_tracking_mode: MouseTrackingMode::Disabled,
         }
     }
 }

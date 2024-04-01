@@ -12,7 +12,8 @@ pub struct TerminalContext {
     max_sequences_to_process: u32,
     just_split: bool,
 
-    debug_discrete_processing: bool
+    debug_discrete_processing: bool,
+    debug_disable_splits: bool
 }
 
 impl TerminalContext {
@@ -26,7 +27,8 @@ impl TerminalContext {
             max_sequences_to_process: 0,
             just_split: false,
 
-            debug_discrete_processing: false
+            debug_discrete_processing: false,
+            debug_disable_splits: false
         }
     }
 
@@ -50,6 +52,11 @@ impl TerminalContext {
         if input.get_key_just_pressed(glfw::Key::F1) {
             any_event |= true;
             self.debug_discrete_processing = !self.debug_discrete_processing;
+        }
+
+        if input.get_key_just_pressed(glfw::Key::F2) {
+            any_event |= true;
+            self.debug_disable_splits = !self.debug_disable_splits;
         }
 
         self.max_sequences_to_process = std::u32::MAX;
@@ -96,7 +103,7 @@ impl TerminalContext {
             }
         }
 
-        if did_split {
+        if did_split && !self.debug_disable_splits {
             let widget_len = self.widgets.len();
             if widget_len > 1 {
                 //self.widgets[widget_len - 2].set_expanded(false);

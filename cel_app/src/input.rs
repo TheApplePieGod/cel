@@ -99,14 +99,12 @@ impl Input {
                 true
             },
             glfw::WindowEvent::MouseButton(button, action, mods) => {
-                if Self::handle_input_press(
+                Self::handle_input_press(
                     *button as usize,
                     &mut self.mouse_states,
                     &action,
                     self.poll_count
-                ) {
-                    // TODO: mouse encoding
-                }
+                );
 
                 true
             },

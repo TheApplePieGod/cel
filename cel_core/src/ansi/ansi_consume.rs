@@ -8,7 +8,10 @@ impl AnsiHandler {
     pub fn new() -> Self {
         Self {
             performer: Default::default(),
-            state_machine: Parser::new()
+            state_machine: Parser::new(),
+
+            mouse_states: [(Default::default(), false); 256],
+            scroll_states: [0.0; 2]
         }
     }
 
@@ -31,6 +34,126 @@ impl AnsiHandler {
         }
 
         None
+    }
+
+    pub fn handle_scroll(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        flags: KeyboardModifierFlags,
+        cell_position: &Cursor
+    ) {
+        self.scroll_states[0] += delta_x;
+        self.scroll_states[1] += delta_y;
+
+        // Horizontal scroll
+        if self.scroll_states[0].abs() >= 1.0 {
+            let left = self.scroll_states[0] > 0.0;
+            let button = match left {
+                true => MouseButton::Mouse6,
+                false => MouseButton::Mouse7,
+            };
+
+            // Toggle
+            self.handle_mouse_button(button, true, flags, cell_position);
+            self.handle_mouse_button(button, false, flags, cell_position);
+        }
+
+        // Vertical scroll
+        if self.scroll_states[1].abs() >= 1.0 {
+            let up = self.scroll_states[1] > 0.0;
+            let button = match up {
+                true => MouseButton::Mouse4,
+                false => MouseButton::Mouse5,
+            };
+
+            // Toggle
+            self.handle_mouse_button(button, true, flags, cell_position);
+            self.handle_mouse_button(button, false, flags, cell_position);
+        }
+
+        self.scroll_states[0] = self.scroll_states[0].fract();
+        self.scroll_states[1] = self.scroll_states[1].fract();
+    }
+
+    pub fn handle_mouse_button(
+        &mut self,
+        button: MouseButton,
+        press: bool,
+        flags: KeyboardModifierFlags,
+        cell_position: &Cursor // 0-indexed, (0,0) in top left
+    ) {
+        let term_state = &mut self.get_terminal_state();
+        let mouse_state = &self.mouse_states[button as usize];
+        match term_state.mouse_tracking_mode {
+            MouseTrackingMode::Disabled => return,
+            MouseTrackingMode::Default => {
+                // Only send signal on state change
+                if mouse_state.1 == press {
+                    return;
+                }
+            },
+            MouseTrackingMode::ButtonEvent => {
+                // Send signal on state or cell change
+                if mouse_state.1 == press && (!press || mouse_state.0 == *cell_position) {
+                    return;
+                }
+            },
+            // TODO: tracking when no buttons are pressed
+            MouseTrackingMode::AnyEvent => {},
+        }
+
+        let mut sequence: Vec<u8> = vec![0x1b, b'[']; // TODO: reuse
+        match term_state.mouse_mode {
+            MouseMode::Default => {
+                let cx = cell_position[0].min(223) as u32 + 32;
+                let cy = cell_position[1].min(223) as u32 + 32;
+                let mut cb = flags.bits() | match press {
+                    true => button as u32,
+                    false => 3 // Release
+                } + 32;
+
+                // Motion tracking events
+                if press == mouse_state.1 {
+                    cb += 32;
+                }
+
+                sequence.push(b'M');
+                sequence.push(cb as u8);
+                sequence.push(cx as u8);
+                sequence.push(cy as u8);
+            },
+            MouseMode::UTF8 => { /* TODO */ },
+            MouseMode::SGR => {
+                let mut cb = flags.bits() | button as u32;
+                let cx = cell_position[0] as u32 + 1;
+                let cy = cell_position[1] as u32 + 1;
+
+                // Motion tracking events
+                if press == mouse_state.1 {
+                    cb += 32;
+                }
+
+                sequence.push(b'<');
+                sequence.extend(self.convert_num_to_ascii(cb));
+                sequence.push(b';');
+                sequence.extend(self.convert_num_to_ascii(cx));
+                sequence.push(b';');
+                sequence.extend(self.convert_num_to_ascii(cy));
+                sequence.push(b';');
+                sequence.push(match press {
+                    true => b'M',
+                    false => b'm'
+                });
+
+
+                //log::warn!("Sending: {}, {} [{}]", cx, cy, press);
+                //log::warn!("Sending: {:?}", sequence);
+            }
+        }
+
+        self.mouse_states[button as usize] = (*cell_position, press);
+        self.performer.output_stream.extend(sequence);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -64,6 +187,24 @@ impl AnsiHandler {
 
     pub fn set_terminal_color(&mut self, color: &[f32; 3]) {
         self.performer.terminal_state.background_color = *color;
+    }
+
+    fn convert_num_to_ascii(&self, val: u32) -> Vec<u8> {
+        if val == 0 {
+            return vec![b'0'];
+        }
+
+        let mut result = vec![];
+
+        let mut cur = val;
+        while cur > 0 {
+            let digit = cur % 10;
+            result.push((digit + 48) as u8);
+            cur /= 10;
+        }
+
+        result.reverse();
+        result
     }
 }
 
@@ -1030,6 +1171,26 @@ impl Perform for Performer {
                     false => {
                         match params[0] {
                             25 => self.terminal_state.cursor_state.visible = enabled,
+                            1000 => self.terminal_state.mouse_tracking_mode = match enabled {
+                                true => MouseTrackingMode::Default,
+                                false => MouseTrackingMode::Disabled
+                            },
+                            1002 => self.terminal_state.mouse_tracking_mode = match enabled {
+                                true => MouseTrackingMode::ButtonEvent,
+                                false => MouseTrackingMode::Disabled
+                            },
+                            1003 => self.terminal_state.mouse_tracking_mode = match enabled {
+                                true => MouseTrackingMode::AnyEvent,
+                                false => MouseTrackingMode::Disabled
+                            },
+                            1005 => self.terminal_state.mouse_mode = match enabled {
+                                true => MouseMode::UTF8,
+                                false => MouseMode::Default
+                            },
+                            1006 => self.terminal_state.mouse_mode = match enabled {
+                                true => MouseMode::SGR,
+                                false => MouseMode::Default
+                            },
                             1046 => match enabled {
                                 true => match self.terminal_state.alt_screen_buffer_state {
                                     BufferState::Active => {}
