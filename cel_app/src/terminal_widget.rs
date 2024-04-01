@@ -153,6 +153,9 @@ impl TerminalWidget {
         }
 
         self.ansi_handler.set_terminal_color(&bg_color);
+        if !self.primary {
+            self.ansi_handler.hide_cursor();
+        }
 
         /*
         let padded_offset = [

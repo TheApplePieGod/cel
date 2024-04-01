@@ -40,10 +40,6 @@ impl AnsiHandler {
         self.performer.terminal_state.margin = Margin::get_from_screen_size(width, height);
     }
 
-    pub fn set_terminal_color(&mut self, color: &[f32; 3]) {
-        self.performer.terminal_state.background_color = *color;
-    }
-
     pub fn get_terminal_state(&self) -> &TerminalState {
         &self.performer.terminal_state
     }
@@ -58,6 +54,16 @@ impl AnsiHandler {
 
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
+    }
+
+    // TODO: utilize producer ?
+
+    pub fn hide_cursor(&mut self) {
+        self.performer.terminal_state.cursor_state.visible = false;
+    }
+
+    pub fn set_terminal_color(&mut self, color: &[f32; 3]) {
+        self.performer.terminal_state.background_color = *color;
     }
 }
 
