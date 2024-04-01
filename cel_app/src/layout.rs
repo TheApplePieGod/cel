@@ -5,6 +5,7 @@ use crate::input::Input;
 use crate::terminal_widget::TerminalWidget;
 
 // All fields are in screen position
+#[derive(Copy, Clone)]
 pub struct LayoutPosition {
     pub offset: [f32; 2],
     pub max_size: [f32; 2],

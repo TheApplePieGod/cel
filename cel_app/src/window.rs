@@ -72,6 +72,7 @@ impl Window {
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
             //background_color: [0.0, 0.0, 0.0],
+            //background_color: [1.0, 0.0, 0.0],
             last_update_time: Instant::now()
         }
     }

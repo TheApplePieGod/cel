@@ -106,8 +106,8 @@ impl AnsiHandler {
         let mut sequence: Vec<u8> = vec![0x1b, b'[']; // TODO: reuse
         match term_state.mouse_mode {
             MouseMode::Default => {
-                let cx = cell_position[0].min(223) as u32 + 32;
-                let cy = cell_position[1].min(223) as u32 + 32;
+                let cx = cell_position[0].min(222) as u32 + 32 + 1;
+                let cy = cell_position[1].min(222) as u32 + 32 + 1;
                 let mut cb = flags.bits() | match press {
                     true => button as u32,
                     false => 3 // Release

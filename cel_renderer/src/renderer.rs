@@ -27,14 +27,14 @@ pub struct Renderer {
     font: Rc<RefCell<Font>>
 }
 
-struct RenderConstants {
-    aspect_ratio: f32,
-    char_root_size: f32, // Fundamental base size of one character cell
-    char_size_x_px: f32,
-    char_size_y_px: f32,
-    char_size_x_screen: f32,
-    char_size_y_screen: f32,
-    line_height: f32
+pub struct RenderConstants {
+    pub aspect_ratio: f32,
+    pub char_root_size: f32, // Fundamental base size of one character cell
+    pub char_size_x_px: f32,
+    pub char_size_y_px: f32,
+    pub char_size_x_screen: f32,
+    pub char_size_y_screen: f32,
+    pub line_height: f32
 }
 
 impl Renderer {
@@ -257,8 +257,7 @@ impl Renderer {
         self.height = height as u32;
     }
 
-    pub fn compute_max_lines(&self, chars_per_line: u32, screen_height: f32) -> u32 {
-        let rc = self.compute_render_constants(chars_per_line);
+    pub fn compute_max_lines(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
         let lines_per_screen = (1.0 / (rc.line_height * rc.char_size_y_screen)).floor();
 
         (lines_per_screen * screen_height) as u32
@@ -552,11 +551,7 @@ impl Renderer {
         );
     }
 
-    pub fn get_width(&self) -> u32 { self.width }
-    pub fn get_height(&self) -> u32 { self.height }
-    pub fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
-
-    fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
+    pub fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let aspect_ratio = self.width as f32 / self.height as f32;
         let char_root_size = face_metrics.space_size;
@@ -573,6 +568,10 @@ impl Renderer {
             line_height: 1.0 + face_metrics.descender
         }
     }
+
+    pub fn get_width(&self) -> u32 { self.width }
+    pub fn get_height(&self) -> u32 { self.height }
+    pub fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
 
     // Assumes the last vertices were created by push_quad
     fn extend_previous_quad(new_x: f32, vertices: &mut Vec<Vertex>) {

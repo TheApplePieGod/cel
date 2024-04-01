@@ -16,7 +16,7 @@ pub struct TerminalWidget {
     chars_per_line: u32,
     lines_per_screen: u32,
     last_rendered_lines: u32,
-    last_computed_height: f32,
+    last_line_height_screen: f32,
 
     primary: bool,
     closed: bool,
@@ -39,7 +39,7 @@ impl TerminalWidget {
             chars_per_line: 180,
             lines_per_screen: 1,
             last_rendered_lines: 0,
-            last_computed_height: 0.0,
+            last_line_height_screen: 0.0,
 
             primary: true,
             closed: false,
@@ -81,17 +81,24 @@ impl TerminalWidget {
         default_height: f32,
         bg_color: Option<[f32; 3]>,
     ) {
-        self.update_mouse_input(renderer, input, position);
+        // Align the widget such that the first line is at the top of the screen, rather
+        // than the bottom always being at the bottom if the lines do not fully fill up
+        // the screen space
+        let excess_space = 1.0 - (self.last_line_height_screen * self.lines_per_screen as f32);
+        let mut real_position = *position;
+        real_position.offset[1] -= excess_space;
+
+        self.update_mouse_input(renderer, input, &real_position);
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
-        self.render_background(renderer, position, default_height, &bg_color);
-        self.render_divider(renderer, position);
-        self.render_terminal(renderer, position, default_height, &bg_color);
-        self.render_overlay(input, renderer, position);
+        self.render_background(renderer, &real_position, default_height, &bg_color);
+        self.render_divider(renderer, &real_position);
+        self.render_terminal(renderer, &real_position, default_height, &bg_color);
+        self.render_overlay(input, renderer, &real_position);
     }
 
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
-    pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
+    pub fn get_last_computed_height(&self) -> f32 { self.last_rendered_lines as f32 * self.last_line_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
@@ -111,6 +118,7 @@ impl TerminalWidget {
 
         // Compute the target cell based on the mouse position and widget position
 
+        let last_height = self.get_last_computed_height();
         let mouse_pos_px = input.get_mouse_pos();
         let mouse_pos_screen = [
             mouse_pos_px[0] / renderer.get_width() as f32,
@@ -118,22 +126,23 @@ impl TerminalWidget {
         ];
         let mouse_pos_widget = [
             (mouse_pos_screen[0] - position.offset[0]) / position.max_size[0],
-            (mouse_pos_screen[1] - position.offset[1]) / self.last_computed_height,
+            (mouse_pos_screen[1] - position.offset[1]) / last_height,
         ];
 
-        let widget_row = (self.last_rendered_lines as f32 * mouse_pos_widget[1]) as i32;
+        let line_count = self.last_rendered_lines;
+        let widget_row = (line_count as f32 * mouse_pos_widget[1]) as i32;
         let screen_row =
             widget_row +
             self.lines_per_screen.min(self.last_rendered_lines) as i32 -
             self.last_rendered_lines as i32;
 
-        if screen_row < 0 || screen_row > self.lines_per_screen as i32 {
+        if screen_row < 0 || screen_row >= self.lines_per_screen as i32 {
             return;
         }
 
         let screen_col = (self.chars_per_line as f32 * mouse_pos_widget[0]) as i32;
 
-        if screen_col < 0 || screen_col > self.chars_per_line as i32 {
+        if screen_col < 0 || screen_col >= self.chars_per_line as i32 {
             return;
         }
 
@@ -207,8 +216,9 @@ impl TerminalWidget {
         let padding = padding_px / renderer.get_width() as f32;
         let width_px = renderer.get_width() as f32 * position.max_size[0];
         let max_chars = ((width_px - 2.0 * padding_px) / self.char_size_px) as u32;
-        let num_screen_lines = renderer.compute_max_lines(max_chars, 1.0);
-        let line_size_screen = 1.0 / num_screen_lines as f32;
+        let rc = renderer.compute_render_constants(max_chars);
+        let num_screen_lines = renderer.compute_max_lines(&rc, 1.0);
+        let line_size_screen = rc.char_size_y_screen * rc.line_height;
         let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
         let max_terminal_lines = num_screen_lines.min(num_actual_lines);
 
@@ -252,14 +262,15 @@ impl TerminalWidget {
         );
 
         //log::warn!("RL: {}", rendered_lines);
-        self.last_computed_height = (
+        let clamped_height = (
             rendered_lines as f32 * line_size_screen
         )
          .max(default_height)
          .min(position.max_size[1]);
 
         // Set the rendered lines based on the height rather than the actual amount of lines
-        self.last_rendered_lines = (self.last_computed_height / line_size_screen) as u32;
+        self.last_rendered_lines = (clamped_height / line_size_screen).ceil() as u32;
+        self.last_line_height_screen = line_size_screen;
     }
 
     fn render_overlay(
