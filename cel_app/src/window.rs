@@ -197,15 +197,15 @@ impl Window {
         if input.event_new_tab {
             input.event_new_tab = false;
             layouts.push(Layout::new(self.get_width(), self.get_height()));
-            self.active_layout_idx = self.layouts.len() - 1;
+            self.active_layout_idx = layouts.len() - 1;
         }
         if input.event_prev_tab {
             input.event_prev_tab = false;
-            self.active_layout_idx = (self.active_layout_idx + 1).rem_euclid(layouts.len());
+            self.active_layout_idx = (self.active_layout_idx - 1).rem_euclid(layouts.len());
         }
         if input.event_next_tab {
             input.event_next_tab = false;
-            self.active_layout_idx = (self.active_layout_idx - 1).rem_euclid(layouts.len());
+            self.active_layout_idx = (self.active_layout_idx + 1).rem_euclid(layouts.len());
         }
 
         any_event
