@@ -1,4 +1,5 @@
 
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -15,11 +16,12 @@ pub struct Window {
     glfw_instance: glfw::Glfw,
     window: Rc<RefCell<glfw::PWindow>>,
     renderer: Rc<RefCell<Renderer>>,
-    layout: Rc<RefCell<Layout>>,
+    layouts: Rc<RefCell<Vec<Layout>>>,
     input: Rc<RefCell<Input>>,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
     background_color: [f32; 3],
-    last_update_time: Instant
+    last_update_time: Instant,
+    active_layout_idx: usize
 }
 
 impl Window {
@@ -64,31 +66,35 @@ impl Window {
                 scale.into(),
                 AppState::current().as_ref().borrow().font.clone()
             ))),
-            layout: Rc::new(RefCell::new(Layout::new(
+            layouts: Rc::new(RefCell::new(vec![Layout::new(
                 initial_size_px.0,
                 initial_size_px.1
-            ))),
+            )])),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
             //background_color: [0.0, 0.0, 0.0],
             //background_color: [1.0, 0.0, 0.0],
-            last_update_time: Instant::now()
+            last_update_time: Instant::now(),
+            active_layout_idx: 0
         }
     }
 
     pub fn update_and_render(&mut self) {
         let renderer_ptr = self.renderer.clone();
-        let layout_ptr = self.layout.clone();
+        let layout_ptr = self.layouts.clone();
         let window_ptr = self.window.clone();
         let input_ptr = self.input.clone();
         let clear_color = self.background_color;
+        let active_layout_idx = self.active_layout_idx;
         self.window.as_ref().borrow_mut().set_refresh_callback(move |w| {
+            let mut layouts = layout_ptr.as_ref().borrow_mut();
+
             // Update
             Self::on_resized_wrapper(
                 w.get_size().into(),
                 renderer_ptr.as_ref().borrow_mut().deref_mut(),
-                layout_ptr.as_ref().borrow_mut().deref_mut()
+                &mut layouts
             );
 
             // !Glitchy!
@@ -99,10 +105,11 @@ impl Window {
             */
 
             // Render
+            let active_layout = &mut layouts[active_layout_idx];
             Self::render_wrapper(
                 &clear_color,
                 renderer_ptr.as_ref().borrow_mut().deref_mut(),
-                layout_ptr.as_ref().borrow_mut().deref_mut(),
+                active_layout,
                 window_ptr.as_ref().borrow_mut().deref_mut(),
                 input_ptr.as_ref().borrow().deref()
             );
@@ -113,7 +120,8 @@ impl Window {
         any_event |= self.poll_events();
 
         // Update layout
-        any_event |= self.layout.as_ref().borrow_mut().update(
+        let active_layout = &mut self.layouts.as_ref().borrow_mut()[self.active_layout_idx];
+        any_event |= active_layout.update(
             self.input.as_ref().borrow().deref()
         );
 
@@ -128,7 +136,7 @@ impl Window {
             Self::render_wrapper(
                 &self.background_color,
                 self.renderer.as_ref().borrow_mut().deref_mut(),
-                self.layout.as_ref().borrow_mut().deref_mut(),
+                active_layout,
                 self.window.as_ref().borrow_mut().deref_mut(),
                 self.input.as_ref().borrow().deref()
             );
@@ -155,9 +163,12 @@ impl Window {
 
         self.input.as_ref().borrow_mut().poll_events();
 
+        // Handle window events
         self.glfw_instance.poll_events();
+        let mut input = self.input.as_ref().borrow_mut();
+        let mut layouts = self.layouts.as_ref().borrow_mut();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
-            if self.input.as_ref().borrow_mut().handle_window_event(&event) {
+            if input.handle_window_event(&event) {
                 any_event = true;
                 continue;
             }
@@ -174,13 +185,27 @@ impl Window {
                 _ => {},
             }
         }
-
         if resize {
             Self::on_resized_wrapper(
                 self.get_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
-                self.layout.as_ref().borrow_mut().deref_mut()
+                self.layouts.as_ref().borrow_mut().deref_mut()
             );
+        }
+
+        // Handle input events
+        if input.event_new_tab {
+            input.event_new_tab = false;
+            layouts.push(Layout::new(self.get_width(), self.get_height()));
+            self.active_layout_idx = self.layouts.len() - 1;
+        }
+        if input.event_prev_tab {
+            input.event_prev_tab = false;
+            self.active_layout_idx = (self.active_layout_idx + 1).rem_euclid(layouts.len());
+        }
+        if input.event_next_tab {
+            input.event_next_tab = false;
+            self.active_layout_idx = (self.active_layout_idx - 1).rem_euclid(layouts.len());
         }
 
         any_event
@@ -201,10 +226,12 @@ impl Window {
     fn on_resized_wrapper(
         new_size: [i32; 2],
         renderer: &mut Renderer,
-        layout: &mut Layout
+        layouts: &mut Vec<Layout>
     ) {
         renderer.update_viewport_size(new_size[0], new_size[1]);
-        layout.on_window_resized(new_size);
+        for layout in layouts {
+            layout.on_window_resized(new_size);
+        }
     }
 
     fn begin_frame<'a>(clear_color: &[f32; 3]) {

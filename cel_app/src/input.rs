@@ -20,7 +20,12 @@ pub struct Input {
     mouse_pos: [f32; 2],
     mouse_delta: [f32; 2],
     scroll_delta: [f32; 2],
-    poll_count: u64
+    poll_count: u64,
+
+    // Event flags
+    pub event_new_tab: bool,
+    pub event_next_tab: bool,
+    pub event_prev_tab: bool,
 }
 
 impl Input {
@@ -42,7 +47,11 @@ impl Input {
             mouse_pos: [0.0, 0.0],
             mouse_delta: [0.0, 0.0],
             scroll_delta: [0.0, 0.0],
-            poll_count: 0
+            poll_count: 0,
+
+            event_new_tab: false,
+            event_next_tab: false,
+            event_prev_tab: false,
         }
     }
 
@@ -70,6 +79,7 @@ impl Input {
                     #[cfg(not(target_os = "macos"))]
                     let modifier_key = Modifiers::Control;
 
+                    // Copy/Paste
                     if mods.contains(modifier_key) {
                         match *key {
                             Key::V if self.clipboard_context.is_some() => { // Paste
@@ -80,6 +90,16 @@ impl Input {
 
                                 return true
                             },
+                            _ => {}
+                        }
+                    }
+
+                    // Cel commands
+                    if mods.contains(Modifiers::Control) {
+                        match *key {
+                            Key::T => self.event_new_tab = true,
+                            Key::Right => self.event_next_tab = true,
+                            Key::Left => self.event_prev_tab = true,
                             _ => {}
                         }
                     }
