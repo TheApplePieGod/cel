@@ -268,6 +268,7 @@ impl Renderer {
         &mut self,
         terminal_state: &TerminalState,
         screen_offset: &[f32; 2],
+        padding_px: &[f32; 2],
         chars_per_line: u32,
         lines_per_screen: u32,
         line_offset: f32,
@@ -277,7 +278,7 @@ impl Renderer {
     ) -> u32 {
         // Setup render state
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
-        let rc = self.compute_render_constants(chars_per_line);
+        let rc = self.compute_render_constants(chars_per_line, padding_px);
         let timestamp_seconds = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::new(0, 0))
@@ -310,7 +311,7 @@ impl Renderer {
             y += rc.line_height;
 
             let max_offscreen_lines = 10.0;
-            let y_pos_screen = (y * rc.char_size_y_screen);// + screen_offset[1];
+            let y_pos_screen = y * rc.char_size_y_screen;
             if y_pos_screen < 0.0 - rc.char_size_y_screen * max_offscreen_lines {
                 // Account for the size of wrapped offscreen lines 
                 if line_idx < terminal_state.screen_buffer.len() {
@@ -396,7 +397,7 @@ impl Renderer {
                     break 'outer;
                 }
 
-                let max_x = rc.char_root_size * chars_per_line as f32 - 0.001;
+                let max_x = base_x + rc.char_root_size * chars_per_line as f32 - 0.0001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
                     max_line_count += 1;
@@ -509,7 +510,7 @@ impl Renderer {
         text: &str
     ) {
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
-        let rc = self.compute_render_constants(150);
+        let rc = self.compute_render_constants(150, &[0.0, 0.0]);
 
         let mut x = 0.0;
         let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
@@ -551,11 +552,12 @@ impl Renderer {
         );
     }
 
-    pub fn compute_render_constants(&self, chars_per_line: u32) -> RenderConstants {
+    pub fn compute_render_constants(&self, chars_per_line: u32, padding_px: &[f32; 2]) -> RenderConstants {
+        let real_width = self.width as f32 - padding_px[0] * 2.0;
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let aspect_ratio = self.width as f32 / self.height as f32;
         let char_root_size = face_metrics.space_size;
-        let char_size_x_px = self.width as f32 / chars_per_line as f32 / char_root_size;
+        let char_size_x_px = real_width / chars_per_line as f32 / char_root_size;
         let char_size_x_screen = char_size_x_px / self.width as f32;
 
         RenderConstants {

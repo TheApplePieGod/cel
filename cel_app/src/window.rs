@@ -189,7 +189,7 @@ impl Window {
             Self::on_resized_wrapper(
                 self.get_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
-                self.layouts.as_ref().borrow_mut().deref_mut()
+                &mut layouts
             );
         }
 

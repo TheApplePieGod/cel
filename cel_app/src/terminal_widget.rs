@@ -14,6 +14,7 @@ pub struct TerminalWidget {
     ansi_handler: AnsiHandler,
     chars_per_line: u32,
     lines_per_screen: u32,
+    last_computed_height: f32,
     last_rendered_lines: u32,
     last_line_height_screen: f32,
 
@@ -22,6 +23,7 @@ pub struct TerminalWidget {
     expanded: bool,
     wrap: bool,
 
+    padding_px: [f32; 2],
     char_size_px: f32,
     button_size_px: f32,
 
@@ -36,6 +38,7 @@ impl TerminalWidget {
             ansi_handler: AnsiHandler::new(),
             chars_per_line: 180,
             lines_per_screen: 1,
+            last_computed_height: 0.0,
             last_rendered_lines: 0,
             last_line_height_screen: 0.0,
 
@@ -44,6 +47,7 @@ impl TerminalWidget {
             expanded: true,
             wrap: true,
 
+            padding_px: [8.0, 12.0],
             char_size_px: 8.0,
             button_size_px: 20.0,
 
@@ -96,7 +100,7 @@ impl TerminalWidget {
     }
 
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
-    pub fn get_last_computed_height(&self) -> f32 { self.last_rendered_lines as f32 * self.last_line_height_screen }
+    pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
@@ -205,7 +209,7 @@ impl TerminalWidget {
         let size_px = 1.0;
         let size = size_px / renderer.get_height() as f32;
         renderer.draw_quad(
-            &[position.offset[0], position.offset[1] - size * 2.0],
+            &[position.offset[0], position.offset[1]],
             &[1.0, size],
             &[0.933, 0.388, 0.321]
         );
@@ -218,11 +222,20 @@ impl TerminalWidget {
         default_height: f32,
         bg_color: &[f32; 3]
     ) {
-        let padding_px = 20.0;
-        let padding = padding_px / renderer.get_width() as f32;
+        let mut line_offset = 0.0;
+        let mut padding_px = self.padding_px;
+
+        // If the alt screen buf is active, we can ignore special rendering styles
+        // Also, ensure the most recent screen is visible (home cursor)
+        if self.ansi_handler.is_alt_screen_buf_active() {
+            line_offset = self.ansi_handler.get_terminal_state().global_cursor_home[1] as f32;
+            padding_px = [0.0, 0.0];
+        }
+
+        let padding = [padding_px[0] / renderer.get_width() as f32, padding_px[1] / renderer.get_height() as f32];
         let width_px = renderer.get_width() as f32 * position.max_size[0];
-        let max_chars = ((width_px - 2.0 * padding_px) / self.char_size_px) as u32;
-        let rc = renderer.compute_render_constants(max_chars);
+        let max_chars = ((width_px - padding_px[0] * 2.0) / self.char_size_px) as u32;
+        let rc = renderer.compute_render_constants(max_chars, &self.padding_px);
         let num_screen_lines = renderer.compute_max_lines(&rc, 1.0);
         let line_size_screen = rc.char_size_y_screen * rc.line_height;
         let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
@@ -250,22 +263,14 @@ impl TerminalWidget {
             self.ansi_handler.hide_cursor();
         }
 
-        // If the alt screen buf is active, we want to render the current screen view
-        // i.e. starting from the position of the home cursor
-        let mut line_offset = 0.0;
-        if self.ansi_handler.is_alt_screen_buf_active() {
-            line_offset = self.ansi_handler.get_terminal_state().global_cursor_home[1] as f32;
-        }
-
-        /*
         let padded_offset = [
-            position.offset[0] + padding,
-            position.offset[1]
+            position.offset[0] + padding[0],
+            position.offset[1] + padding[1]
         ];
-        */
         let rendered_lines = renderer.render_terminal(
             &self.ansi_handler.get_terminal_state(),
-            &position.offset,
+            &padded_offset,
+            &self.padding_px,
             max_chars,
             max_render_lines,
             line_offset,
@@ -284,6 +289,8 @@ impl TerminalWidget {
         // Set the rendered lines based on the height rather than the actual amount of lines
         self.last_rendered_lines = (clamped_height / line_size_screen).ceil() as u32;
         self.last_line_height_screen = line_size_screen;
+
+        self.last_computed_height = self.last_rendered_lines as f32 * line_size_screen + padding[1] * 2.0;
     }
 
     fn render_overlay(
