@@ -12,7 +12,6 @@ const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
 pub struct TerminalWidget {
     char_buffer: Vec<u8>,
     ansi_handler: AnsiHandler,
-    line_offset: f32,
     chars_per_line: u32,
     lines_per_screen: u32,
     last_rendered_lines: u32,
@@ -35,7 +34,6 @@ impl TerminalWidget {
         Self {
             char_buffer: vec![],
             ansi_handler: AnsiHandler::new(),
-            line_offset: 0.0,
             chars_per_line: 180,
             lines_per_screen: 1,
             last_rendered_lines: 0,
@@ -252,6 +250,13 @@ impl TerminalWidget {
             self.ansi_handler.hide_cursor();
         }
 
+        // If the alt screen buf is active, we want to render the current screen view
+        // i.e. starting from the position of the home cursor
+        let mut line_offset = 0.0;
+        if self.ansi_handler.is_alt_screen_buf_active() {
+            line_offset = self.ansi_handler.get_terminal_state().global_cursor_home[1] as f32;
+        }
+
         /*
         let padded_offset = [
             position.offset[0] + padding,
@@ -263,7 +268,7 @@ impl TerminalWidget {
             &position.offset,
             max_chars,
             max_render_lines,
-            self.line_offset,
+            line_offset,
             self.wrap,
             self.debug_line_number,
             self.debug_show_cursor
