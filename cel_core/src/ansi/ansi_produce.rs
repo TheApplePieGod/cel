@@ -57,6 +57,10 @@ impl AnsiBuilder {
         self.set_cursor_pos(1, 1)
     }
 
+    pub fn reverse_index(self) -> Self {
+        self.add_raw(&[0x1b, b'M'])
+    }
+
     // Margins
 
     pub fn set_scroll_margin_y(self, top: u32, bottom: u32) -> Self {

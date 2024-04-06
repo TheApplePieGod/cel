@@ -278,4 +278,29 @@ mod tests {
         assert_eq!(state.global_cursor_home, [5, 0]);
         assert!(!state.wants_wrap);
     }
+
+    #[test]
+    fn reverse_index_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("1234567890123") // 3 lines
+            .add_newline_and_cr()
+            .add_text("1234567890123") // 3 lines
+            .reverse_index()
+            .set_cursor_pos(1, 1)
+            .add_text("A")
+        );
+
+        let final_buffer = vec![
+            vec!['1', '2', '3', '4', '5',
+                 'A', '7', '8', '9', '0',
+                 '1', '2', '3'],
+            vec!['1', '2', '3', '4', '5',
+                 '6', '7', '8', '9', '0',
+                 '1', '2', '3'],
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor_home, [5, 0]);
+        assert_eq!(state.screen_cursor, [1, 0]);
+        assert!(!state.wants_wrap);
+    }
 }

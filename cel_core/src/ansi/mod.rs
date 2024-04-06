@@ -112,7 +112,7 @@ pub struct TerminalState {
     pub mouse_tracking_mode: MouseTrackingMode,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BufferState {
     Disabled,
     Enabled,

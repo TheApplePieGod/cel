@@ -175,6 +175,10 @@ impl AnsiHandler {
         self.performer.is_empty
     }
 
+    pub fn is_alt_screen_buf_active(&self) -> bool {
+        self.performer.terminal_state.alt_screen_buffer_state == BufferState::Active
+    }
+
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
     }
@@ -785,7 +789,7 @@ impl Performer {
 
         if down && state.screen_cursor[1] < state.margin.bottom {
             self.terminal_state.screen_cursor[1] += 1;
-        } else if !down && state.screen_cursor[1] < state.margin.bottom {
+        } else if !down && state.screen_cursor[1] > state.margin.top {
             self.terminal_state.screen_cursor[1] -= 1;
         } else {
             if self.scroll_region(down, state.margin) {
