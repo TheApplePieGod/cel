@@ -91,7 +91,7 @@ impl TerminalWidget {
         self.update_mouse_input(renderer, input, &real_position);
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
-        self.render_background(renderer, &real_position, default_height, &bg_color);
+        self.render_background(renderer, &real_position, default_height, excess_space, &bg_color);
         self.render_divider(renderer, &real_position);
         self.render_terminal(renderer, &real_position, default_height, &bg_color);
         self.render_overlay(input, renderer, &real_position);
@@ -182,11 +182,19 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
         default_height: f32,
+        excess_space: f32,
         bg_color: &[f32; 3]
     ) {
+        // Increase the size of the primary widget to compensate for the upward
+        // alignment shift so that scrolled widgets are not visible behind the primary
+        let extra_height = match self.primary {
+            true => excess_space,
+            false => 0.0
+        };
+
         renderer.draw_quad(
             &position.offset,
-            &[1.0, self.get_last_computed_height().max(default_height)],
+            &[1.0, self.get_last_computed_height().max(default_height) + extra_height],
             &bg_color
         );
     }
