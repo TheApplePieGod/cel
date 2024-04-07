@@ -17,6 +17,7 @@ pub struct TerminalWidget {
     last_computed_height: f32,
     last_rendered_lines: u32,
     last_line_height_screen: f32,
+    last_char_width_screen: f32,
 
     primary: bool,
     closed: bool,
@@ -41,6 +42,7 @@ impl TerminalWidget {
             last_computed_height: 0.0,
             last_rendered_lines: 0,
             last_line_height_screen: 0.0,
+            last_char_width_screen: 0.0,
 
             primary: true,
             closed: false,
@@ -120,14 +122,15 @@ impl TerminalWidget {
 
         // Compute the target cell based on the mouse position and widget position
 
-        let last_height = self.get_last_computed_height();
+        let last_height = self.last_computed_height;
+        let last_width = self.last_char_width_screen * self.chars_per_line as f32;
         let mouse_pos_px = input.get_mouse_pos();
         let mouse_pos_screen = [
             mouse_pos_px[0] / renderer.get_width() as f32,
             mouse_pos_px[1] / renderer.get_height() as f32,
         ];
         let mouse_pos_widget = [
-            (mouse_pos_screen[0] - position.offset[0]) / position.max_size[0],
+            (mouse_pos_screen[0] - position.offset[0]) / last_width,
             (mouse_pos_screen[1] - position.offset[1]) / last_height,
         ];
 
@@ -143,7 +146,6 @@ impl TerminalWidget {
         }
 
         let screen_col = (self.chars_per_line as f32 * mouse_pos_widget[0]) as i32;
-
         if screen_col < 0 || screen_col >= self.chars_per_line as i32 {
             return;
         }
@@ -289,6 +291,8 @@ impl TerminalWidget {
         // Set the rendered lines based on the height rather than the actual amount of lines
         self.last_rendered_lines = (clamped_height / line_size_screen).ceil() as u32;
         self.last_line_height_screen = line_size_screen;
+
+        self.last_char_width_screen = rc.char_root_size * rc.char_size_x_screen;
 
         self.last_computed_height = self.last_rendered_lines as f32 * line_size_screen + padding[1] * 2.0;
     }
