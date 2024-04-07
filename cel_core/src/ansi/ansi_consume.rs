@@ -1060,6 +1060,34 @@ impl Perform for Performer {
                 log::debug!("Cursor left [{:?}]", amount);
                 self.set_cursor_pos_relative(&[-amount, 0])
             },
+            'E' => {
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Cursor next line [{:?}]", amount);
+                let mut new_screen = self.get_relative_screen_cursor(&[0, amount]);
+                new_screen[0] = 0;
+                self.set_cursor_pos_absolute(&new_screen);
+            },
+            'F' => {
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Cursor preceding line [{:?}]", amount);
+                let mut new_screen = self.get_relative_screen_cursor(&[0, -amount]);
+                new_screen[0] = 0;
+                self.set_cursor_pos_absolute(&new_screen);
+            },
+            'G' => { // Place cursor in row
+                let col = match params.len() {
+                    0 | 1 if params[0] == 0 => 0,
+                    _ => params[0] as usize - 1
+                };
+                log::debug!("Cursor set col [{}]", col);
+                self.set_cursor_pos_absolute(&[col, self.terminal_state.screen_cursor[1]]);
+            },
             'H' => { // Place cursor
                 // Params have row, col format
                 let row = match params.len() {
