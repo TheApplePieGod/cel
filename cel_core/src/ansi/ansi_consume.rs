@@ -862,6 +862,19 @@ impl Performer {
             style: state.style_state
         };
     }
+
+    fn remove_characters_at_cursor(&mut self, amount: u32) {
+        let state = &mut self.terminal_state;
+        if state.global_cursor[1] >= state.screen_buffer.len() {
+            return;
+        }
+
+        let offset = state.global_cursor[0];
+        let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
+        let range = offset..((offset + amount as usize).min(buffer_line.len()));
+        buffer_line.drain(range);
+    }
+
 }
 
 // TO ADD:
@@ -1167,6 +1180,7 @@ impl Perform for Performer {
                     _ => params[0]
                 } as u32;
                 log::debug!("Delete chars [{:?}]", amount);
+                self.remove_characters_at_cursor(amount);
             },
             'c' => { // Send device attributes
                 if !params.is_empty() && params[0] != 0 {
