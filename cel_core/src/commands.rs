@@ -53,19 +53,19 @@ impl Commands {
             //cmd.args(["-is"]);
             //cmd.args(["-i", "-c", "{}; exec {} -i"]);
             cmd.args([
-                "+o", "promptsp", "+o", "histignorespace"
+                "-il", "+o", "promptsp", "+o", "histignorespace"
             ]);
         }
         cmd.get_argv_mut()[0] = shell.into();
         cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
+        cmd.env_remove("TERMINFO");
+        cmd.env("TERM", "tmux-256color");
+        cmd.env("CEL_PROMPT_ID", "0");
 
         let child = pair.slave.spawn_command(cmd).unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
-        writer.write_all(" TERMINFO=\r".as_bytes());
-        writer.write_all(" TERM=tmux-256color\r".as_bytes());
-        writer.write_all(" CEL_PROMPT_ID=0\r".as_bytes());
         writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"; CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1))'\r".as_bytes());
         writer.write_all(" precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());
         writer.write_all(" PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'$PROMPT\r".as_bytes());

@@ -55,8 +55,8 @@ impl Window {
         
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
-        // Disable vsync to decrease latency
-        glfw_instance.set_swap_interval(glfw::SwapInterval::None);
+        //glfw_instance.set_swap_interval(glfw::SwapInterval::None);
+        glfw_instance.set_swap_interval(glfw::SwapInterval::Sync(1));
 
         let scale = window.get_content_scale();
         let initial_size_px = window.get_size();
@@ -151,7 +151,7 @@ impl Window {
                 active_layout,
                 self.window.as_ref().borrow_mut().deref_mut(),
                 self.input.as_ref().borrow().deref()
-            );
+            ) | any_event;
             self.last_render_time = Instant::now();
         }
 
