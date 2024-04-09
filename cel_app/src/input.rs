@@ -81,26 +81,34 @@ impl Input {
 
                     // Copy/Paste
                     if mods.contains(modifier_key) {
+                        let mut handled = true;
                         match *key {
                             Key::V if self.clipboard_context.is_some() => { // Paste
                                 match self.clipboard_context.as_mut().unwrap().get_contents() {
                                     Ok(contents) => self.input_buffer.extend(contents.as_bytes()),
                                     Err(_) => {}
                                 }
-
-                                return true
                             },
-                            _ => {}
+                            _ => handled = false
+                        }
+
+                        if handled {
+                            return true;
                         }
                     }
 
                     // Cel commands
                     if mods.contains(Modifiers::Control) {
+                        let mut handled = true;
                         match *key {
                             Key::T => self.event_new_tab = true,
                             Key::Right => self.event_next_tab = true,
                             Key::Left => self.event_prev_tab = true,
-                            _ => {}
+                            _ => handled = false
+                        }
+
+                        if handled {
+                            return true;
                         }
                     }
 

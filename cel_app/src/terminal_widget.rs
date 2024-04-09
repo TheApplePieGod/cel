@@ -34,14 +34,17 @@ pub struct TerminalWidget {
 
 impl TerminalWidget {
     pub fn new() -> Self {
+        let chars_per_line = 180; // Sane default size
+        let lines_per_screen = 40;
+
         Self {
             char_buffer: vec![],
-            ansi_handler: AnsiHandler::new(),
-            chars_per_line: 180,
-            lines_per_screen: 1,
+            ansi_handler: AnsiHandler::new(chars_per_line, lines_per_screen),
+            chars_per_line,
+            lines_per_screen,
             last_computed_height: 0.0,
             last_rendered_lines: 0,
-            last_line_height_screen: 0.0,
+            last_line_height_screen: 1.0, // To prevent the 'excess space' from blowing up on initial render
             last_char_width_screen: 0.0,
 
             primary: true,
@@ -49,7 +52,7 @@ impl TerminalWidget {
             expanded: true,
             wrap: true,
 
-            padding_px: [8.0, 12.0],
+            padding_px: [12.0, 12.0],
             char_size_px: 8.0,
             button_size_px: 20.0,
 
@@ -77,6 +80,7 @@ impl TerminalWidget {
         self.ansi_handler.reset();
     }
 
+    // Returns true if a rerender should occur after this one
     pub fn render(
         &mut self,
         renderer: &mut Renderer,
@@ -84,7 +88,7 @@ impl TerminalWidget {
         position: &LayoutPosition,
         default_height: f32,
         bg_color: Option<[f32; 3]>,
-    ) {
+    ) -> bool {
         // Align the widget such that the first line is at the top of the screen, rather
         // than the bottom always being at the bottom if the lines do not fully fill up
         // the screen space
@@ -98,7 +102,8 @@ impl TerminalWidget {
         self.render_background(renderer, &real_position, default_height, excess_space, &bg_color);
         self.render_divider(renderer, &real_position);
         self.render_terminal(renderer, &real_position, default_height, &bg_color);
-        self.render_overlay(input, renderer, &real_position);
+
+        self.render_overlay(input, renderer, &real_position)
     }
 
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
@@ -297,18 +302,21 @@ impl TerminalWidget {
         self.last_computed_height = self.last_rendered_lines as f32 * line_size_screen + padding[1] * 2.0;
     }
 
+    // Returns true if a rerender should occur after this one, i.e. when a button is pressed
     fn render_overlay(
         &mut self,
         input: &Input,
         renderer: &mut Renderer,
         position: &LayoutPosition,
-    ) {
+    ) -> bool {
         let aspect = renderer.get_aspect_ratio();
         let screen_size = [renderer.get_width() as f32, renderer.get_height() as f32];
         let button_size = [
             self.button_size_px / screen_size[0],
             self.button_size_px / screen_size[0] as f32 * aspect
         ];
+
+        let mut should_rerender = false;
 
         // Close button
         if !self.primary {
@@ -320,7 +328,10 @@ impl TerminalWidget {
             button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
             if button.is_clicked(input, glfw::MouseButton::Button1) {
                 self.close();
+                should_rerender = true;
             }
         }
+
+        should_rerender
     }
 }

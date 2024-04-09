@@ -59,14 +59,16 @@ impl Layout {
         any_event
     }
 
+    // Returns true if a rerender should occur after this one
     pub fn render(
         &mut self,
         bg_color: Option<[f32; 3]>,
         renderer: &mut Renderer,
         input: &Input
-    ) {
+    ) -> bool {
         let widget_height = self.widget_height_px / self.height as f32;
 
+        let mut should_rerender = false;
         let mut last_local_offset = 0.0;
         let mut last_global_offset = 0.0;
         self.map_onscreen_widgets(|ctx, local_offset, global_offset| {
@@ -80,7 +82,7 @@ impl Layout {
                 last_local_offset = local_offset;
                 last_global_offset = global_offset;
             }
-            ctx.render(
+            should_rerender |= ctx.render(
                 renderer,
                 input,
                 &LayoutPosition {
@@ -94,6 +96,8 @@ impl Layout {
 
         // Lock scrolling to the last widget
         self.can_scroll_up = last_local_offset < 0.0;
+
+        should_rerender
     }
 
     pub fn on_window_resized(&mut self, new_size: [i32; 2]) {

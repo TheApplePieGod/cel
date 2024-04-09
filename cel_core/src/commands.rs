@@ -160,7 +160,7 @@ impl Commands {
     }
 
     pub fn resize(&mut self, rows: u32, cols: u32) {
-        if rows == self.rows && cols == self.cols {
+        if (rows == self.rows && cols == self.cols) || rows == 0 || cols == 0 {
             return;
         }
 

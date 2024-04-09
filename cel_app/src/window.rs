@@ -1,5 +1,5 @@
 
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -20,8 +20,11 @@ pub struct Window {
     input: Rc<RefCell<Input>>,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
     background_color: [f32; 3],
-    last_update_time: Instant,
-    active_layout_idx: usize
+    active_layout_idx: usize,
+
+    last_event_time: Instant,
+    last_render_time: Instant,
+    rerender_requested: bool,
 }
 
 impl Window {
@@ -75,8 +78,11 @@ impl Window {
             background_color: [0.05, 0.05, 0.1],
             //background_color: [0.0, 0.0, 0.0],
             //background_color: [1.0, 0.0, 0.0],
-            last_update_time: Instant::now(),
-            active_layout_idx: 0
+            active_layout_idx: 0,
+
+            last_event_time: Instant::now(),
+            last_render_time: Instant::now(),
+            rerender_requested: true
         }
     }
 
@@ -97,15 +103,12 @@ impl Window {
                 &mut layouts
             );
 
+            let active_layout = &mut layouts[active_layout_idx];
+
             // !Glitchy!
-            /*
-            layout_ptr.as_ref().borrow_mut().update(
-                input_ptr.as_ref().borrow().deref()
-            );
-            */
+            //active_layout.update(input_ptr.as_ref().borrow().deref());
 
             // Render
-            let active_layout = &mut layouts[active_layout_idx];
             Self::render_wrapper(
                 &clear_color,
                 renderer_ptr.as_ref().borrow_mut().deref_mut(),
@@ -115,33 +118,41 @@ impl Window {
             );
         });
 
+        // Reduce update frequency if there have not been recent inputs
+        let event_time_dist = (Instant::now() - self.last_event_time).as_secs_f32();
+        let recently_updated = event_time_dist <= 3.0;
+        if !recently_updated {
+            std::thread::sleep(std::time::Duration::new(0, 50e6 as u32));
+        }
+
         let mut any_event = false;
 
         any_event |= self.poll_events();
 
         // Update layout
         let active_layout = &mut self.layouts.as_ref().borrow_mut()[self.active_layout_idx];
-        any_event |= active_layout.update(
-            self.input.as_ref().borrow().deref()
-        );
+        any_event |= active_layout.update(self.input.as_ref().borrow().deref());
 
         if any_event {
-            self.last_update_time = Instant::now();
+            self.last_event_time = Instant::now();
         }
 
         // Render
-        let time_dist = (Instant::now() - self.last_update_time).as_secs_f32();
-        let recently_updated = time_dist <= 3.0;
-        if recently_updated {
-            Self::render_wrapper(
+        // Only rerender when:
+        //  - inputs occur
+        //  - rerender is requested
+        //  - interval passes, so that blinking effects will render
+        let render_time_dist = (Instant::now() - self.last_event_time).as_millis();
+        let interval_render = render_time_dist > 100 && self.get_is_focused();
+        if any_event || self.rerender_requested || interval_render {
+            self.rerender_requested = Self::render_wrapper(
                 &self.background_color,
                 self.renderer.as_ref().borrow_mut().deref_mut(),
                 active_layout,
                 self.window.as_ref().borrow_mut().deref_mut(),
                 self.input.as_ref().borrow().deref()
             );
-        } else {
-            std::thread::sleep(std::time::Duration::new(0, 50e6 as u32));
+            self.last_render_time = Instant::now();
         }
 
         self.input.as_ref().borrow_mut().clear();
@@ -155,6 +166,7 @@ impl Window {
     pub fn get_pixel_height(&self) -> i32 { self.window.as_ref().borrow().get_framebuffer_size().1 }
     pub fn get_pixel_size(&self) -> [i32; 2] { self.window.as_ref().borrow().get_framebuffer_size().into() }
     pub fn get_scale(&self) -> [f32; 2] { self.window.as_ref().borrow().get_content_scale().into() }
+    pub fn get_is_focused(&self) -> bool { self.window.as_ref().borrow().is_focused() }
     pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
 
     fn poll_events(&mut self) -> bool {
@@ -217,10 +229,12 @@ impl Window {
         layout: &mut Layout,
         window: &mut glfw::PWindow,
         input: &Input
-    ) {
+    ) -> bool {
         Self::begin_frame(clear_color);
-        layout.render(Some(*clear_color), renderer, input);
+        let should_rerender = layout.render(Some(*clear_color), renderer, input);
         Self::end_frame(window);
+
+        should_rerender
     }
 
     fn on_resized_wrapper(

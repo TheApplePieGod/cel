@@ -5,14 +5,18 @@ use std::fmt;
 use super::*;
 
 impl AnsiHandler {
-    pub fn new() -> Self {
-        Self {
-            performer: Default::default(),
+    pub fn new(width: u32, height: u32) -> Self {
+        let mut obj = Self {
+            performer: Performer::new(width, height),
             state_machine: Parser::new(),
 
             mouse_states: [(Default::default(), false); 256],
             scroll_states: [0.0; 2]
-        }
+        };
+
+        obj.resize(width, height);
+
+        obj
     }
 
     pub fn handle_byte(&mut self, byte: u8) {
@@ -213,6 +217,21 @@ impl AnsiHandler {
 }
 
 impl Performer {
+    fn new(width: u32, height: u32) -> Self {
+        Self {
+            screen_width: width as usize,
+            screen_height: height as usize,
+            output_stream: vec![],
+            is_empty: true,
+            action_performed: false,
+
+            terminal_state: Default::default(),
+            saved_terminal_state: Default::default(),
+
+            ignore_print: false
+        }
+    }
+
     fn parse_params(&self, params: &Params) -> Vec<u16> {
         let mut res: Vec<u16> = Vec::with_capacity(params.len());
         for param in params {

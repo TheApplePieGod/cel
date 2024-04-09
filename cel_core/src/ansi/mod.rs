@@ -176,23 +176,6 @@ impl Default for TerminalState {
     }
 }
 
-impl Default for Performer {
-    fn default() -> Self {
-        Self {
-            screen_width: 1,
-            screen_height: 1,
-            output_stream: vec![],
-            is_empty: true,
-            action_performed: false,
-
-            terminal_state: Default::default(),
-            saved_terminal_state: Default::default(),
-
-            ignore_print: false
-        }
-    }
-}
-
 impl Margin {
     fn get_from_screen_size(width: u32, height: u32) -> Self {
         Self {
