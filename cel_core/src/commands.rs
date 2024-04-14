@@ -1,14 +1,12 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, PtyPair};
 use std::{default, sync::mpsc, thread};
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 enum ShellState {
     Init,
-    StartSequenceA,
-    StartSequenceB,
+    PromptIdA,
+    PromptIdB,
     Ready,
-    EndSequenceA,
-    EndSequenceB
 }
 
 pub struct Commands {
@@ -66,9 +64,8 @@ impl Commands {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
-        writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x00$CEL_PROMPT_ID\\\\x00\\\"; CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1))'\r".as_bytes());
-        writer.write_all(" precmd() { eval \"$PROMPT_COMMAND\" }\r".as_bytes());
-        writer.write_all(" PROMPT=$'%{\\x1d\\x00$CEL_PROMPT_ID\\x00%}'$PROMPT\r".as_bytes());
+        writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x15$CEL_PROMPT_ID\\\\x15\\\"'\r".as_bytes());
+        writer.write_all(" precmd() { CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1)); eval \"$PROMPT_COMMAND\" }\r".as_bytes());
 
         //writer.write_all(b"ls -la\r\n\0");
 
@@ -98,7 +95,7 @@ impl Commands {
 
             shell_state: ShellState::Init,
             parsing_id: String::new(),
-            prompt_id: 2,
+            prompt_id: 1,
         }
     }
 
@@ -119,40 +116,36 @@ impl Commands {
         while let Ok(v) = self.io_rx.try_recv() {
             for byte in v {
                 //log::warn!("{:?}", byte as char);
+                //self.shell_state = ShellState::Ready;
                 match self.shell_state {
-                    ShellState::Init | ShellState::Ready if byte == 0x1d
-                        => self.shell_state = ShellState::StartSequenceA,
+                    ShellState::Init | ShellState::Ready if byte == 0x1f
+                        => self.shell_state = ShellState::PromptIdA,
                     ShellState::Init
                         => {}
-                    ShellState::Ready if byte == 0x1f
-                        => self.shell_state = ShellState::EndSequenceA,
                     ShellState::Ready => {
                         self.output[output_idx].push(byte);
                     },
-                    ShellState::EndSequenceA if byte == 0x00
-                        => self.shell_state = ShellState::EndSequenceB,
-                    ShellState::StartSequenceA if byte == 0x00
-                        => self.shell_state = ShellState::StartSequenceB,
-                    ShellState::StartSequenceB | ShellState::EndSequenceB if byte == 0x00 => {
+                    ShellState::PromptIdA if byte == 0x15
+                        => self.shell_state = ShellState::PromptIdB,
+                    ShellState::PromptIdB if byte == 0x15 => {
                         let parsed_id = self.parsing_id.parse::<u32>();
                         if let Ok(parsed_id) = parsed_id {
-                            // Can only happen once per poll, for obvious reasons
                             if parsed_id == self.prompt_id {
-                                if self.shell_state == ShellState::StartSequenceB {
-                                    self.shell_state = ShellState::Ready;
-                                } else {
-                                    output_idx = 1;
-                                    self.set_next_split();
-                                    self.shell_state = ShellState::Init;
-                                }
+                                output_idx = 1;
+                                self.set_next_split();
+                                self.shell_state = ShellState::Ready;
+                            } else {
+                                self.shell_state = ShellState::Init;
                             }
                         }
                         self.parsing_id.clear();
                     }
-                    ShellState::StartSequenceB | ShellState::EndSequenceB
+                    ShellState::PromptIdB
                         => self.parsing_id.push(byte as char),
                     _ => {}
                 }
+
+                //log::warn!("New state: {:?}", self.shell_state);
             }
         }
 
