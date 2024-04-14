@@ -7,6 +7,8 @@ pub struct App {
     pub window: Window
 }
 
+const MIN_DELTA_TIME_NS: u128 = 4e6 as u128;
+
 impl App {
     pub fn new() -> Self {
         let window = Window::new();
@@ -24,6 +26,12 @@ impl App {
             self.window.update_and_render();
 
             delta_time = time::Instant::now() - frame_start;
+            if delta_time.as_nanos() < MIN_DELTA_TIME_NS {
+                let sleep_time = (MIN_DELTA_TIME_NS - delta_time.as_nanos()) as u32;
+                std::thread::sleep(std::time::Duration::new(0, sleep_time));
+            }
+            delta_time = time::Instant::now() - frame_start;
+
             //log::warn!("DT: {}ms", delta_time.as_millis());
         }
     }

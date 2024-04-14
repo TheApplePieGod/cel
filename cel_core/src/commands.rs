@@ -66,6 +66,7 @@ impl Commands {
 
         writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x15$CEL_PROMPT_ID\\\\x15\\\"'\r".as_bytes());
         writer.write_all(" precmd() { CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1)); eval \"$PROMPT_COMMAND\" }\r".as_bytes());
+        writer.write_all(" \r".as_bytes());
 
         //writer.write_all(b"ls -la\r\n\0");
 
@@ -95,7 +96,7 @@ impl Commands {
 
             shell_state: ShellState::Init,
             parsing_id: String::new(),
-            prompt_id: 1,
+            prompt_id: 2,
         }
     }
 

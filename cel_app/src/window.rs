@@ -55,8 +55,8 @@ impl Window {
         
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
-        //glfw_instance.set_swap_interval(glfw::SwapInterval::None);
-        glfw_instance.set_swap_interval(glfw::SwapInterval::Sync(1));
+        glfw_instance.set_swap_interval(glfw::SwapInterval::None);
+        //glfw_instance.set_swap_interval(glfw::SwapInterval::Sync(1));
 
         let scale = window.get_content_scale();
         let initial_size_px = window.get_size();
@@ -139,12 +139,15 @@ impl Window {
 
         // Render
         // Only rerender when:
-        //  - inputs occur
+        //  - inputs occurred recently
         //  - rerender is requested
         //  - interval passes, so that blinking effects will render
-        let render_time_dist = (Instant::now() - self.last_event_time).as_millis();
-        let interval_render = render_time_dist > 100 && self.get_is_focused();
-        if any_event || self.rerender_requested || interval_render {
+        //  - another render has not happened too recently
+        let render_time_dist = (Instant::now() - self.last_render_time).as_millis();
+        let interval_render = render_time_dist > 250 && self.get_is_focused();
+        let very_recent_event = event_time_dist <= 0.05;
+        if self.rerender_requested || any_event || interval_render || very_recent_event {
+            //log::warn!("{}, {}", render_time_dist, any_event);
             self.rerender_requested = Self::render_wrapper(
                 &self.background_color,
                 self.renderer.as_ref().borrow_mut().deref_mut(),
