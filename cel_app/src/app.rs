@@ -23,7 +23,7 @@ impl App {
         while AppState::current().borrow().running && !self.window.should_close() {
             let frame_start = time::Instant::now();
 
-            self.window.update_and_render();
+            self.window.update_and_render(delta_time.as_secs_f64() * 1000.0);
 
             delta_time = time::Instant::now() - frame_start;
             if delta_time.as_nanos() < MIN_DELTA_TIME_NS {

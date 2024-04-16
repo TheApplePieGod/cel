@@ -503,20 +503,29 @@ impl Renderer {
     // Origin top left to bottom right
     pub fn draw_text(
         &mut self,
+        chars_per_line: u32,
         screen_offset: &[f32; 2],
         bg_size_screen: &[f32; 2],
         fg_color: &[f32; 3],
         bg_color: &[f32; 3],
+        centered: bool,
         text: &str
     ) {
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
-        let rc = self.compute_render_constants(150, &[0.0, 0.0]);
+        let rc = self.compute_render_constants(chars_per_line, &[0.0, 0.0]);
 
         let mut x = 0.0;
+        let mut y = 0.0;
         let mut msdf_vertices: Vec<Vertex> = vec![]; // TODO: reuse
         let mut raster_vertices: Vec<Vertex> = vec![];
 
         for c in text.chars() {
+            if c == '\n' {
+                x = 0.0;
+                y += rc.line_height;
+                continue;
+            }
+
             if c.is_whitespace() || c == '\0' {
                 x += rc.char_root_size;
                 continue;
@@ -527,7 +536,7 @@ impl Renderer {
                 &face_metrics,
                 fg_color,
                 bg_color,
-                &[x, 0.0],
+                &[x, y],
                 StyleFlags::default(),
                 &mut msdf_vertices,
                 &mut raster_vertices
@@ -545,7 +554,10 @@ impl Renderer {
         ];
         self.draw_text_vertices(
             &rc,
-            &centered_offset,
+            match centered {
+                true => &centered_offset,
+                false => &screen_offset
+            },
             &vec![],
             &msdf_vertices,
             &raster_vertices

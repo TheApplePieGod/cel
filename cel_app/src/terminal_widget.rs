@@ -77,6 +77,10 @@ impl TerminalWidget {
         }
 
         self.closed = true;
+        self.reset();
+    }
+
+    pub fn reset(&mut self) {
         self.ansi_handler.reset();
     }
 
@@ -114,6 +118,8 @@ impl TerminalWidget {
     pub fn get_primary(&self) -> bool { self.primary }
     pub fn set_primary(&mut self, primary: bool) { self.primary = primary }
     pub fn get_terminal_size(&self) -> [u32; 2] { [self.chars_per_line, self.lines_per_screen] }
+    pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
+    pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
 
     fn update_mouse_input(
         &mut self,

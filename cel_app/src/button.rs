@@ -40,10 +40,12 @@ impl Button {
         let width = renderer.get_width() as f32;
         let height = renderer.get_height() as f32;
         renderer.draw_text(
+            150,
             &[self.offset[0] / width, self.offset[1] / height],
             &[self.size[0] / width, self.size[1] / height],
             fg_color,
             bg_color,
+            true,
             text
         );
     }

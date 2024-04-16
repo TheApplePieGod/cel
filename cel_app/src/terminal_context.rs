@@ -41,7 +41,8 @@ impl TerminalContext {
         any_event
     }
 
-    pub fn get_widgets(&mut self) -> &mut Vec<TerminalWidget> { &mut self.widgets }
+    pub fn get_widgets(&self) -> &Vec<TerminalWidget> { &self.widgets }
+    pub fn get_widgets_mut(&mut self) -> &mut Vec<TerminalWidget> { &mut self.widgets }
     pub fn just_split(&self) -> bool { self.just_split }
 
     fn handle_user_io(&mut self, input: &Input) -> bool {
@@ -57,6 +58,16 @@ impl TerminalContext {
         if input.get_key_just_pressed(glfw::Key::F2) {
             any_event |= true;
             self.debug_disable_splits = !self.debug_disable_splits;
+        }
+
+        if input.get_key_just_pressed(glfw::Key::F3) {
+            any_event |= true;
+            self.widgets.last_mut().as_mut().unwrap().toggle_debug_line_numbers();
+        }
+
+        if input.get_key_just_pressed(glfw::Key::F4) {
+            any_event |= true;
+            self.widgets.last_mut().as_mut().unwrap().toggle_debug_show_cursor();
         }
 
         self.max_sequences_to_process = std::u32::MAX;

@@ -185,6 +185,7 @@ impl AnsiHandler {
 
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
+        self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32);
     }
 
     // TODO: utilize producer ?

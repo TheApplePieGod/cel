@@ -105,6 +105,16 @@ impl Layout {
         self.height = new_size[1] as u32;
     }
 
+    pub fn get_debug_lines(&self) -> Vec<String> {
+        let widgets = self.context.get_widgets();
+        let active = widgets.last().unwrap();
+        let active_size = active.get_terminal_size();
+        vec![
+            format!("Num widgets: {}", widgets.len()),
+            format!("Active size: {}x{}", active_size[0], active_size[1]),
+        ]
+    }
+
     fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
 
     fn map_onscreen_widgets(
@@ -114,7 +124,7 @@ impl Layout {
         // Draw visible widgets except the primary
         let widget_gap = self.widget_gap_px / self.height as f32;
         let mut cur_offset = 1.0;
-        for ctx in self.context.get_widgets().iter_mut().rev() {
+        for ctx in self.context.get_widgets_mut().iter_mut().rev() {
             if ctx.get_closed() || ctx.is_empty() {
                 continue;
             }
@@ -135,7 +145,7 @@ impl Layout {
         }
 
         // Last (primary) widget is always rendered at the bottom
-        let last_widget = self.context.get_widgets().last_mut().unwrap();
+        let last_widget = self.context.get_widgets_mut().last_mut().unwrap();
         func(
             last_widget,
             1.0 - last_widget.get_last_computed_height(),

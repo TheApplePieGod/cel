@@ -1,4 +1,3 @@
-
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
@@ -25,6 +24,9 @@ pub struct Window {
     last_event_time: Instant,
     last_render_time: Instant,
     rerender_requested: bool,
+
+    debug_widget_width_px: f32,
+    debug_show_widget: bool,
 }
 
 impl Window {
@@ -82,11 +84,14 @@ impl Window {
 
             last_event_time: Instant::now(),
             last_render_time: Instant::now(),
-            rerender_requested: true
+            rerender_requested: true,
+
+            debug_widget_width_px: 300.0,
+            debug_show_widget: false,
         }
     }
 
-    pub fn update_and_render(&mut self) {
+    pub fn update_and_render(&mut self, dt_ms: f64) {
         let renderer_ptr = self.renderer.clone();
         let layout_ptr = self.layouts.clone();
         let window_ptr = self.window.clone();
@@ -110,6 +115,7 @@ impl Window {
 
             // Render
             Self::render_wrapper(
+                true,
                 &clear_color,
                 renderer_ptr.as_ref().borrow_mut().deref_mut(),
                 active_layout,
@@ -126,36 +132,55 @@ impl Window {
         }
 
         let mut any_event = false;
+        let mut did_render = false;
 
         any_event |= self.poll_events();
 
-        // Update layout
-        let active_layout = &mut self.layouts.as_ref().borrow_mut()[self.active_layout_idx];
-        any_event |= active_layout.update(self.input.as_ref().borrow().deref());
+        {
+            // Update layout
+            let active_layout = &mut self.layouts.as_ref().borrow_mut()[self.active_layout_idx];
+            any_event |= active_layout.update(self.input.as_ref().borrow().deref());
 
-        if any_event {
-            self.last_event_time = Instant::now();
+            if any_event {
+                self.last_event_time = Instant::now();
+            }
+
+            // Render
+            // Only rerender when:
+            //  - inputs occurred recently
+            //  - rerender is requested
+            //  - interval passes, so that blinking effects will render
+            //  - another render has not happened too recently
+            let render_time_dist = (Instant::now() - self.last_render_time).as_millis();
+            let interval_render = render_time_dist > 250 && self.get_is_focused();
+            let very_recent_event = event_time_dist <= 0.05;
+            if self.rerender_requested || any_event || interval_render || very_recent_event {
+                //log::warn!("{}, {}", render_time_dist, any_event);
+                self.rerender_requested = Self::render_wrapper(
+                    false,
+                    &self.background_color,
+                    self.renderer.as_ref().borrow_mut().deref_mut(),
+                    active_layout,
+                    self.window.as_ref().borrow_mut().deref_mut(),
+                    self.input.as_ref().borrow().deref()
+                ) | any_event;
+                self.last_render_time = Instant::now();
+                did_render = true;
+            }
         }
 
-        // Render
-        // Only rerender when:
-        //  - inputs occurred recently
-        //  - rerender is requested
-        //  - interval passes, so that blinking effects will render
-        //  - another render has not happened too recently
-        let render_time_dist = (Instant::now() - self.last_render_time).as_millis();
-        let interval_render = render_time_dist > 250 && self.get_is_focused();
-        let very_recent_event = event_time_dist <= 0.05;
-        if self.rerender_requested || any_event || interval_render || very_recent_event {
-            //log::warn!("{}, {}", render_time_dist, any_event);
-            self.rerender_requested = Self::render_wrapper(
-                &self.background_color,
+        // Always rerender debug widget
+        if self.debug_show_widget {
+            self.render_debug_widget(
                 self.renderer.as_ref().borrow_mut().deref_mut(),
-                active_layout,
-                self.window.as_ref().borrow_mut().deref_mut(),
-                self.input.as_ref().borrow().deref()
-            ) | any_event;
-            self.last_render_time = Instant::now();
+                dt_ms
+            );
+            did_render = true;
+        }
+
+        // Need to present
+        if did_render {
+            Self::end_frame(self.window.as_ref().borrow_mut().deref_mut());
         }
 
         self.input.as_ref().borrow_mut().clear();
@@ -216,17 +241,63 @@ impl Window {
         }
         if input.event_prev_tab {
             input.event_prev_tab = false;
-            self.active_layout_idx = (self.active_layout_idx - 1).rem_euclid(layouts.len());
+            self.active_layout_idx = match self.active_layout_idx {
+                0 => layouts.len() - 1,
+                _ => self.active_layout_idx - 1
+            };
         }
         if input.event_next_tab {
             input.event_next_tab = false;
-            self.active_layout_idx = (self.active_layout_idx + 1).rem_euclid(layouts.len());
+            self.active_layout_idx = (self.active_layout_idx + 1) % layouts.len();
+        }
+
+        // Handle window keystrokes
+        if input.get_key_just_pressed(glfw::Key::F5) {
+            any_event |= true;
+            self.debug_show_widget = !self.debug_show_widget;
         }
 
         any_event
     }
 
+    fn render_debug_widget(&self, renderer: &mut Renderer, dt_ms: f64) {
+        let layouts = self.layouts.as_ref().borrow();
+        let mut text_lines: Vec<String> = vec![
+            String::from("cel_ debug"),
+            format!("Frametime (ms): {:.1}", dt_ms),
+            format!("Window size: {}x{}", self.get_width(), self.get_height()),
+            format!("Content scale: {}x{}", self.get_scale()[0], self.get_scale()[1]),
+            format!("Num layouts: {}", layouts.len()),
+            format!("Active layout: {}", self.active_layout_idx),
+            String::from("\n"),
+        ];
+
+        
+        let active_layout = &layouts[self.active_layout_idx];
+        text_lines.extend(active_layout.get_debug_lines());
+
+        let bg_color = [0.5, 0.1, 0.1];
+        let size_x = self.debug_widget_width_px / self.get_width() as f32;
+        renderer.draw_quad(
+            &[1.0 - size_x, 0.0],
+            &[size_x, 0.5],
+            &bg_color
+        );
+
+        let chars_per_line = self.get_width() as f32 / 6.0;
+        renderer.draw_text(
+            chars_per_line as u32,
+            &[1.0 - size_x, 0.0],
+            &[0.0, 0.0],
+            &[1.0, 1.0, 1.0],
+            &bg_color,
+            false,
+            &text_lines.join("\n")
+        );
+    }
+
     fn render_wrapper(
+        end_frame: bool,
         clear_color: &[f32; 3],
         renderer: &mut Renderer,
         layout: &mut Layout,
@@ -235,7 +306,9 @@ impl Window {
     ) -> bool {
         Self::begin_frame(clear_color);
         let should_rerender = layout.render(Some(*clear_color), renderer, input);
-        Self::end_frame(window);
+        if end_frame {
+            Self::end_frame(window);
+        }
 
         should_rerender
     }
