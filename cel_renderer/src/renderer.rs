@@ -274,6 +274,7 @@ impl Renderer {
         line_offset: f32,
         wrap: bool,
         debug_line_number: bool,
+        debug_col_number: bool,
         debug_show_cursor: bool
     ) -> u32 {
         // Setup render state
@@ -397,7 +398,7 @@ impl Renderer {
                     break 'outer;
                 }
 
-                let max_x = base_x + rc.char_root_size * chars_per_line as f32 - 0.0001;
+                let max_x = base_x + rc.char_root_size * chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
                     max_line_count += 1;
@@ -444,6 +445,7 @@ impl Renderer {
 
                 let char_to_draw = match debug_line_number {
                     true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
+                    false if debug_col_number => char::from_u32((char_idx as u32) % 10 + 48).unwrap(),
                     false => c.elem
                 };
                 self.push_char_quad(

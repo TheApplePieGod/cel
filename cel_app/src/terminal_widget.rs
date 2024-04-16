@@ -29,6 +29,7 @@ pub struct TerminalWidget {
     button_size_px: f32,
 
     debug_line_number: bool,
+    debug_char_number: bool,
     debug_show_cursor: bool
 }
 
@@ -57,6 +58,7 @@ impl TerminalWidget {
             button_size_px: 20.0,
 
             debug_line_number: false,
+            debug_char_number: false,
             debug_show_cursor: false
         }
     }
@@ -119,6 +121,7 @@ impl TerminalWidget {
     pub fn set_primary(&mut self, primary: bool) { self.primary = primary }
     pub fn get_terminal_size(&self) -> [u32; 2] { [self.chars_per_line, self.lines_per_screen] }
     pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
+    pub fn toggle_debug_char_numbers(&mut self) { self.debug_char_number = !self.debug_char_number }
     pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
 
     fn update_mouse_input(
@@ -289,6 +292,7 @@ impl TerminalWidget {
             line_offset,
             self.wrap,
             self.debug_line_number,
+            self.debug_char_number,
             self.debug_show_cursor
         );
 

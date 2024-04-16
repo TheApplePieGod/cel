@@ -67,6 +67,11 @@ impl TerminalContext {
 
         if input.get_key_just_pressed(glfw::Key::F4) {
             any_event |= true;
+            self.widgets.last_mut().as_mut().unwrap().toggle_debug_char_numbers();
+        }
+
+        if input.get_key_just_pressed(glfw::Key::F6) {
+            any_event |= true;
             self.widgets.last_mut().as_mut().unwrap().toggle_debug_show_cursor();
         }
 
