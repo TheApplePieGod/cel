@@ -55,7 +55,7 @@ impl Commands {
             ]);
         }
         cmd.get_argv_mut()[0] = shell.into();
-        cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
+        //cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
         cmd.env_remove("TERMINFO");
         cmd.env("TERM", "tmux-256color");
         cmd.env("CEL_PROMPT_ID", "0");
