@@ -239,6 +239,15 @@ impl Window {
             layouts.push(Layout::new(self.get_width(), self.get_height()));
             self.active_layout_idx = layouts.len() - 1;
         }
+        if input.event_del_tab {
+            input.event_del_tab = false;
+            if layouts.len() > 1 {
+                layouts.remove(self.active_layout_idx);
+                self.active_layout_idx = self.active_layout_idx.min(
+                    layouts.len() - 1
+                );
+            }
+        }
         if input.event_prev_tab {
             input.event_prev_tab = false;
             self.active_layout_idx = match self.active_layout_idx {

@@ -26,6 +26,7 @@ pub struct Input {
     pub event_new_tab: bool,
     pub event_next_tab: bool,
     pub event_prev_tab: bool,
+    pub event_del_tab: bool,
 }
 
 impl Input {
@@ -52,6 +53,7 @@ impl Input {
             event_new_tab: false,
             event_next_tab: false,
             event_prev_tab: false,
+            event_del_tab: false
         }
     }
 
@@ -98,10 +100,11 @@ impl Input {
                     }
 
                     // Cel commands
-                    if mods.contains(Modifiers::Control) {
+                    if mods.contains(Modifiers::Control | Modifiers::Shift) {
                         let mut handled = true;
                         match *key {
                             Key::T => self.event_new_tab = true,
+                            Key::W => self.event_del_tab = true,
                             Key::Right => self.event_next_tab = true,
                             Key::Left => self.event_prev_tab = true,
                             _ => handled = false
