@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "cel_core",
+    "cel_renderer",
+    "cel_app"
+]
