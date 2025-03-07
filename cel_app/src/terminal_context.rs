@@ -13,7 +13,8 @@ pub struct TerminalContext {
     just_split: bool,
 
     debug_discrete_processing: bool,
-    debug_disable_splits: bool
+    debug_disable_splits: bool,
+    debug_disable_input: bool
 }
 
 impl TerminalContext {
@@ -28,7 +29,8 @@ impl TerminalContext {
             just_split: false,
 
             debug_discrete_processing: false,
-            debug_disable_splits: false
+            debug_disable_splits: false,
+            debug_disable_input: false
         }
     }
 
@@ -46,7 +48,9 @@ impl TerminalContext {
     pub fn just_split(&self) -> bool { self.just_split }
 
     fn handle_user_io(&mut self, input: &Input) -> bool {
-        self.input_buffer.extend_from_slice(input.get_input_buffer());
+        if !self.debug_disable_input {
+            self.input_buffer.extend_from_slice(input.get_input_buffer());
+        }
 
         let mut any_event = false;
 
@@ -73,6 +77,11 @@ impl TerminalContext {
         if input.get_key_just_pressed(glfw::Key::F6) {
             any_event |= true;
             self.widgets.last_mut().as_mut().unwrap().toggle_debug_show_cursor();
+        }
+
+        if input.get_key_just_pressed(glfw::Key::F7) {
+            any_event |= true;
+            self.debug_disable_input = !self.debug_disable_input;
         }
 
         self.max_sequences_to_process = std::u32::MAX;

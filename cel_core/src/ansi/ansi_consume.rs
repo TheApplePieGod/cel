@@ -321,7 +321,9 @@ impl Performer {
         // TODO: check that params are in range
         let state = &mut self.terminal_state.style_state;
         let mut extended_mode = 0;
-        for (i, code) in params.iter().enumerate() {
+        let mut i = 0;
+        while i < params.len() {
+            let code = params[i];
             match code {
                 0 => *state = Default::default(),
                 1 => {
@@ -345,14 +347,16 @@ impl Performer {
                 3 => state.flags.insert(StyleFlags::Italic),
                 4 => state.flags.insert(StyleFlags::Underline),
                 5 => match extended_mode {
-                    38 => {
+                    38 if i + 1 < params.len() => {
                         state.fg_color = Some(Self::parse_8_bit_color(params[i + 1]));
-                        return;
+                        i += 1;
                     },
-                    48 => {
+                    38 => {}
+                    48 if i + 1 < params.len() => {
                         state.bg_color = Some(Self::parse_8_bit_color(params[i + 1]));
-                        return;
+                        i += 1;
                     },
+                    48 => {}
                     _ => state.flags.insert(StyleFlags::Blink)
                 },
                 8 => state.flags.insert(StyleFlags::Invisible),
@@ -376,6 +380,8 @@ impl Performer {
                 49 => state.bg_color = None,
                 _ => {}
             }
+
+            i += 1;
         }
     }
 
@@ -1121,7 +1127,7 @@ impl Perform for Performer {
                 log::debug!("Cursor set col [{}]", col);
                 self.set_cursor_pos_absolute(&[col, self.terminal_state.screen_cursor[1]]);
             },
-            'H' => { // Place cursor
+            'H' | 'f' => { // Place cursor
                 // Params have row, col format
                 let row = match params.len() {
                     1..=2 if params[0] > 0 => params[0] as usize - 1,
@@ -1220,6 +1226,29 @@ impl Perform for Performer {
                     },
                     _ => {}
                 }
+            },
+            'd' => { // Set line position absolute
+                let row = match params.len() {
+                    1 if params[0] > 0 => params[0] as usize - 1,
+                    _ => 0
+                };
+                log::debug!("Set line position abs [_, {}]", row);
+                self.set_cursor_pos_absolute(
+                    &[self.terminal_state.screen_cursor[0], row]
+                );
+            },
+            'e' => { // Set line position relative
+                let row = match params.len() {
+                    1 if params[0] > 0 => params[0] as usize - 1,
+                    _ => 0
+                };
+                log::debug!("Set line position relative [_, +{}]", row);
+                self.set_cursor_pos_absolute(
+                    &[
+                        self.terminal_state.screen_cursor[0],
+                        self.terminal_state.screen_cursor[1] + row
+                    ]
+                );
             },
             'h' | 'l' => {
                 if params.len() != 1 {
