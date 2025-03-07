@@ -349,11 +349,13 @@ impl Performer {
                 5 => match extended_mode {
                     38 if i + 1 < params.len() => {
                         state.fg_color = Some(Self::parse_8_bit_color(params[i + 1]));
+                        extended_mode = 0;
                         i += 1;
                     },
                     38 => {}
                     48 if i + 1 < params.len() => {
                         state.bg_color = Some(Self::parse_8_bit_color(params[i + 1]));
+                        extended_mode = 0;
                         i += 1;
                     },
                     48 => {}
