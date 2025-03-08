@@ -21,8 +21,7 @@ pub struct QuadData {
     pub position: [f32; 4],  // x0, y0, x1, y1
     pub tex_coord: [f32; 4], // u0, v0, u1, v1
     pub color: [u32; 3],     // r, g, b (fg, bg)
-    pub flags: StyleFlags,
-    pub shear_amount: f32,
+    pub flags: StyleFlags
 }
 
 pub struct Renderer {
@@ -86,22 +85,18 @@ impl Renderer {
             let pos_stride = size_of::<f32>() as i32 * 4;
             let coord_stride = size_of::<f32>() as i32 * 4 + pos_stride;
             let color_stride = size_of::<u32>() as i32 * 3 + coord_stride;
-            let flags_stride = size_of::<StyleFlags>() as i32 + color_stride;
             gl::VertexAttribPointer(0, 4, gl::FLOAT, gl::FALSE, instance_stride, null());
             gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, instance_stride, pos_stride as _);
             gl::VertexAttribPointer(2, 3, gl::UNSIGNED_INT, gl::FALSE, instance_stride, coord_stride as _);
             gl::VertexAttribPointer(3, 1, gl::UNSIGNED_INT, gl::FALSE, instance_stride, color_stride as _);
-            gl::VertexAttribPointer(4, 1, gl::FLOAT, gl::FALSE, instance_stride, flags_stride as _);
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
             gl::EnableVertexAttribArray(2);
             gl::EnableVertexAttribArray(3);
-            gl::EnableVertexAttribArray(4);
             gl::VertexAttribDivisor(0, 1);
             gl::VertexAttribDivisor(1, 1);
             gl::VertexAttribDivisor(2, 1);
             gl::VertexAttribDivisor(3, 1);
-            gl::VertexAttribDivisor(4, 1);
         }
 
         let vert_shader_source = b"
@@ -111,7 +106,6 @@ impl Renderer {
             layout (location = 1) in vec4 inTexCoord;
             layout (location = 2) in uvec3 inColor;
             layout (location = 3) in uint inFlags;
-            layout (location = 4) in float inShearAmount;
 
             out vec2 texCoord;
             out vec3 fgColor;
@@ -148,7 +142,8 @@ impl Renderer {
                 vec2 pos = mix(p0, p1, offset);
 
                 // Apply shear transformation
-                pos.x += offset.y * inShearAmount;
+                float shearAmount = (inFlags & 8U) * 0.015f;
+                pos.x += offset.y * shearAmount;
 
                 // Compute texture coordinates
                 vec2 tex0 = inTexCoord.xy;
@@ -195,7 +190,7 @@ impl Renderer {
 
             void main()
             {
-                float sdFactor = 1.0 + (flags & 1U) * 0.15 - (flags & 2U) * 0.05;
+                float sdFactor = 1.05 + (flags & 1U) * 0.15 - (flags & 2U) * 0.05;
                 vec4 msd = texture(atlasTex, texCoord);
                 float sd = Median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
                 float screenPxDistance = pixelRange * (sd - 0.5);
@@ -679,17 +674,11 @@ impl Renderer {
             Util::pack_floats(fg_color[2], bg_color[2]),
         ];
 
-        let shear_amount = match flags.contains(StyleFlags::Italic) {
-            true => 0.075,
-            false => 0.0,
-        };
-
         arr.push(QuadData {
             position: [pos_min[0], pos_max[1], pos_max[0], pos_min[1]],
             tex_coord: [uv_min[0], uv_max[1], uv_max[0], uv_min[1]],
             color,
-            flags,
-            shear_amount,
+            flags
         });
     }
 

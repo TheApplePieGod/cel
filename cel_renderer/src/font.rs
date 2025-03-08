@@ -9,8 +9,8 @@ use crate::texture::Texture;
 pub type FontCache = FcFontCache;
 
 const ATLAS_SIZE: u32 = 1024;
-const MSDF_SIZE: u32 = 32;
-const MSDF_RANGE: f32 = 8.0;
+const MSDF_SIZE: u32 = 16;
+const MSDF_RANGE: f32 = 4.0;
 
 #[derive(Default)]
 pub struct FaceMetrics {
@@ -32,7 +32,7 @@ pub struct GlyphMetrics {
     pub atlas_uv: Bound<f32>,
     pub advance: f32,
     pub glyph_bound: Bound<f32>,
-    pub atlas_bound: Bound<f32>,
+    pub atlas_bound: Bound<f64>,
     pub render_type: RenderType
 }
 
@@ -145,7 +145,7 @@ impl Font {
         }
     }
 
-    pub fn get_atlas_texcoord(atlas_index: u32) -> [f32; 2] {
+    pub fn get_atlas_texcoord(atlas_index: u32) -> [f64; 2] {
         let offset = Self::convert_atlas_index_to_offset(atlas_index);
         return Self::convert_atlas_offset_to_texcoord(offset);
     }
@@ -204,10 +204,10 @@ impl Font {
             uv_min[1] - glyph_data.metrics.atlas_bound.height(),
         ];
         glyph_data.metrics.atlas_uv = Bound::new(
-            uv_min[0],
-            uv_max[1],
-            uv_max[0],
-            uv_min[1],
+            uv_min[0] as f32,
+            uv_max[1] as f32,
+            uv_max[0] as f32,
+            uv_min[1] as f32,
         );
 
         self.glyph_lru.put(key, glyph_data.metrics);
@@ -266,7 +266,7 @@ impl Font {
         };
 
         // Compute final atlas bound (uv coords)
-        let texcoord_scale = 1.0 / self.get_atlas_size() as f32;
+        let texcoord_scale = 1.0 / self.get_atlas_size() as f64;
         let atlas_bound = Bound::new(
             pixel_bound.left * texcoord_scale,
             pixel_bound.bottom * texcoord_scale,
@@ -288,7 +288,7 @@ impl Font {
         }
     }
 
-    fn generate_msdf(face: &Face, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f32>) {
+    fn generate_msdf(face: &Face, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
         let mut shape = shape;
         let bound = shape.get_bound();
         let framing = bound.autoframe(
@@ -317,30 +317,30 @@ impl Font {
         }
 
         // Convert pixel units to normalized units
-        let scale = face.units_per_em() as f32;
+        let scale = face.units_per_em() as f64;
         let glyph_bound = Bound::new(
-            bound.left as f32 / scale - 0.001,
-            bound.bottom as f32 / scale + 0.001,
-            bound.right as f32 / scale + 0.001,
-            bound.top as f32 / scale - 0.001
+            (bound.left / scale) as f32,
+            (bound.bottom / scale) as f32,
+            (bound.right / scale) as f32,
+            (bound.top / scale) as f32
         );
 
         // Cursed math that I don't fully understand but basically this is
         // necessary to go from glyph space into pixel space within the atlas
         let pixel_bound = Bound::new(
-            ((bound.left + framing.translate.x) * framing.scale.x) as f32,
-            ((bound.bottom + framing.translate.y) * framing.scale.y) as f32,
-            ((bound.right + framing.translate.x) * framing.scale.x) as f32,
-            ((bound.top + framing.translate.y) * framing.scale.y) as f32
+            (bound.left + framing.translate.x) * framing.scale.x,
+            (bound.bottom + framing.translate.y) * framing.scale.y,
+            (bound.right + framing.translate.x) * framing.scale.x,
+            (bound.top + framing.translate.y) * framing.scale.y
         );
 
         (pixels, glyph_bound, pixel_bound)
     }
 
-    fn generate_raster(raster: RasterGlyphImage) -> (Vec<f32>, Bound<f32>, Bound<f32>) {
+    fn generate_raster(raster: RasterGlyphImage) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
         // TODO: half pixel correction here is not great
         let glyph_bound = Bound::new(0.0, 0.0, 1.0, 1.0);
-        let pixel_bound = Bound::new(0.5, 0.5, MSDF_SIZE as f32 - 0.5, MSDF_SIZE as f32 - 0.5);
+        let pixel_bound = Bound::new(0.5, 0.5, MSDF_SIZE as f64 - 0.5, MSDF_SIZE as f64 - 0.5);
 
         let mut image = match image::load_from_memory(raster.data) {
             Ok(img) => img,
@@ -369,9 +369,9 @@ impl Font {
         [x, y * MSDF_SIZE]
     }
 
-    fn convert_atlas_offset_to_texcoord(offset: [u32; 2]) -> [f32; 2] {
-        let atlas_f32 = ATLAS_SIZE as f32;
-        [offset[0] as f32 / atlas_f32, offset[1] as f32 / atlas_f32]
+    fn convert_atlas_offset_to_texcoord(offset: [u32; 2]) -> [f64; 2] {
+        let atlas_f64 = ATLAS_SIZE as f64;
+        [offset[0] as f64 / atlas_f64, offset[1] as f64 / atlas_f64]
     }
 
     fn load_font_by_name(cache: &FontCache, name: &str) -> Result<Vec<u8>, String> {
