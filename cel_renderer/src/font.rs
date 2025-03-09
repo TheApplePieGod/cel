@@ -10,14 +10,13 @@ pub type FontCache = FcFontCache;
 
 const ATLAS_SIZE: u32 = 1024;
 const MSDF_SIZE: u32 = 16;
-const MSDF_RANGE: f32 = 4.0;
+const MSDF_RANGE: f32 = 3.0;
 
 #[derive(Default)]
 pub struct FaceMetrics {
     pub height: f32,
     pub width: f32,
-    pub descender: f32,
-    pub space_size: f32
+    pub descender: f32
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -136,12 +135,20 @@ impl Font {
     pub fn get_face_metrics(&self) -> FaceMetrics {
         let face = Face::parse(self.font_data[0].as_slice(), 0).unwrap();
         let scale = face.units_per_em() as f32;
-        let space_glyph = face.glyph_index(' ').unwrap();
+
+        // Fixed width (all glyphs should have the same advance width)
+        let fixed_width = face.glyph_hor_advance(GlyphId(0)).unwrap_or(0);
+
+        // Fixed height
+        let ascender = face.ascender();  // Distance from baseline to top
+        let descender = face.descender(); // Distance from baseline to bottom
+        let line_gap = face.line_gap(); // Extra spacing between lines
+        let fixed_height = ascender - descender + line_gap;
+
         FaceMetrics {
-            height: face.global_bounding_box().height() as f32 / scale,
-            width: face.global_bounding_box().width() as f32 / scale,
-            descender: face.descender().abs() as f32 / scale,
-            space_size: face.glyph_hor_advance(space_glyph).unwrap() as f32 / scale
+            width: fixed_width as f32 / scale,
+            height: fixed_height as f32 / scale,
+            descender: face.descender().abs() as f32 / scale
         }
     }
 
@@ -268,10 +275,10 @@ impl Font {
         // Compute final atlas bound (uv coords)
         let texcoord_scale = 1.0 / self.get_atlas_size() as f64;
         let atlas_bound = Bound::new(
-            pixel_bound.left * texcoord_scale,
-            pixel_bound.bottom * texcoord_scale,
-            pixel_bound.right * texcoord_scale,
-            pixel_bound.top * texcoord_scale,
+            pixel_bound.left * texcoord_scale - texcoord_scale * 0.25,
+            pixel_bound.bottom * texcoord_scale - texcoord_scale * 0.25,
+            pixel_bound.right * texcoord_scale + texcoord_scale * 0.25,
+            pixel_bound.top * texcoord_scale + texcoord_scale * 0.25,
         );
 
         let scale = face.units_per_em() as f32;

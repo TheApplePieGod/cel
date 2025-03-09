@@ -38,7 +38,6 @@ pub struct Renderer {
 }
 
 pub struct RenderConstants {
-    pub aspect_ratio: f32,
     pub char_root_size: f32, // Fundamental base size of one character cell
     pub char_size_x_px: f32,
     pub char_size_y_px: f32,
@@ -327,14 +326,14 @@ impl Renderer {
         debug_show_cursor: bool,
     ) -> u32 {
         // Setup render state
-        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let rc = self.compute_render_constants(chars_per_line, padding_px);
         let timestamp_seconds = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::new(0, 0))
             .as_secs_f64();
-        let base_x = screen_offset[0] / rc.char_size_x_screen;
-        let base_y = screen_offset[1] / rc.char_size_y_screen;
+        // Clamp base position to nearest pixel
+        let base_x = ((screen_offset[0] / rc.char_size_x_screen) * rc.char_size_x_px).floor() / rc.char_size_x_px;
+        let base_y = ((screen_offset[1] / rc.char_size_y_screen) * rc.char_size_y_px).floor() / rc.char_size_y_px;
         let mut x = base_x;
         let mut y = base_y - rc.line_height;
         let mut should_render_cursor = debug_show_cursor
@@ -507,7 +506,7 @@ impl Renderer {
                 };
                 self.push_char_quad(
                     char_to_draw,
-                    &face_metrics,
+                    &rc,
                     fg_color,
                     bg_color,
                     &[x, y],
@@ -564,7 +563,6 @@ impl Renderer {
         centered: bool,
         text: &str,
     ) {
-        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
         let rc = self.compute_render_constants(chars_per_line, &[0.0, 0.0]);
 
         let mut x = 0.0;
@@ -586,7 +584,7 @@ impl Renderer {
 
             self.push_char_quad(
                 c,
-                &face_metrics,
+                &rc,
                 fg_color,
                 bg_color,
                 &[x, y],
@@ -624,19 +622,18 @@ impl Renderer {
     ) -> RenderConstants {
         let real_width = self.width as f32 - padding_px[0] * 2.0;
         let face_metrics = self.font.as_ref().borrow().get_face_metrics();
-        let aspect_ratio = self.width as f32 / self.height as f32;
-        let char_root_size = face_metrics.space_size;
-        let char_size_x_px = real_width / chars_per_line as f32 / char_root_size;
-        let char_size_x_screen = char_size_x_px / self.width as f32;
+        let char_size_px = (real_width / chars_per_line as f32 / face_metrics.width).floor();
+        let char_size_x_screen = char_size_px / self.width as f32;
+        let char_size_y_screen = char_size_px / self.height as f32;
 
+        // Ensure all sizes are pixel-aligned
         RenderConstants {
-            aspect_ratio,
-            char_root_size,
-            char_size_x_px,
-            char_size_y_px: char_size_x_px * aspect_ratio,
+            char_root_size: (face_metrics.width * char_size_px).ceil() / char_size_px,
+            char_size_x_px: char_size_px,
+            char_size_y_px: char_size_px,
             char_size_x_screen,
-            char_size_y_screen: char_size_x_screen * aspect_ratio,
-            line_height: 1.0 + face_metrics.descender,
+            char_size_y_screen,
+            line_height: ((1.0 + face_metrics.descender) * char_size_px).ceil() / char_size_px,
         }
     }
 
@@ -685,7 +682,7 @@ impl Renderer {
     fn push_char_quad(
         &mut self,
         c: char,
-        metrics: &FaceMetrics,
+        rc: &RenderConstants,
         fg_color: &[f32; 3],
         bg_color: &[f32; 3],
         pos: &[f32; 2], // In character space
@@ -698,6 +695,11 @@ impl Renderer {
         let glyph_bound = &glyph_metrics.glyph_bound;
         let atlas_uv = &glyph_metrics.atlas_uv;
 
+        // Round y position for consistent characters
+        let round = |pos: f32| {
+            (pos * rc.char_size_y_px).round() / rc.char_size_y_px
+        };
+
         Self::push_quad(
             fg_color,
             bg_color,
@@ -706,7 +708,7 @@ impl Renderer {
             &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
             &[
                 pos[0] + glyph_bound.right,
-                pos[1] + 1.0 - glyph_bound.bottom,
+                pos[1] + 1.0 - round(glyph_bound.bottom),
             ],
             flags,
             match glyph_metrics.render_type {
