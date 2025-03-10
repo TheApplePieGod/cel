@@ -695,11 +695,6 @@ impl Renderer {
         let glyph_bound = &glyph_metrics.glyph_bound;
         let atlas_uv = &glyph_metrics.atlas_uv;
 
-        // Round y position for consistent characters
-        let round = |pos: f32| {
-            (pos * rc.char_size_y_px).round() / rc.char_size_y_px
-        };
-
         Self::push_quad(
             fg_color,
             bg_color,
@@ -708,7 +703,7 @@ impl Renderer {
             &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
             &[
                 pos[0] + glyph_bound.right,
-                pos[1] + 1.0 - round(glyph_bound.bottom),
+                pos[1] + 1.0 - glyph_bound.bottom,
             ],
             flags,
             match glyph_metrics.render_type {

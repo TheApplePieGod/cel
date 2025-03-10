@@ -9,7 +9,7 @@ use crate::texture::Texture;
 pub type FontCache = FcFontCache;
 
 const ATLAS_SIZE: u32 = 1024;
-const MSDF_SIZE: u32 = 16;
+const MSDF_SIZE: u32 = 32;
 const MSDF_RANGE: f32 = 3.0;
 
 #[derive(Default)]
@@ -38,6 +38,14 @@ pub struct GlyphMetrics {
 pub struct GlyphData {
     pixels: Vec<f32>,
     metrics: GlyphMetrics
+}
+
+#[derive(Clone, Copy, Default)]
+struct GlyphBox {
+    range: f64,
+    scale: f64,
+    rect: msdfgen::Vector2<f64>,
+    translate: msdfgen::Vector2<f64>
 }
 
 pub struct Font {
@@ -272,13 +280,23 @@ impl Font {
             RenderType::RASTER => Self::generate_raster(raster.unwrap())
         };
 
+        /*
+        // For debugging
+        let bytes = pixels.iter().map(|p| (p * 255.0) as u8).collect::<Vec<u8>>();
+        let _ = image::save_buffer(
+            format!("glyphs/{}.png", key),
+            &bytes, MSDF_SIZE, MSDF_SIZE, image::ColorType::Rgba8
+        );
+        println!("Pixel bound for {}: T:{} B:{} L:{} R:{}", key, pixel_bound.top, pixel_bound.bottom, pixel_bound.left, pixel_bound.right);
+        */
+
         // Compute final atlas bound (uv coords)
         let texcoord_scale = 1.0 / self.get_atlas_size() as f64;
         let atlas_bound = Bound::new(
-            pixel_bound.left * texcoord_scale - texcoord_scale * 0.25,
-            pixel_bound.bottom * texcoord_scale - texcoord_scale * 0.25,
-            pixel_bound.right * texcoord_scale + texcoord_scale * 0.25,
-            pixel_bound.top * texcoord_scale + texcoord_scale * 0.25,
+            pixel_bound.left * texcoord_scale,
+            pixel_bound.bottom * texcoord_scale,
+            pixel_bound.right * texcoord_scale,
+            pixel_bound.top * texcoord_scale
         );
 
         let scale = face.units_per_em() as f32;
@@ -295,15 +313,82 @@ impl Font {
         }
     }
 
+    fn get_msdf_box(scale: f64, shape: &mut Shape) -> GlyphBox {
+        // Loosely based on 
+        // https://github.com/Chlumsky/msdf-atlas-gen/blob/master/msdf-atlas-gen/GlyphGeometry.cpp
+
+        // Helper to compute boundaries and dimensions given a scale
+        let compute_boundaries = |scale: f64, bounds: &msdfgen::Bound<f64>| -> (f64, f64, f64, f64, f64, f64) {
+            let sl = (scale * bounds.left - 0.5).floor();
+            let sr = (scale * bounds.right + 0.5).ceil();
+            let sb = (scale * bounds.bottom - 0.5).floor();
+            let st = (scale * bounds.top + 0.5).ceil();
+            let width = sr - sl;
+            let height = st - sb;
+            (sl, sr, sb, st, width, height)
+        };
+
+        let mut bbox = GlyphBox::default();
+        let mut bounds = shape.get_bound();
+        let mut scale = MSDF_SIZE as f64 * scale;
+        let range = MSDF_RANGE as f64 / scale;
+        let miter_limit = 1.0;
+
+        bbox.scale = scale;
+        bbox.range = range;
+
+        if bounds.left < bounds.right && bounds.bottom < bounds.top {
+            if miter_limit > 0.0 {
+                shape.bound_miters(&mut bounds, -range, miter_limit, msdfgen::Polarity::Positive);
+            }
+
+            // Compute provisional pixel boundaries
+            let (mut sl, _, mut sb, _, mut width, mut height) = compute_boundaries(scale, &bounds);
+
+            // Check if the glyph exceeds the maximum allowed size
+            let scale_adjust = if width > MSDF_SIZE as f64 || height > MSDF_SIZE as f64 {
+                let factor_width  = if width  > MSDF_SIZE as f64 { MSDF_SIZE as f64 / width } else { 1.0 };
+                let factor_height = if height > MSDF_SIZE as f64 { MSDF_SIZE as f64 / height } else { 1.0 };
+                factor_width.min(factor_height)
+            } else {
+                1.0
+            };
+
+            // If the glyph is too large, adjust the scale and recalc boundaries
+            if scale_adjust < 1.0 {
+                scale *= scale_adjust;
+                bbox.scale = scale;
+                bbox.range = MSDF_RANGE as f64 / scale;
+                (sl, _, sb, _, width, height) = compute_boundaries(scale, &bounds);
+            }
+            
+            bbox.translate.x = -sl / scale;
+            bbox.translate.y = -sb / scale;
+            bbox.rect.x = width;
+            bbox.rect.y = height;
+        } else {
+            // Invalid bounds
+            bbox.rect = msdfgen::Vector2::default();
+            bbox.translate = msdfgen::Vector2::default();
+        }
+
+        bbox
+    }
+
+
     fn generate_msdf(face: &Face, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
         let mut shape = shape;
-        let bound = shape.get_bound();
-        let framing = bound.autoframe(
-            MSDF_SIZE,
-            MSDF_SIZE,
-            Range::Px(MSDF_RANGE as f64),
-            None
-        ).unwrap();
+        shape.normalize();
+
+        let scale = 1.0 / face.units_per_em() as f64;
+        let bbox = Font::get_msdf_box(scale, &mut shape);
+        let framing = msdfgen::Framing {
+            projection: msdfgen::Projection {
+                translate: bbox.translate,
+                scale: bbox.scale.into()
+            },
+            range: bbox.range
+        };
 
         let config = MsdfGeneratorConfig::default();
         let fill_rule = FillRule::default();
@@ -323,22 +408,19 @@ impl Font {
             pixels[i * 4 + 3] = bmp_pixels[i].a;
         }
 
-        // Convert pixel units to normalized units
-        let scale = face.units_per_em() as f64;
+        // https://github.com/Chlumsky/msdf-atlas-gen/blob/master/msdf-atlas-gen/GlyphGeometry.cpp
         let glyph_bound = Bound::new(
-            (bound.left / scale) as f32,
-            (bound.bottom / scale) as f32,
-            (bound.right / scale) as f32,
-            (bound.top / scale) as f32
+            (scale * (-bbox.translate.x + 0.5 / bbox.scale)) as f32,
+            (scale * (-bbox.translate.y + 0.5 / bbox.scale)) as f32,
+            (scale * (-bbox.translate.x + (bbox.rect.x - 0.5) / bbox.scale)) as f32,
+            (scale * (-bbox.translate.y + (bbox.rect.y - 0.5) / bbox.scale)) as f32,
         );
 
-        // Cursed math that I don't fully understand but basically this is
-        // necessary to go from glyph space into pixel space within the atlas
         let pixel_bound = Bound::new(
-            (bound.left + framing.translate.x) * framing.scale.x,
-            (bound.bottom + framing.translate.y) * framing.scale.y,
-            (bound.right + framing.translate.x) * framing.scale.x,
-            (bound.top + framing.translate.y) * framing.scale.y
+            0.5,
+            0.5,
+            bbox.rect.x - 0.5,
+            bbox.rect.y - 0.5,
         );
 
         (pixels, glyph_bound, pixel_bound)
