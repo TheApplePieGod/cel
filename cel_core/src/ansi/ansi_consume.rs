@@ -1,4 +1,5 @@
 use bitflags::Flags;
+use unicode_segmentation::{UnicodeSegmentation, GraphemeCursor};
 use vte::{Parser, Params, Perform};
 use std::fmt;
 
@@ -870,7 +871,7 @@ impl Performer {
         log::debug!("[deactivate_alternate_screen_buffer]");
     }
 
-    fn put_char_at_cursor(&mut self, c: char, overwrite: bool) {
+    fn put_char_at_cursor(&mut self, c: char) -> bool {
         let state = &mut self.terminal_state;
 
         while state.global_cursor[1] >= state.screen_buffer.len() {
@@ -881,14 +882,55 @@ impl Performer {
             buffer_line.push(Default::default());
         }
 
-        if buffer_line[state.global_cursor[0]].elem != '\0' && !overwrite {
-            return;
+        let (left_cells, right_cells) = buffer_line.split_at_mut(state.global_cursor[0]);
+        let cur_cell = right_cells.first_mut().unwrap();
+        cur_cell.style = state.style_state;
+        if state.global_cursor[0] > 0 {
+            let last_cell = left_cells.last_mut().unwrap();
+            match &mut last_cell.elem {
+                CellContent::Char(old) => {
+                    let mut buf = [0; 10];
+                    let len1 = old.encode_utf8(&mut buf).len();
+                    let len2 = c.encode_utf8(&mut buf[len1..]).len();
+                    let str = std::str::from_utf8(&buf[..len1 + len2]).unwrap();
+                    match str.graphemes(true).count() {
+                        0..=1 => {
+                            last_cell.elem = CellContent::Grapheme(str.to_string(), str.len());
+                            false
+                        },
+                        _ => {
+                            cur_cell.elem = CellContent::Char(c);
+                            true
+                        }
+                    }
+                }
+                CellContent::Grapheme(str, len) => {
+                    // Temp mutate to check graphemes
+                    str.push(c);
+                    match str.graphemes(true).count() {
+                        0..=1 => {
+                            *len += 1;
+                            false
+                        },
+                        _ => {
+                            str.pop();
+                            cur_cell.elem = CellContent::Char(c);
+                            true
+                        }
+                    }
+                }
+                //CellContent::Continuation(offset) => {}
+                //CellContent::Empty => cell.elem = CellContent::Char(c)
+                _ => {
+                    cur_cell.elem = CellContent::Char(c);
+                    true
+                }
+            }
+        } else {
+            // TODO: handle replacing continuations
+            cur_cell.elem = CellContent::Char(c);
+            true
         }
-
-        buffer_line[state.global_cursor[0]] = ScreenBufferElement {
-            elem: c,
-            style: state.style_state
-        };
     }
 
     fn remove_characters_at_cursor(&mut self, amount: u32) {
@@ -902,7 +944,6 @@ impl Performer {
         let range = offset..((offset + amount as usize).min(buffer_line.len()));
         buffer_line.drain(range);
     }
-
 }
 
 // TO ADD:
@@ -927,36 +968,49 @@ impl Perform for Performer {
             self.advance_screen_cursor_with_scroll(true);
         }
 
-        self.put_char_at_cursor(c, true);
+        /*
+        //let str = c.to_string();
+        let str = "🇺🇸ab";
+        let graphemes = str.graphemes(true);
+        for g in graphemes {
+            println!("Complete grapheme: '{}'", g);
+        }
+        */
 
-        // Check for wrap. If we want to wrap, update the state accordingly. Otherwise,
-        // update the cursor directly
-        let state = &mut self.terminal_state;
-        let wrap = state.screen_cursor[0] + 1 >= self.screen_width;
-        if wrap {
-            state.wants_wrap = true;
+        // Put char at the current position and advance if necessary
+        if self.put_char_at_cursor(c) {
+            // Check for wrap. If we want to wrap, update the state accordingly. Otherwise,
+            // update the cursor directly
+            let state = &mut self.terminal_state;
+            let wrap = state.screen_cursor[0] + 1 >= self.screen_width;
+            if wrap {
+                state.wants_wrap = true;
+            } else {
+                // Advance the cursor
+                state.global_cursor[0] += 1;
+                state.screen_cursor[0] += 1;
+            }
+
+            log::trace!(
+                "Print {:?} {}", c,
+                match wrap {
+                    true => "<NEXT WRAP>",
+                    false => ""
+                }
+            );
         } else {
-            // Advance the cursor
-            state.global_cursor[0] += 1;
-            state.screen_cursor[0] += 1;
+            log::trace!("Print {:?} <APPEND>", c);
         }
 
         if !c.is_whitespace() {
             self.is_empty = false;
         }
-
-        log::trace!(
-            "Print {:?} {}",
-            c,
-            match wrap {
-                true => "<NEXT WRAP>",
-                false => ""
-            }
-        );
     }
 
     fn execute(&mut self, byte: u8) {
         self.action_performed = true;
+
+        log::trace!("Execute [{:?}]", byte as char);
 
         match byte {
             b'\n' => {
@@ -1066,6 +1120,8 @@ impl Perform for Performer {
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
         self.action_performed = true;
+
+        //log::trace!("Handling CSI '{:?}'", c);
 
         let params = self.parse_params(params);
         match c {
@@ -1432,7 +1488,8 @@ impl Perform for Performer {
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
         self.action_performed = true;
-        //log::debug!("Esc [{:?}]", byte as char);
+
+        log::trace!("Esc [{:?}]", byte as char);
 
         match byte {
             b'B' => {},

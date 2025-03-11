@@ -80,9 +80,17 @@ pub struct StyleState {
     pub bg_color: Option<Color>
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Debug)]
+pub enum CellContent {
+    Char(char),
+    Grapheme(String, usize),
+    Continuation(usize),
+    Empty
+}
+
+#[derive(Clone)]
 pub struct ScreenBufferElement {
-    pub elem: char,
+    pub elem: CellContent,
     pub style: StyleState
 }
 
@@ -109,7 +117,7 @@ pub struct TerminalState {
     pub global_cursor: Cursor,
     pub screen_cursor: Cursor,
     pub mouse_mode: MouseMode,
-    pub mouse_tracking_mode: MouseTrackingMode,
+    pub mouse_tracking_mode: MouseTrackingMode
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -147,6 +155,15 @@ pub struct AnsiBuilder {
     buffer: Vec<u8>
 }
 
+impl Default for ScreenBufferElement {
+    fn default() -> Self {
+        Self {
+            elem: CellContent::Char('\0'),
+            style: Default::default()
+        }
+    }
+}
+
 impl Default for CursorState {
     fn default() -> Self {
         Self {
@@ -171,7 +188,7 @@ impl Default for TerminalState {
             global_cursor: [0, 0],
             screen_cursor: [0, 0],
             mouse_mode: MouseMode::Default,
-            mouse_tracking_mode: MouseTrackingMode::Disabled,
+            mouse_tracking_mode: MouseTrackingMode::Disabled
         }
     }
 }

@@ -1,4 +1,4 @@
-use cel_core::ansi::{CursorStyle, StyleFlags, TerminalState};
+use cel_core::ansi::{CellContent, CursorStyle, StyleFlags, TerminalState};
 use std::time::{Duration, SystemTime};
 use std::{
     cell::RefCell,
@@ -458,11 +458,11 @@ impl Renderer {
                     prev_bg_color = terminal_state.background_color;
                 }
 
-                let c = line[char_idx];
+                let elem = &line[char_idx];
 
                 // TODO: store in separate buffer?
-                let fg_color = c.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
-                let bg_color = c
+                let fg_color = elem.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                let bg_color = elem
                     .style
                     .bg_color
                     .as_ref()
@@ -488,11 +488,29 @@ impl Renderer {
                         StyleFlags::default(),
                         &mut bg_quads,
                     );
-                } else if c.style.bg_color.is_some() {
+                } else if elem.style.bg_color.is_some() {
                     Self::extend_previous_quad(x + rc.char_root_size, &mut bg_quads);
                 }
 
-                if c.elem.is_whitespace() || c.elem == '\0' {
+                /*
+                let mut skip = false;
+                match elem.elem {
+                    CellContent::Char(c) => {
+                        // Skip rendering if this is a whitespace char
+                        if c.is_whitespace() || c == '\0' {
+                            skip = true;
+                        } else {
+                            codepoints.push(c);
+                        }
+                    },
+                    CellContent::Grapheme(str, len) => {
+                        
+                    },
+                    CellContent::Continuation(_) => skip = true,
+                    CellContent::Empty => skip = true
+                };
+
+                if skip {
                     x += rc.char_root_size;
                     continue;
                 }
@@ -502,7 +520,7 @@ impl Renderer {
                     false if debug_col_number => {
                         char::from_u32((char_idx as u32) % 10 + 48).unwrap()
                     }
-                    false => c.elem,
+                    false => elem,
                 };
                 self.push_char_quad(
                     char_to_draw,
@@ -514,6 +532,7 @@ impl Renderer {
                     &mut msdf_quads,
                     &mut raster_quads,
                 );
+                */
 
                 x += rc.char_root_size;
             }

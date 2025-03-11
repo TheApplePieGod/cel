@@ -144,6 +144,10 @@ impl Font {
         let face = Face::parse(self.font_data[0].as_slice(), 0).unwrap();
         let scale = face.units_per_em() as f32;
 
+        let font = harfbuzz_rs::Font::new(face);
+        let buffer = harfbuzz_rs::UnicodeBuffer::new().add_str("Hello World!");
+        harfbuzz_rs::shape(face, buffer, &[]);
+
         // Fixed width (all glyphs should have the same advance width)
         let fixed_width = face.glyph_hor_advance(GlyphId(0)).unwrap_or(0);
 
@@ -299,13 +303,13 @@ impl Font {
             pixel_bound.top * texcoord_scale
         );
 
-        let scale = face.units_per_em() as f32;
+        let scale = 1.0 / face.units_per_em() as f32;
         GlyphData {
             pixels,
             metrics: GlyphMetrics {
                 atlas_index: 0,
                 atlas_uv: Bound::new(0.0, 0.0, 0.0, 0.0),
-                advance: face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32 / scale as f32,
+                advance: scale * face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32,
                 glyph_bound,
                 atlas_bound,
                 render_type
@@ -374,7 +378,6 @@ impl Font {
 
         bbox
     }
-
 
     fn generate_msdf(face: &Face, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
         let mut shape = shape;

@@ -12,4 +12,5 @@ rust-fontconfig = { git = "https://github.com/TheApplePieGod/rust-fontconfig.git
 ttf-parser = "0.18"
 msdfgen = { version = "0.2.1", default-features = false, features = ["ttf-parser"] }
 half = "2.3.1"
+harfbuzz_rs = "2.0.1"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
