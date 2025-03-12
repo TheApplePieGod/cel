@@ -492,19 +492,28 @@ impl Renderer {
                     Self::extend_previous_quad(x + rc.char_root_size, &mut bg_quads);
                 }
 
-                /*
+                let mut char_to_draw = None;
                 let mut skip = false;
-                match elem.elem {
+                match &elem.elem {
                     CellContent::Char(c) => {
                         // Skip rendering if this is a whitespace char
-                        if c.is_whitespace() || c == '\0' {
+                        if c.is_whitespace() || *c == '\0' {
                             skip = true;
                         } else {
-                            codepoints.push(c);
+                            char_to_draw = Some(*c)
                         }
                     },
                     CellContent::Grapheme(str, len) => {
-                        
+                        self.push_unicode_quad(
+                            str,
+                            &rc,
+                            fg_color,
+                            bg_color,
+                            &[x, y],
+                            elem.style.flags,
+                            &mut msdf_quads,
+                            &mut raster_quads,
+                        );
                     },
                     CellContent::Continuation(_) => skip = true,
                     CellContent::Empty => skip = true
@@ -515,24 +524,26 @@ impl Renderer {
                     continue;
                 }
 
-                let char_to_draw = match debug_line_number {
-                    true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
-                    false if debug_col_number => {
+                if debug_line_number || debug_col_number {
+                    char_to_draw = Some(if debug_line_number {
+                        char::from_u32((line_idx as u32) % 10 + 48).unwrap()
+                    } else {
                         char::from_u32((char_idx as u32) % 10 + 48).unwrap()
-                    }
-                    false => elem,
-                };
-                self.push_char_quad(
-                    char_to_draw,
-                    &rc,
-                    fg_color,
-                    bg_color,
-                    &[x, y],
-                    c.style.flags,
-                    &mut msdf_quads,
-                    &mut raster_quads,
-                );
-                */
+                    });
+                }
+
+                if let Some(char_to_draw) = char_to_draw {
+                    self.push_char_quad(
+                        char_to_draw,
+                        &rc,
+                        fg_color,
+                        bg_color,
+                        &[x, y],
+                        elem.style.flags,
+                        &mut msdf_quads,
+                        &mut raster_quads,
+                    );
+                }
 
                 x += rc.char_root_size;
             }
@@ -730,6 +741,41 @@ impl Renderer {
                 RenderType::RASTER => raster_arr,
             },
         );
+    }
+
+    fn push_unicode_quad(
+        &mut self,
+        str: &str,
+        rc: &RenderConstants,
+        fg_color: &[f32; 3],
+        bg_color: &[f32; 3],
+        pos: &[f32; 2], // In character space
+        flags: StyleFlags,
+        msdf_arr: &mut Vec<QuadData>,
+        raster_arr: &mut Vec<QuadData>,
+    ) {
+        let mut mut_font = self.font.as_ref().borrow_mut();
+        for metrics in mut_font.get_grapheme_data(str).iter() {
+            let glyph_bound = &metrics.glyph_bound;
+            let atlas_uv = &metrics.atlas_uv;
+
+            Self::push_quad(
+                fg_color,
+                bg_color,
+                &[atlas_uv.left, atlas_uv.top],
+                &[atlas_uv.right, atlas_uv.bottom],
+                &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
+                &[
+                    pos[0] + glyph_bound.right,
+                    pos[1] + 1.0 - glyph_bound.bottom,
+                ],
+                flags,
+                match metrics.render_type {
+                    RenderType::MSDF => msdf_arr,
+                    RenderType::RASTER => raster_arr,
+                },
+            );
+        }
     }
 
     fn compute_pixel_range(&self, size_px: f32) -> f32 {

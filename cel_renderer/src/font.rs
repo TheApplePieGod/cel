@@ -48,28 +48,38 @@ struct GlyphBox {
     translate: msdfgen::Vector2<f64>
 }
 
+// If not None, indicates font index. Then, the first argument is glyph index.
+// Otherwise, first argument is generic char
+type CacheKey = (u32, Option<usize>);
+
 pub struct Font {
     name_list: Vec<String>,
     font_data: Vec<Vec<u8>>,
-    glyph_cache: HashMap<char, GlyphData>,
-    glyph_lru: LruCache<char, GlyphMetrics>,
+    glyph_cache: HashMap<CacheKey, GlyphData>,
+    glyph_lru: LruCache<CacheKey, GlyphMetrics>,
     atlas_free_list: u32,
     atlas_tex: Texture<f32>,
     font_cache: FontCache
+}
+
+impl Default for GlyphMetrics {
+    fn default() -> Self {
+        Self {
+            atlas_index: 0,
+            atlas_uv: Default::default(),
+            advance: 0.0,
+            glyph_bound: Bound::new(0.0, 0.0, 1.0, 1.0),
+            atlas_bound: Default::default(),
+            render_type: RenderType::RASTER
+        }
+    }
 }
 
 impl Default for GlyphData {
     fn default() -> Self {
         Self {
             pixels: vec![1.0; (MSDF_SIZE * MSDF_SIZE * 4) as usize],
-            metrics: GlyphMetrics {
-                atlas_index: 0,
-                atlas_uv: Default::default(),
-                advance: 0.0,
-                glyph_bound: Bound::new(0.0, 0.0, 1.0, 1.0),
-                atlas_bound: Default::default(),
-                render_type: RenderType::RASTER
-            }
+            metrics: Default::default()
         }
     }
 }
@@ -144,10 +154,6 @@ impl Font {
         let face = Face::parse(self.font_data[0].as_slice(), 0).unwrap();
         let scale = face.units_per_em() as f32;
 
-        let font = harfbuzz_rs::Font::new(face);
-        let buffer = harfbuzz_rs::UnicodeBuffer::new().add_str("Hello World!");
-        harfbuzz_rs::shape(face, buffer, &[]);
-
         // Fixed width (all glyphs should have the same advance width)
         let fixed_width = face.glyph_hor_advance(GlyphId(0)).unwrap_or(0);
 
@@ -170,8 +176,26 @@ impl Font {
     }
 
     pub fn get_glyph_data(&mut self, key: char) -> GlyphMetrics {
+        self.get_glyph_data_internal(key as u32, None)
+    }
+
+    pub fn get_grapheme_data(&mut self, key: &str) -> Vec<GlyphMetrics> {
+        // TODO: cache
+        match self.parse_grapheme(key) {
+            Some(parsed) => {
+                let mut output = vec![];
+                for (info, pos) in parsed.1.iter() {
+                    output.push(self.get_glyph_data_internal(info.codepoint, Some(parsed.0)));
+                }
+                output
+            },
+            None => vec![ Default::default() ]
+        }
+    }
+
+    fn get_glyph_data_internal(&mut self, key: u32, font_index: Option<usize>) -> GlyphMetrics {
         // TODO: don't need to evict if new glyph is invalid (default to index 0)
-        match self.glyph_lru.get(&key) {
+        match self.glyph_lru.get(&(key, font_index)) {
             Some(v) => *v,
             None => {
                 let atlas_index: u32;
@@ -186,21 +210,25 @@ impl Font {
                     atlas_index = lru.1.atlas_index;
                 }
 
-                let glyph_data = self.update_char_in_atlas(key, atlas_index);
+                let glyph_data = self.update_char_in_atlas(key, atlas_index, font_index);
 
                 glyph_data.metrics
             }
         }
     }
 
-    fn update_char_in_atlas(&mut self, key: char, atlas_index: u32) -> &GlyphData {
+    fn update_char_in_atlas(&mut self, key: u32, atlas_index: u32, font_index: Option<usize>) -> &GlyphData {
         // TODO: batching for face parsing 
-        if !self.glyph_cache.contains_key(&key) {
-            let new_data = self.load_glyph(key);
-            self.glyph_cache.insert(key, new_data);
+        let cache_key = (key, font_index);
+        if !self.glyph_cache.contains_key(&cache_key) {
+            let new_data = match font_index {
+                Some(font_index) => self.load_glyph_from_index(key, font_index),
+                None => self.load_glyph_from_char(char::from_u32(key).unwrap())
+            };
+            self.glyph_cache.insert(cache_key, new_data);
         }
 
-        let glyph_data = self.glyph_cache.get_mut(&key).unwrap();
+        let glyph_data = self.glyph_cache.get_mut(&cache_key).unwrap();
 
         // Update atlas pixels
         let offset = Self::convert_atlas_index_to_offset(atlas_index);
@@ -229,56 +257,107 @@ impl Font {
             uv_min[1] as f32,
         );
 
-        self.glyph_lru.put(key, glyph_data.metrics);
+        self.glyph_lru.put(cache_key, glyph_data.metrics);
 
         glyph_data
     }
 
-    fn load_glyph(&mut self, key: char) -> GlyphData {
-        let render_type: RenderType;
-        let mut font_index = 0;
-        let mut face: Face;
-        let mut raster: Option<RasterGlyphImage>;
-        let mut shape: Option<Shape> = None;
-        let mut glyph_index: Option<GlyphId>;
-        loop {
-            if font_index >= self.font_data.len() {
-                // Search for new fallback font
-                /*
-                match Self::load_font_by_glyph(&self.font_cache, key) {
-                    Ok(font_data) => {
-                        self.font_data.push(font_data);
-                    },
-                    Err(_) => {
-                        log::warn!("Missing glyph for '{:?}'", key);
-                        return Default::default();
-                    }
-                }
-                */
+    fn parse_grapheme(&self, grapheme: &str) -> Option<(usize, Vec<(harfbuzz_rs::GlyphInfo, harfbuzz_rs::GlyphPosition)>)> {
+        // TODO: reuse
+        let mut buf = harfbuzz_rs::UnicodeBuffer::new().add_str(grapheme);
 
+        let mut min: Option<(usize, Vec<(harfbuzz_rs::GlyphInfo, harfbuzz_rs::GlyphPosition)>)> = None;
+        for (font_index, font_data) in self.font_data.iter().enumerate() {
+            let ttf_face = ttf_parser::Face::parse(font_data.as_slice(), 0).unwrap();
+            let supports = grapheme.chars().all(|c| ttf_face.glyph_index(c).is_some());
+            if !supports {
+                continue;
+            }
+
+            let hb_face = harfbuzz_rs::Face::from_bytes(&font_data, 0);
+            let hb_font = harfbuzz_rs::Font::new(hb_face);
+
+            let hb_shape = harfbuzz_rs::shape(&hb_font, buf, &[]);
+            let num_codepoints = hb_shape.get_glyph_infos().len();
+            if min.is_none() || num_codepoints < min.as_ref().unwrap().1.len() {
+                let vec = hb_shape.get_glyph_infos()
+                    .iter()
+                    .zip(hb_shape.get_glyph_positions())
+                    .map(|v| (v.0.clone(), v.1.clone()))
+                    .collect();
+                min = Some ((font_index, vec))
+            }
+            
+            buf = hb_shape.clear().add_str(grapheme);
+        }
+
+        if min.is_none() {
+            log::warn!("Missing font support for {:?}", grapheme);
+        }
+
+        return min
+    }
+
+    fn load_glyph_from_index(&self, index: u32, font_index: usize) -> GlyphData {
+        let face = Face::parse(self.font_data[font_index].as_slice(), 0).unwrap();
+        self.load_glyph(&face, GlyphId(index as u16))
+    }
+
+    fn load_glyph_from_char(&self, key: char) -> GlyphData {
+        let mut face: Face;
+        let glyph_id: GlyphId;
+
+        // Search for the glyph in loaded fonts
+        let mut index = 0;
+        loop {
+            if index >= self.font_data.len() {
                 log::warn!("Missing glyph for '{:?}'", key);
                 return Default::default();
             }
 
-            face = Face::parse(self.font_data[font_index].as_slice(), 0).unwrap();
-            glyph_index = face.glyph_index(key);
-            font_index += 1;
+            face = Face::parse(self.font_data[index].as_slice(), 0).unwrap();
+            if let Some(id) = face.glyph_index(key) {
+                glyph_id = id;
+                break;
+            }
 
-            if glyph_index.is_some() {
-                raster = face.glyph_raster_image(glyph_index.unwrap(), std::u16::MAX);
-                if raster.is_some() {
-                    render_type = RenderType::RASTER;
-                    break;
-                }
-                shape = face.glyph_shape(glyph_index.unwrap());
-                if shape.is_some() {
-                    render_type = RenderType::MSDF;
-                    break;
-                }
+            index += 1;
+        }
+
+        self.load_glyph(&face, glyph_id)
+    }
+
+    fn load_glyph(&self, face: &Face, id: GlyphId) -> GlyphData {
+        let render_type: RenderType;
+        let raster: Option<RasterGlyphImage>;
+        let mut shape: Option<Shape> = None;
+
+        raster = face.glyph_raster_image(id, MSDF_SIZE as u16);
+        if raster.is_some() {
+            render_type = RenderType::RASTER;
+        } else {
+            shape = face.glyph_shape(id);
+            if shape.is_some() {
+                render_type = RenderType::MSDF;
+            } else {
+                log::warn!("Missing data for glyph id {}", id.0);
+                return Default::default();
             }
         }
 
-        let glyph_index = glyph_index.unwrap();
+        /*
+        //match self.parse_grapheme("🧑‍🧑‍🧒‍🧒") {
+        match self.parse_grapheme("A̸̲") {
+            Some(parsed) => {
+                log::warn!("Parsed for font {}", parsed.0);
+                for (info, pos) in parsed.1.iter() {
+                    log::warn!("Char: {}:{:?} ({}, {}) ({}, {})", info.codepoint, char::from_u32(info.codepoint), pos.x_offset, pos.y_advance, pos.x_advance, pos.y_advance);
+                }
+            },
+            None => {}
+        };
+        */
+
         let (pixels, glyph_bound, pixel_bound) = match render_type {
             RenderType::MSDF => Self::generate_msdf(&face, shape.unwrap()),
             RenderType::RASTER => Self::generate_raster(raster.unwrap())
@@ -309,7 +388,7 @@ impl Font {
             metrics: GlyphMetrics {
                 atlas_index: 0,
                 atlas_uv: Bound::new(0.0, 0.0, 0.0, 0.0),
-                advance: scale * face.glyph_hor_advance(glyph_index).unwrap_or(0) as f32,
+                advance: scale * face.glyph_hor_advance(id).unwrap_or(0) as f32,
                 glyph_bound,
                 atlas_bound,
                 render_type
