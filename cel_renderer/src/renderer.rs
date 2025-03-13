@@ -195,7 +195,7 @@ impl Renderer {
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
                 
-                fragColor = vec4(mix(bgColor, fgColor, opacity), 1.f);
+                fragColor = vec4(mix(bgColor, fgColor, opacity), opacity);
             }
         \0";
 
@@ -843,7 +843,9 @@ impl Renderer {
 
         self.bind_vertex_shader_data(self.msdf_program, model);
 
+        self.enable_blending();
         self.draw_indexed_instanced(arr.len() as i32);
+        self.disable_blending();
     }
 
     fn draw_raster_quads(&self, arr: &[QuadData], model: &[f32; 16]) {
@@ -913,6 +915,19 @@ impl Renderer {
         unsafe {
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
+        }
+    }
+
+    fn enable_blending(&self) {
+        unsafe {
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+        }
+    }
+
+    fn disable_blending(&self) {
+        unsafe {
+            gl::Disable(gl::BLEND);
         }
     }
 

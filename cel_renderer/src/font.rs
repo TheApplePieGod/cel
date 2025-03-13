@@ -181,16 +181,13 @@ impl Font {
 
     pub fn get_grapheme_data(&mut self, key: &str) -> Vec<GlyphMetrics> {
         // TODO: cache
-        match self.parse_grapheme(key) {
-            Some(parsed) => {
-                let mut output = vec![];
-                for (info, pos) in parsed.1.iter() {
-                    output.push(self.get_glyph_data_internal(info.codepoint, Some(parsed.0)));
-                }
-                output
-            },
-            None => vec![ Default::default() ]
+        let mut output = vec![];
+        for (font_idx, glyphs) in self.parse_grapheme(key).iter() {
+            for (info, _) in glyphs.iter() {
+                output.push(self.get_glyph_data_internal(info.codepoint, Some(*font_idx)));
+            }
         }
+        output
     }
 
     fn get_glyph_data_internal(&mut self, key: u32, font_index: Option<usize>) -> GlyphMetrics {
@@ -262,40 +259,69 @@ impl Font {
         glyph_data
     }
 
-    fn parse_grapheme(&self, grapheme: &str) -> Option<(usize, Vec<(harfbuzz_rs::GlyphInfo, harfbuzz_rs::GlyphPosition)>)> {
+    fn parse_grapheme(&self, grapheme: &str) -> Vec<(usize, Vec<(harfbuzz_rs::GlyphInfo, harfbuzz_rs::GlyphPosition)>)> {
+        // TODO: optimize 
+
         // TODO: reuse
-        let mut buf = harfbuzz_rs::UnicodeBuffer::new().add_str(grapheme);
+        let mut supported_chars = String::new();
+        let mut buf = harfbuzz_rs::UnicodeBuffer::new();
 
-        let mut min: Option<(usize, Vec<(harfbuzz_rs::GlyphInfo, harfbuzz_rs::GlyphPosition)>)> = None;
-        for (font_index, font_data) in self.font_data.iter().enumerate() {
-            let ttf_face = ttf_parser::Face::parse(font_data.as_slice(), 0).unwrap();
-            let supports = grapheme.chars().all(|c| ttf_face.glyph_index(c).is_some());
-            if !supports {
-                continue;
-            }
+        let mut result = Vec::new();
+        let mut chars = grapheme.chars().peekable();
+        
+        while chars.peek().is_some() {
+            for (font_index, font_data) in self.font_data.iter().enumerate() {
+                let ttf_face = ttf_parser::Face::parse(font_data.as_slice(), 0).unwrap();
 
-            let hb_face = harfbuzz_rs::Face::from_bytes(&font_data, 0);
-            let hb_font = harfbuzz_rs::Font::new(hb_face);
+                // Find the longest substring supported by this font
+                supported_chars.clear();
+                let mut iter = chars.clone();
+                while let Some(&c) = iter.peek() {
+                    if ttf_face.glyph_index(c).is_some() {
+                        supported_chars.push(c);
+                        iter.next();
+                    } else {
+                        break;
+                    }
+                }
 
-            let hb_shape = harfbuzz_rs::shape(&hb_font, buf, &[]);
-            let num_codepoints = hb_shape.get_glyph_infos().len();
-            if min.is_none() || num_codepoints < min.as_ref().unwrap().1.len() {
-                let vec = hb_shape.get_glyph_infos()
+                if supported_chars.is_empty() {
+                    continue;
+                }
+
+                // Shape using HarfBuzz
+                buf = buf.add_str(&supported_chars);
+                let hb_face = harfbuzz_rs::Face::from_bytes(&font_data, 0);
+                let hb_font = harfbuzz_rs::Font::new(hb_face);
+                let hb_shape = harfbuzz_rs::shape(&hb_font, buf, &[]);
+                
+                let glyphs = hb_shape
+                    .get_glyph_infos()
                     .iter()
                     .zip(hb_shape.get_glyph_positions())
-                    .map(|v| (v.0.clone(), v.1.clone()))
+                    .map(|(info, pos)| (info.clone(), pos.clone()))
                     .collect();
-                min = Some ((font_index, vec))
+                
+                result.push((font_index, glyphs));
+
+                // Advance chars iterator to the next unsupported character
+                // TODO: optimize
+                for _ in 0..supported_chars.chars().count() {
+                    chars.next();
+                }
+
+                buf = hb_shape.clear();
+
+                break;
             }
-            
-            buf = hb_shape.clear().add_str(grapheme);
+
+            if supported_chars.is_empty() {
+                let unsupported_char = chars.next().unwrap();
+                log::warn!("Missing font support for {:?}", unsupported_char);
+            }
         }
 
-        if min.is_none() {
-            log::warn!("Missing font support for {:?}", grapheme);
-        }
-
-        return min
+        result
     }
 
     fn load_glyph_from_index(&self, index: u32, font_index: usize) -> GlyphData {
@@ -344,19 +370,6 @@ impl Font {
                 return Default::default();
             }
         }
-
-        /*
-        //match self.parse_grapheme("🧑‍🧑‍🧒‍🧒") {
-        match self.parse_grapheme("A̸̲") {
-            Some(parsed) => {
-                log::warn!("Parsed for font {}", parsed.0);
-                for (info, pos) in parsed.1.iter() {
-                    log::warn!("Char: {}:{:?} ({}, {}) ({}, {})", info.codepoint, char::from_u32(info.codepoint), pos.x_offset, pos.y_advance, pos.x_advance, pos.y_advance);
-                }
-            },
-            None => {}
-        };
-        */
 
         let (pixels, glyph_bound, pixel_bound) = match render_type {
             RenderType::MSDF => Self::generate_msdf(&face, shape.unwrap()),
