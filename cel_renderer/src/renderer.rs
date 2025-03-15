@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    font::{FaceMetrics, Font, RenderType},
+    font::{Font, RenderType},
     glchk,
     util::Util,
 };
@@ -38,12 +38,10 @@ pub struct Renderer {
 }
 
 pub struct RenderConstants {
-    pub char_root_size: f32, // Fundamental base size of one character cell
     pub char_size_x_px: f32,
     pub char_size_y_px: f32,
     pub char_size_x_screen: f32,
-    pub char_size_y_screen: f32,
-    pub line_height: f32,
+    pub char_size_y_screen: f32
 }
 
 impl Renderer {
@@ -183,7 +181,7 @@ impl Renderer {
             uniform sampler2D atlasTex;
             uniform float pixelRange;
 
-            float Median(float r, float g, float b, float a) {
+            float median(float r, float g, float b, float a) {
                 return max(min(r, g), min(max(r, g), b));
             }
 
@@ -191,11 +189,11 @@ impl Renderer {
             {
                 float sdFactor = 1.05 + (flags & 1U) * 0.15 - (flags & 2U) * 0.05;
                 vec4 msd = texture(atlasTex, texCoord);
-                float sd = Median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
+                float sd = median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
                 
-                fragColor = vec4(mix(bgColor, fgColor, opacity), opacity);
+                fragColor = vec4(fgColor, opacity);
             }
         \0";
 
@@ -306,7 +304,7 @@ impl Renderer {
     }
 
     pub fn compute_max_lines(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
-        let lines_per_screen = (1.0 / (rc.line_height * rc.char_size_y_screen)).floor();
+        let lines_per_screen = (1.0 / rc.char_size_y_screen).floor();
 
         (lines_per_screen * screen_height) as u32
     }
@@ -335,7 +333,7 @@ impl Renderer {
         let base_x = ((screen_offset[0] / rc.char_size_x_screen) * rc.char_size_x_px).floor() / rc.char_size_x_px;
         let base_y = ((screen_offset[1] / rc.char_size_y_screen) * rc.char_size_y_px).floor() / rc.char_size_y_px;
         let mut x = base_x;
-        let mut y = base_y - rc.line_height;
+        let mut y = base_y - 1.0;
         let mut should_render_cursor = debug_show_cursor
             || (terminal_state.cursor_state.visible
                 && (!terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5));
@@ -355,7 +353,7 @@ impl Renderer {
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
             rendered_line_count += 1;
             x = base_x;
-            y += rc.line_height;
+            y += 1.0;
 
             let max_offscreen_lines = 10.0;
             let y_pos_screen = y * rc.char_size_y_screen;
@@ -365,7 +363,7 @@ impl Renderer {
                     let line = &terminal_state.screen_buffer[line_idx];
                     let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
                     rendered_line_count += line_occupancy;
-                    y += rc.line_height * line_occupancy as f32;
+                    y += line_occupancy as f32;
                 } else {
                     break;
                 }
@@ -381,7 +379,7 @@ impl Renderer {
                 let line = &terminal_state.screen_buffer[line_idx];
                 let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
                 rendered_line_count += line_occupancy;
-                y += rc.line_height * line_occupancy as f32;
+                y += line_occupancy as f32;
 
                 // TODO: should break here, but the rendered line count gets messed
                 // up which breaks other things
@@ -404,8 +402,8 @@ impl Renderer {
                         _ => 1.0,
                     };
                     let pos_min = [
-                        base_x + (cursor[0] % chars_per_line as usize) as f32 * rc.char_root_size,
-                        y + rc.line_height * (cursor[0] / chars_per_line as usize) as f32,
+                        base_x + (cursor[0] % chars_per_line as usize) as f32,
+                        y + (cursor[0] / chars_per_line as usize) as f32,
                     ];
                     Self::push_quad(
                         &[0.0, 0.0, 0.0],
@@ -414,8 +412,8 @@ impl Renderer {
                         &[0.0, 0.0],
                         &pos_min,
                         &[
-                            pos_min[0] + rc.char_root_size * width,
-                            pos_min[1] + rc.line_height * height,
+                            pos_min[0] + width,
+                            pos_min[1] + height,
                         ],
                         StyleFlags::default(),
                         &mut raster_quads,
@@ -448,13 +446,13 @@ impl Renderer {
                     break 'outer;
                 }
 
-                let max_x = base_x + rc.char_root_size * chars_per_line as f32 - 0.001;
+                let max_x = base_x + chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
                     max_line_count += 1;
                     rendered_line_count += 1;
                     x = base_x;
-                    y += rc.line_height;
+                    y += 1.0;
                     prev_bg_color = terminal_state.background_color;
                 }
 
@@ -484,12 +482,12 @@ impl Renderer {
                         &[0.0, 0.0],
                         &[0.0, 0.0],
                         &[x, y],
-                        &[x + rc.char_root_size, y + rc.line_height],
+                        &[x + 1.0, y + 1.0],
                         StyleFlags::default(),
                         &mut bg_quads,
                     );
                 } else if elem.style.bg_color.is_some() {
-                    Self::extend_previous_quad(x + rc.char_root_size, &mut bg_quads);
+                    Self::extend_previous_quad(x + 1.0, &mut bg_quads);
                 }
 
                 let mut char_to_draw = None;
@@ -520,7 +518,7 @@ impl Renderer {
                 };
 
                 if skip {
-                    x += rc.char_root_size;
+                    x += 1.0;
                     continue;
                 }
 
@@ -545,7 +543,7 @@ impl Renderer {
                     );
                 }
 
-                x += rc.char_root_size;
+                x += 1.0;
             }
         }
 
@@ -603,12 +601,12 @@ impl Renderer {
         for c in text.chars() {
             if c == '\n' {
                 x = 0.0;
-                y += rc.line_height;
+                y += 1.0;
                 continue;
             }
 
             if c.is_whitespace() || c == '\0' {
-                x += rc.char_root_size;
+                x += 1.0;
                 continue;
             }
 
@@ -623,7 +621,7 @@ impl Renderer {
                 &mut raster_quads,
             );
 
-            x += rc.char_root_size;
+            x += 1.0;
         }
 
         self.draw_quad(screen_offset, bg_size_screen, bg_color);
@@ -631,7 +629,7 @@ impl Renderer {
         // Draw text, centered on background
         let centered_offset = [
             screen_offset[0] + (bg_size_screen[0] - x * rc.char_size_x_screen) * 0.5,
-            screen_offset[1] + (bg_size_screen[1] - rc.line_height * rc.char_size_y_screen) * 0.5,
+            screen_offset[1] + (bg_size_screen[1] - rc.char_size_y_screen) * 0.5,
         ];
         self.draw_text_quads(
             &rc,
@@ -651,19 +649,19 @@ impl Renderer {
         padding_px: &[f32; 2],
     ) -> RenderConstants {
         let real_width = self.width as f32 - padding_px[0] * 2.0;
-        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
-        let char_size_px = (real_width / chars_per_line as f32 / face_metrics.width).floor();
-        let char_size_x_screen = char_size_px / self.width as f32;
-        let char_size_y_screen = char_size_px / self.height as f32;
+        let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
+        let char_size_x_px = (real_width / chars_per_line as f32).round();
+        let char_size_y_px = (char_size_x_px * face_metrics.height).round();
+        let char_size_x_screen = char_size_x_px / self.width as f32;
+        let char_size_y_screen = char_size_y_px / self.height as f32;
 
-        // Ensure all sizes are pixel-aligned
+        //log::warn!(
+
         RenderConstants {
-            char_root_size: (face_metrics.width * char_size_px).ceil() / char_size_px,
-            char_size_x_px: char_size_px,
-            char_size_y_px: char_size_px,
+            char_size_x_px,
+            char_size_y_px,
             char_size_x_screen,
             char_size_y_screen,
-            line_height: ((1.0 + face_metrics.descender) * char_size_px).ceil() / char_size_px,
         }
     }
 

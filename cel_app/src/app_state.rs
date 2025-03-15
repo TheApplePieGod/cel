@@ -13,7 +13,7 @@ impl AppState {
         let primary_font_name = "Martian Mono Regular";
         let secondary_font_name = "Hack Nerd Font Mono Regular";
         #[cfg(target_os = "macos")]
-        let mut fallback_fonts = vec!["Apple Color Emoji", "Apple Symbols", "Arial Unicode MS"];
+        let mut fallback_fonts = vec!["Courier New", "Apple Color Emoji", "Apple Symbols", "Arial Unicode MS"];
         #[cfg(target_os = "linux")]
         let mut fallback_fonts = vec!["Courier New", "Arial Unicode MS"];
         #[cfg(target_os = "windows")]
