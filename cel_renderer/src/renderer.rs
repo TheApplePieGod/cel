@@ -137,7 +137,6 @@ impl Renderer {
             flat out uint flags;
 
             uniform mat4 model;
-            uniform mat4 scale;
 
             const vec2 offsets[4] = vec2[](
                 vec2(0.0, 0.0), // Bottom-left
@@ -165,7 +164,7 @@ impl Renderer {
                 vec2 tex1 = inTexCoord.zw;
                 vec2 coord = mix(tex0, tex1, offset);
 
-                gl_Position = scale * model * vec4(pos, 0.0, 1.0)
+                gl_Position = model * vec4(pos, 0.0, 1.0)
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = inColor;
@@ -182,7 +181,6 @@ impl Renderer {
             out vec3 bgColor;
 
             uniform mat4 model;
-            uniform mat4 scale;
 
             const vec2 offsets[4] = vec2[](
                 vec2(0.0, 0.0), // Bottom-left
@@ -201,7 +199,7 @@ impl Renderer {
                 vec2 offset = offsets[gl_VertexID % 4];
                 vec2 pos = mix(p0, p1, offset);
 
-                gl_Position = scale * model * vec4(pos, 0.0, 1.0)
+                gl_Position = model * vec4(pos, 0.0, 1.0)
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 bgColor = inColor;
             }
@@ -923,6 +921,13 @@ impl Renderer {
     }
 
     fn bind_vertex_shader_data(&self, program_id: u32, model: &[f32; 16]) {
+        // Scale model mat by the global scale
+        let mut model: [f32; 16] = model.clone();
+        model[0] *= self.scale[0];
+        model[5] *= -self.scale[1];
+        model[12] *= self.scale[0];
+        model[13] *= -self.scale[1];
+
         // Set global model matrix (column major)
         unsafe {
             gl::UniformMatrix4fv(
@@ -930,22 +935,6 @@ impl Renderer {
                 1,
                 gl::FALSE,
                 model.as_ptr(),
-            );
-        }
-
-        // Set content scale
-        unsafe {
-            let scaling_mat: [f32; 16] = [
-                self.scale[0], 0.0, 0.0, 0.0,
-                0.0, -self.scale[1], 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, 0.0, 0.0, 1.0,
-            ];
-            gl::UniformMatrix4fv(
-                self.get_uniform_location(program_id, "scale"),
-                1,
-                gl::FALSE,
-                scaling_mat.as_ptr(),
             );
         }
     }
