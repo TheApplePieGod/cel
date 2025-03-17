@@ -11,6 +11,12 @@ use crate::app_state::AppState;
 use crate::layout::Layout;
 use crate::input::Input;
 
+pub struct MonitorInfo {
+    pub refresh_rate: u32,
+    pub position: (i32, i32),
+    pub size: (u32, u32),
+}
+
 pub struct Window {
     glfw_instance: glfw::Glfw,
     window: Rc<RefCell<glfw::PWindow>>,
@@ -33,6 +39,7 @@ impl Window {
     pub fn new() -> Self {
         let mut glfw_instance = glfw::init(fail_on_errors!()).unwrap();
 
+        glfw_instance.window_hint(glfw::WindowHint::Resizable(true));
         glfw_instance.window_hint(glfw::WindowHint::ContextVersion(4, 0));
         glfw_instance.window_hint(glfw::WindowHint::OpenGlForwardCompat(true));
         glfw_instance.window_hint(glfw::WindowHint::OpenGlProfile(
@@ -196,6 +203,34 @@ impl Window {
     pub fn get_scale(&self) -> [f32; 2] { self.window.as_ref().borrow().get_content_scale().into() }
     pub fn get_is_focused(&self) -> bool { self.window.as_ref().borrow().is_focused() }
     pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
+    pub fn get_monitor_info(&mut self) -> Option<MonitorInfo> { self.get_monitor() }
+
+    fn get_monitor(&mut self) -> Option<MonitorInfo> {
+        let window = self.window.as_ref().borrow();
+        let (win_x, win_y) = window.get_pos();
+        let (win_w, win_h) = window.get_size();
+
+        self.glfw_instance.with_connected_monitors(|_, monitors| {
+            for monitor in monitors {
+                if let Some(video_mode) = monitor.get_video_mode() {
+                    let (mon_x, mon_y) = monitor.get_pos();
+                    let mon_w = video_mode.width as i32;
+                    let mon_h = video_mode.height as i32;
+
+                    // Check if window is within the monitor's bounds
+                    if win_x >= mon_x && win_x + win_w <= mon_x + mon_w &&
+                       win_y >= mon_y && win_y + win_h <= mon_y + mon_h {
+                        return Some(MonitorInfo {
+                            refresh_rate: video_mode.refresh_rate,
+                            position: (mon_x, mon_y),
+                            size: (video_mode.width, video_mode.height),
+                        });
+                    }
+                }
+            }
+            None
+        })
+    }
 
     fn poll_events(&mut self) -> bool {
         let mut any_event = false;
