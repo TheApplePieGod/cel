@@ -884,6 +884,7 @@ impl Performer {
             _ => 1
         };
         cell.elem = CellContent::Char(c, width);
+        cell.style = style;
         let continuations_pos = [pos[0] + 1, pos[1]];
         self.update_continuations(continuations_pos, style, old_width - 1, width - 1, 0);
 
@@ -908,11 +909,15 @@ impl Performer {
             _ => {}
         };
 
-        let (left_cells, right_cells) = buffer_line.split_at_mut(state.global_cursor[0]);
         let cur_pos = state.global_cursor;
-        let cur_cell = right_cells.first_mut().unwrap();
         let cur_style = state.style_state;
-        cur_cell.style = cur_style;
+
+        // Fast-path: if the new char is ASCII, skip grapheme merging
+        if c.is_ascii() {
+            return self.put_wide_char_unchecked(cur_pos, cur_style, c);
+        }
+
+        let (left_cells, _) = buffer_line.split_at_mut(state.global_cursor[0]);
         if state.global_cursor[0] > 0 {
             // Get the previous cell, accounting for continuations
             let last_cell = match &left_cells.last().unwrap().elem {
