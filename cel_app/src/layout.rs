@@ -1,4 +1,4 @@
-use cel_renderer::renderer::Renderer;
+use cel_renderer::renderer::{RenderStats, Renderer};
 
 use crate::terminal_context::TerminalContext;
 use crate::input::Input;
@@ -107,11 +107,26 @@ impl Layout {
 
     pub fn get_debug_lines(&self) -> Vec<String> {
         let widgets = self.context.get_widgets();
+
+        // Accumulate render stats
+        let mut stats: RenderStats = Default::default();
+        for widget in widgets {
+            let w_stat = widget.get_last_render_stats();
+            stats.num_fg_instances += w_stat.num_fg_instances;
+            stats.num_bg_instances += w_stat.num_bg_instances;
+            stats.wrapped_line_count += w_stat.wrapped_line_count;
+            stats.rendered_line_count += w_stat.rendered_line_count;
+        }
+
         let active = widgets.last().unwrap();
         let active_size = active.get_terminal_size();
         vec![
             format!("Num widgets: {}", widgets.len()),
             format!("Active size: {}x{}", active_size[0], active_size[1]),
+            format!("Total fg quads: {}", stats.num_fg_instances),
+            format!("Total bg quads: {}", stats.num_bg_instances),
+            format!("Total rendered lines: {}", stats.rendered_line_count),
+            format!("Total wrapped lines: {}", stats.wrapped_line_count),
         ]
     }
 

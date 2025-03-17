@@ -40,6 +40,7 @@ impl Window {
         let mut glfw_instance = glfw::init(fail_on_errors!()).unwrap();
 
         //glfw_instance.window_hint(glfw::WindowHint::Decorated(false));
+        glfw_instance.window_hint(glfw::WindowHint::DoubleBuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::Resizable(true));
         glfw_instance.window_hint(glfw::WindowHint::ContextVersion(4, 0));
         glfw_instance.window_hint(glfw::WindowHint::OpenGlForwardCompat(true));
@@ -171,7 +172,7 @@ impl Window {
                     active_layout,
                     self.window.as_ref().borrow_mut().deref_mut(),
                     self.input.as_ref().borrow().deref()
-                ) | any_event;
+                );
                 self.last_render_time = Instant::now();
                 did_render = true;
             }
@@ -307,6 +308,7 @@ impl Window {
 
     fn render_debug_widget(&self, renderer: &mut Renderer, dt_ms: f64) {
         let layouts = self.layouts.as_ref().borrow();
+
         let mut text_lines: Vec<String> = vec![
             String::from("cel_ debug"),
             format!("Frametime (ms): {:.1}", dt_ms),

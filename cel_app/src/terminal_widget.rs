@@ -1,5 +1,5 @@
 use cel_core::ansi::{self, AnsiHandler, BufferState};
-use cel_renderer::renderer::Renderer;
+use cel_renderer::renderer::{RenderStats, Renderer};
 
 use crate::{button::Button, input::Input, layout::LayoutPosition};
 
@@ -14,6 +14,7 @@ pub struct TerminalWidget {
     ansi_handler: AnsiHandler,
     chars_per_line: u32,
     lines_per_screen: u32,
+    last_render_stats: RenderStats,
     last_computed_height: f32,
     last_rendered_lines: u32,
     last_line_height_screen: f32,
@@ -43,6 +44,7 @@ impl TerminalWidget {
             ansi_handler: AnsiHandler::new(chars_per_line, lines_per_screen),
             chars_per_line,
             lines_per_screen,
+            last_render_stats: Default::default(),
             last_computed_height: 0.0,
             last_rendered_lines: 0,
             last_line_height_screen: 1.0, // To prevent the 'excess space' from blowing up on initial render
@@ -113,6 +115,7 @@ impl TerminalWidget {
     }
 
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
+    pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
@@ -283,7 +286,7 @@ impl TerminalWidget {
             position.offset[0] + padding[0],
             position.offset[1] + padding[1]
         ];
-        let rendered_lines = renderer.render_terminal(
+        let render_stats = renderer.render_terminal(
             &self.ansi_handler.get_terminal_state(),
             &padded_offset,
             &self.padding_px,
@@ -298,7 +301,7 @@ impl TerminalWidget {
 
         //log::warn!("RL: {}", rendered_lines);
         let clamped_height = (
-            rendered_lines as f32 * line_size_screen
+            render_stats.rendered_line_count as f32 * line_size_screen
         )
          .max(default_height)
          .min(position.max_size[1]);
@@ -310,6 +313,8 @@ impl TerminalWidget {
         self.last_char_width_screen = rc.char_size_x_screen;
 
         self.last_computed_height = self.last_rendered_lines as f32 * line_size_screen + padding[1] * 2.0;
+
+        self.last_render_stats = render_stats;
     }
 
     // Returns true if a rerender should occur after this one, i.e. when a button is pressed

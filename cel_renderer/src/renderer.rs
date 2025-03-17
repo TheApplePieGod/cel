@@ -32,6 +32,22 @@ pub struct BgQuadData {
     pub padding: u32
 }
 
+#[derive(Copy, Clone, Default)]
+pub struct RenderStats {
+    pub num_fg_instances: u32,
+    pub num_bg_instances: u32,
+    pub wrapped_line_count: u32,
+    pub rendered_line_count: u32
+}
+
+pub struct RenderConstants {
+    pub char_size_x_px: f32,
+    pub char_size_y_px: f32,
+    pub char_size_x_screen: f32,
+    pub char_size_y_screen: f32,
+    pub atlas_pixel_size: f32
+}
+
 pub struct Renderer {
     msdf_program: u32,
     raster_program: u32,
@@ -44,14 +60,6 @@ pub struct Renderer {
     height: u32,
     scale: [f32; 2],
     font: Rc<RefCell<Font>>,
-}
-
-pub struct RenderConstants {
-    pub char_size_x_px: f32,
-    pub char_size_y_px: f32,
-    pub char_size_x_screen: f32,
-    pub char_size_y_screen: f32,
-    pub atlas_pixel_size: f32
 }
 
 impl Renderer {
@@ -81,12 +89,6 @@ impl Renderer {
             // Instance VBO
             gl::GenBuffers(1, &mut instance_vbo);
             gl::BindBuffer(gl::ARRAY_BUFFER, instance_vbo);
-            gl::BufferData(
-                gl::ARRAY_BUFFER,
-                (size_of::<FgQuadData>() * MAX_CHARACTERS as usize) as isize,
-                null(),
-                gl::DYNAMIC_DRAW,
-            );
 
             // FG VAO attributes
             let instance_stride = size_of::<FgQuadData>() as i32;
@@ -363,7 +365,9 @@ impl Renderer {
         debug_line_number: bool,
         debug_col_number: bool,
         debug_show_cursor: bool,
-    ) -> u32 {
+    ) -> RenderStats {
+        let mut stats = RenderStats::default();
+
         // Setup render state
         let rc = self.compute_render_constants(chars_per_line, padding_px);
         let timestamp_seconds = SystemTime::now()
@@ -506,6 +510,7 @@ impl Renderer {
                 if should_wrap {
                     max_line_count += 1;
                     rendered_line_count += 1;
+                    stats.wrapped_line_count += 1;
                     x = base_x;
                     y += 1.0;
                     prev_bg_color = terminal_state.background_color;
@@ -537,6 +542,8 @@ impl Renderer {
                         &[x + 1.0, y + 1.0],
                         &mut bg_quads
                     );
+
+                    stats.num_bg_instances += 1;
                 } else if elem.style.bg_color.is_some() {
                     Self::extend_previous_quad(x + 1.0, &mut bg_quads);
                 }
@@ -555,7 +562,7 @@ impl Renderer {
                         }
                     },
                     CellContent::Grapheme(str, width) => {
-                        self.push_unicode_quad(
+                        stats.num_fg_instances += self.push_unicode_quad(
                             str,
                             &rc,
                             fg_color,
@@ -584,6 +591,7 @@ impl Renderer {
                 }
 
                 if let Some(char_to_draw) = char_to_draw {
+                    stats.num_fg_instances += 1;
                     self.push_char_quad(
                         char_to_draw,
                         &rc,
@@ -602,7 +610,8 @@ impl Renderer {
 
         self.draw_text_quads(&rc, &[0.0, 0.0], &bg_quads, &msdf_quads, &raster_quads);
 
-        max_line_count
+        stats.rendered_line_count = max_line_count;
+        stats
     }
 
     pub fn draw_quad(
@@ -807,12 +816,14 @@ impl Renderer {
         flags: StyleFlags,
         msdf_arr: &mut Vec<FgQuadData>,
         raster_arr: &mut Vec<FgQuadData>,
-    ) {
+    ) -> u32 {
+        let mut count = 0;
         let mut mut_font = self.font.as_ref().borrow_mut();
         for metrics in mut_font.get_grapheme_data(str).iter() {
             let glyph_bound = &metrics.glyph_bound;
             let atlas_uv = &metrics.atlas_uv;
 
+            count += 1;
             Self::push_fg_quad(
                 fg_color,
                 &[atlas_uv.left, atlas_uv.top],
@@ -829,6 +840,8 @@ impl Renderer {
                 },
             );
         }
+
+        count
     }
 
     fn compute_pixel_range(&self, size_px: f32) -> f32 {
@@ -994,11 +1007,11 @@ impl Renderer {
     fn update_buffer_data<T>(&self, buffer_id: u32, buffer_type: gl::types::GLenum, data: &[T]) {
         self.bind_buffer(buffer_id, buffer_type);
         unsafe {
-            gl::BufferSubData(
+            gl::BufferData(
                 buffer_type,
-                0,
                 (size_of::<T>() * data.len()) as isize,
                 data.as_ptr() as _,
+                gl::STATIC_DRAW,
             );
         }
         self.bind_buffer(0, buffer_type);
