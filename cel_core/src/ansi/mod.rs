@@ -82,7 +82,7 @@ pub struct StyleState {
 
 #[derive(Clone, Debug)]
 pub enum CellContent {
-    Char(char),
+    Char(char, usize),
     Grapheme(String, usize),
     Continuation(usize),
     Empty
@@ -158,7 +158,7 @@ pub struct AnsiBuilder {
 impl Default for ScreenBufferElement {
     fn default() -> Self {
         Self {
-            elem: CellContent::Char('\0'),
+            elem: CellContent::Char('\0', 1),
             style: Default::default()
         }
     }

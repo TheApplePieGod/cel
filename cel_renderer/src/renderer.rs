@@ -527,22 +527,25 @@ impl Renderer {
                 }
 
                 let mut char_to_draw = None;
+                let mut width = 1.0;
                 let mut skip = false;
                 match &elem.elem {
-                    CellContent::Char(c) => {
+                    CellContent::Char(c, c_width) => {
                         // Skip rendering if this is a whitespace char
                         if c.is_whitespace() || *c == '\0' {
                             skip = true;
                         } else {
-                            char_to_draw = Some(*c)
+                            char_to_draw = Some(*c);
+                            width = *c_width as f32;
                         }
                     },
-                    CellContent::Grapheme(str, len) => {
+                    CellContent::Grapheme(str, width) => {
                         self.push_unicode_quad(
                             str,
                             &rc,
                             fg_color,
                             &[x, y],
+                            *width as f32,
                             elem.style.flags,
                             &mut msdf_quads,
                             &mut raster_quads,
@@ -571,6 +574,7 @@ impl Renderer {
                         &rc,
                         fg_color,
                         &[x, y],
+                        width,
                         elem.style.flags,
                         &mut msdf_quads,
                         &mut raster_quads,
@@ -645,6 +649,7 @@ impl Renderer {
                 &rc,
                 fg_color,
                 &[x, y],
+                1.0,
                 StyleFlags::default(),
                 &mut msdf_quads,
                 &mut raster_quads,
@@ -750,6 +755,7 @@ impl Renderer {
         rc: &RenderConstants,
         fg_color: &[f32; 3],
         pos: &[f32; 2], // In character space
+        width: f32, // In character space
         flags: StyleFlags,
         msdf_arr: &mut Vec<FgQuadData>,
         raster_arr: &mut Vec<FgQuadData>,
@@ -765,7 +771,7 @@ impl Renderer {
             &[atlas_uv.right, atlas_uv.bottom],
             &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
             &[
-                pos[0] + glyph_bound.right,
+                pos[0] + glyph_bound.right * width,
                 pos[1] + 1.0 - glyph_bound.bottom,
             ],
             flags,
@@ -782,6 +788,7 @@ impl Renderer {
         rc: &RenderConstants,
         fg_color: &[f32; 3],
         pos: &[f32; 2], // In character space
+        width: f32, // In character space
         flags: StyleFlags,
         msdf_arr: &mut Vec<FgQuadData>,
         raster_arr: &mut Vec<FgQuadData>,
@@ -797,7 +804,7 @@ impl Renderer {
                 &[atlas_uv.right, atlas_uv.bottom],
                 &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
                 &[
-                    pos[0] + glyph_bound.right,
+                    pos[0] + glyph_bound.right * width,
                     pos[1] + 1.0 - glyph_bound.bottom,
                 ],
                 flags,
@@ -921,7 +928,7 @@ impl Renderer {
     }
 
     fn bind_vertex_shader_data(&self, program_id: u32, model: &[f32; 16]) {
-        // Scale model mat by the global scale
+        // Scale model mat by the global scale (TODO: should probably do a proper matmul)
         let mut model: [f32; 16] = model.clone();
         model[0] *= self.scale[0];
         model[5] *= -self.scale[1];

@@ -1,5 +1,6 @@
 use bitflags::Flags;
 use unicode_segmentation::{UnicodeSegmentation, GraphemeCursor};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Params, Perform};
 use std::fmt;
 
@@ -871,7 +872,25 @@ impl Performer {
         log::debug!("[deactivate_alternate_screen_buffer]");
     }
 
-    fn put_char_at_cursor(&mut self, c: char) -> bool {
+    // Replaces cell content at cursor position, accounting for inserting and removing continuation cells.
+    // This assumes that pos is not out of bounds, and the content at pos is NOT empty or a continuation
+    fn put_wide_char_unchecked(&mut self, pos: Cursor, style: StyleState, c: char) -> usize {
+        // TODO: optimize
+        let width = c.width().unwrap_or(1).max(1);
+        let cell = &mut self.terminal_state.screen_buffer[pos[1]][pos[0]];
+        let old_width = match cell.elem {
+            CellContent::Char(_, w) => w,
+            CellContent::Grapheme(_, w) => w,
+            _ => 1
+        };
+        cell.elem = CellContent::Char(c, width);
+        let continuations_pos = [pos[0] + 1, pos[1]];
+        self.update_continuations(continuations_pos, style, old_width - 1, width - 1, 0);
+
+        width
+    }
+
+    fn put_char_at_cursor(&mut self, c: char) -> usize {
         let state = &mut self.terminal_state;
 
         while state.global_cursor[1] >= state.screen_buffer.len() {
@@ -882,67 +901,148 @@ impl Performer {
             buffer_line.push(Default::default());
         }
 
+        match &buffer_line[state.global_cursor[0]].elem {
+            // Mutate cursor and navigate to start of character. This makes behavior
+            // much more predictable and easy to implement
+            CellContent::Continuation(width) => state.global_cursor[0] -= width,
+            _ => {}
+        };
+
         let (left_cells, right_cells) = buffer_line.split_at_mut(state.global_cursor[0]);
+        let cur_pos = state.global_cursor;
         let cur_cell = right_cells.first_mut().unwrap();
-        cur_cell.style = state.style_state;
+        let cur_style = state.style_state;
+        cur_cell.style = cur_style;
         if state.global_cursor[0] > 0 {
-            let last_cell = left_cells.last_mut().unwrap();
+            // Get the previous cell, accounting for continuations
+            let last_cell = match &left_cells.last().unwrap().elem {
+                CellContent::Continuation(width) => &mut left_cells[left_cells.len() - width - 1],
+                _ => left_cells.last_mut().unwrap()
+            };
+            let last_style = last_cell.style;
             match &mut last_cell.elem {
-                CellContent::Char(old) => {
+                CellContent::Char(old_c, old_width) => {
                     let mut buf = [0; 10];
-                    let len1 = old.encode_utf8(&mut buf).len();
+                    let len1 = old_c.encode_utf8(&mut buf).len();
                     let len2 = c.encode_utf8(&mut buf[len1..]).len();
                     let str = std::str::from_utf8(&buf[..len1 + len2]).unwrap();
                     match str.graphemes(true).count() {
                         0..=1 => {
-                            last_cell.elem = CellContent::Grapheme(str.to_string(), str.len());
-                            false
+                            let width = *old_width;
+                            let new_width = str.width();
+                            let num_continutations = new_width - width;
+                            last_cell.elem = CellContent::Grapheme(str.to_string(), new_width);
+                            self.update_continuations(cur_pos, last_style, num_continutations, 0, width);
+                            num_continutations
                         },
                         _ => {
-                            cur_cell.elem = CellContent::Char(c);
-                            true
+                            self.put_wide_char_unchecked(cur_pos, cur_style, c)
                         }
                     }
                 }
-                CellContent::Grapheme(str, len) => {
+                CellContent::Grapheme(str, old_width) => {
                     // Temp mutate to check graphemes
                     str.push(c);
                     match str.graphemes(true).count() {
                         0..=1 => {
-                            *len += 1;
-                            false
+                            let width = *old_width;
+                            let new_width = str.width();
+                            let num_continutations = new_width - width;
+                            *old_width = new_width;
+                            self.update_continuations(cur_pos, last_style, num_continutations, 0, width);
+                            num_continutations
                         },
                         _ => {
                             str.pop();
-                            cur_cell.elem = CellContent::Char(c);
-                            true
+                            self.put_wide_char_unchecked(cur_pos, cur_style, c)
                         }
                     }
                 }
-                //CellContent::Continuation(offset) => {}
-                //CellContent::Empty => cell.elem = CellContent::Char(c)
-                _ => {
-                    cur_cell.elem = CellContent::Char(c);
-                    true
+                CellContent::Continuation(_) => {
+                    log::warn!("BUG! This should never happen.");
+                    self.put_wide_char_unchecked(cur_pos, cur_style, c)
+                }
+                CellContent::Empty => {
+                    self.put_wide_char_unchecked(cur_pos, cur_style, c)
                 }
             }
         } else {
-            // TODO: handle replacing continuations
-            cur_cell.elem = CellContent::Char(c);
-            true
+            self.put_wide_char_unchecked(cur_pos, cur_style, c)
         }
     }
 
-    fn remove_characters_at_cursor(&mut self, amount: u32) {
+    fn remove_characters(&mut self, pos: Cursor, amount: u32) {
         let state = &mut self.terminal_state;
-        if state.global_cursor[1] >= state.screen_buffer.len() {
+        if pos[1] >= state.screen_buffer.len() {
             return;
         }
 
-        let offset = state.global_cursor[0];
-        let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
+        let offset = pos[0];
+        let buffer_line = &mut state.screen_buffer[pos[1]];
         let range = offset..((offset + amount as usize).min(buffer_line.len()));
         buffer_line.drain(range);
+    }
+
+    fn update_continuations(&mut self, pos: Cursor, style: StyleState, old_amount: usize, amount: usize, start_index: usize) {
+        if amount == 0 && old_amount == 0 {
+            // Don't do range check insertions if we aren't actually inserting anything
+            return;
+        }
+
+        let state = &mut self.terminal_state;
+
+        while pos[1] >= state.screen_buffer.len() {
+            state.screen_buffer.push(vec![]);
+        }
+        let buffer_line = &mut state.screen_buffer[pos[1]];
+        while pos[0] >= buffer_line.len() {
+            buffer_line.push(Default::default());
+        }
+
+        // TODO: handle insert mode
+        if false {
+            // In insert mode, we insert new cells
+            // (This shifts existing cells to the right)
+            for i in 0..amount {
+                let elem = ScreenBufferElement {
+                    style,
+                    elem: CellContent::Continuation(start_index + amount - i),
+                };
+                buffer_line.insert(pos[0], elem);
+            }
+        } else {
+            // Otherwise, we update the existing cells in place
+            let mut old_amount = old_amount;
+            for i in 0..amount {
+                let idx = pos[0] + i;
+                let new_cell = ScreenBufferElement {
+                    style,
+                    elem: CellContent::Continuation(start_index + amount - i),
+                };
+                if idx < buffer_line.len() {
+                    // Ensure that any intersecting graphemes also have their continuations
+                    // cleared. Exploit old_amount to achieve this
+                    match buffer_line[idx].elem {
+                        CellContent::Char(_, w) |
+                        CellContent::Grapheme(_, w) => old_amount = amount.max(i + w),
+                        _ => {}
+                    };
+                    buffer_line[idx] = new_cell;
+                } else {
+                    buffer_line.push(new_cell);
+                }
+            }
+            // If the previous wide character had more continuation cells than we need now,
+            // clear the extra cells by marking them as empty.
+            if old_amount > amount {
+                for i in amount..old_amount {
+                    let idx = pos[0] + i;
+                    if idx < buffer_line.len() {
+                        buffer_line[idx].elem = CellContent::Empty;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -951,6 +1051,7 @@ impl Performer {
 // - Cursor modes
 // - Mouse modes (1000-1034)
 // - Origin mode
+// - Insert/replace mode
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
@@ -968,17 +1069,17 @@ impl Perform for Performer {
             self.advance_screen_cursor_with_scroll(true);
         }
 
-        /*
-        //let str = c.to_string();
-        let str = "🇺🇸ab";
-        let graphemes = str.graphemes(true);
-        for g in graphemes {
-            println!("Complete grapheme: '{}'", g);
-        }
-        */
-
         // Put char at the current position and advance if necessary
-        if self.put_char_at_cursor(c) {
+        let num_advances = self.put_char_at_cursor(c);
+        for adv in 0..num_advances {
+            // Handle wrapping only when we place a character
+            if self.terminal_state.wants_wrap {
+                self.terminal_state.screen_cursor[0] = 0;
+                self.terminal_state.global_cursor[0] += 1;
+                self.terminal_state.wants_wrap = false;
+                self.advance_screen_cursor_with_scroll(true);
+            }
+
             // Check for wrap. If we want to wrap, update the state accordingly. Otherwise,
             // update the cursor directly
             let state = &mut self.terminal_state;
@@ -992,13 +1093,16 @@ impl Perform for Performer {
             }
 
             log::trace!(
-                "Print {:?} {}", c,
+                "Print {:?} (adv {}) {}", c,
+                adv,
                 match wrap {
                     true => "<NEXT WRAP>",
                     false => ""
                 }
             );
-        } else {
+        }
+
+        if num_advances == 0 {
             log::trace!("Print {:?} <APPEND>", c);
         }
 
@@ -1264,7 +1368,7 @@ impl Perform for Performer {
                     _ => params[0]
                 } as u32;
                 log::debug!("Delete chars [{:?}]", amount);
-                self.remove_characters_at_cursor(amount);
+                self.remove_characters(self.terminal_state.global_cursor, amount);
             },
             'c' => { // Send device attributes
                 if !params.is_empty() && params[0] != 0 {
@@ -1544,7 +1648,7 @@ impl fmt::Debug for ScreenBufferElement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SBufElem: ")?;
         write!(f, "C: {:?}, ", self.elem)?;
-        write!(f, "STY: {:?}, ", self.style)?;
+        //write!(f, "STY: {:?}, ", self.style)?;
         Ok(())
     }
 }
