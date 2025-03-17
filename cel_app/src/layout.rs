@@ -18,6 +18,8 @@ pub struct Layout {
     scroll_offset: f32,
     context: TerminalContext,
 
+    last_num_onscreen_widgets: u32,
+
     widget_height_px: f32,
     widget_gap_px: f32,
 }
@@ -30,6 +32,8 @@ impl Layout {
             can_scroll_up: false,
             scroll_offset: 0.0,
             context: TerminalContext::new(),
+
+            last_num_onscreen_widgets: 0,
 
             widget_height_px: 54.0,
             widget_gap_px: 3.0,
@@ -69,6 +73,7 @@ impl Layout {
         let widget_height = self.widget_height_px / self.height as f32;
 
         let mut should_rerender = false;
+        let mut count = 0;
         let mut last_local_offset = 0.0;
         let mut last_global_offset = 0.0;
         self.map_onscreen_widgets(|ctx, local_offset, global_offset| {
@@ -92,10 +97,13 @@ impl Layout {
                 widget_height,
                 bg_color
             );
+
+            count += 1;
         });
 
         // Lock scrolling to the last widget
         self.can_scroll_up = last_local_offset < 0.0;
+        self.last_num_onscreen_widgets = count;
 
         should_rerender
     }
@@ -121,7 +129,8 @@ impl Layout {
         let active = widgets.last().unwrap();
         let active_size = active.get_terminal_size();
         vec![
-            format!("Num widgets: {}", widgets.len()),
+            format!("Total widgets: {}", widgets.len()),
+            format!("Rendered widgets: {}", self.last_num_onscreen_widgets),
             format!("Active size: {}x{}", active_size[0], active_size[1]),
             format!("Total fg quads: {}", stats.num_fg_instances),
             format!("Total bg quads: {}", stats.num_bg_instances),
@@ -147,7 +156,7 @@ impl Layout {
             let last_height = ctx.get_last_computed_height();
             let start_offset = cur_offset - self.scroll_offset - last_height;
 
-            if !ctx.get_primary() {
+            if !ctx.get_primary() && start_offset < 1.0 {
                 func(ctx, start_offset, cur_offset);
             }
 

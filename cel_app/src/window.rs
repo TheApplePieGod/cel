@@ -371,7 +371,7 @@ impl Window {
         }
     }
 
-    fn begin_frame<'a>(clear_color: &[f32; 3]) {
+    fn begin_frame(clear_color: &[f32; 3]) {
         unsafe {
             gl::ClearColor(
                 clear_color[0],
