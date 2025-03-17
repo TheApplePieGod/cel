@@ -435,8 +435,20 @@ impl Renderer {
                     // Compute absolute position to account for wraps
                     should_render_cursor = false;
                     let width = match terminal_state.cursor_state.style {
+                        // Adjust width of cursor based on char width
                         CursorStyle::Bar => 0.15,
-                        _ => 1.0,
+                        _ => {
+                            if cursor[1] < terminal_state.screen_buffer.len() &&
+                               cursor[0] < terminal_state.screen_buffer[cursor[1]].len() {
+                                match terminal_state.screen_buffer[cursor[1]][cursor[0]].elem {
+                                    CellContent::Char(_, w) => w as f32,
+                                    CellContent::Grapheme(_, w) => w as f32,
+                                    _ => 1.0
+                                }
+                            } else {
+                                1.0
+                            }
+                        }
                     };
                     let height = match terminal_state.cursor_state.style {
                         CursorStyle::Underline => 0.09,
@@ -450,10 +462,13 @@ impl Renderer {
                         &[1.0, 0.0, 0.0],
                         &[rc.atlas_pixel_size, rc.atlas_pixel_size],
                         &[rc.atlas_pixel_size, rc.atlas_pixel_size],
-                        &pos_min,
+                        &[
+                            pos_min[0],
+                            pos_min[1] + 1.0 - height
+                        ],
                         &[
                             pos_min[0] + width,
-                            pos_min[1] + height,
+                            pos_min[1] + 1.0
                         ],
                         StyleFlags::default(),
                         &mut raster_quads,
