@@ -223,7 +223,7 @@ impl Renderer {
 
             void main()
             {
-                float sdFactor = 1.05 + (flags & 1U) * 0.15 - (flags & 2U) * 0.05;
+                float sdFactor = 1.05 + (flags & 1U) * 0.3 - (flags & 2U) * 0.05;
                 vec4 msd = texture(atlasTex, texCoord);
                 float sd = median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
                 float screenPxDistance = pixelRange * (sd - 0.5);

@@ -1375,6 +1375,20 @@ impl Perform for Performer {
                 log::debug!("Delete chars [{:?}]", amount);
                 self.remove_characters(self.terminal_state.global_cursor, amount);
             },
+            'S' | 'T' => { // Scroll region
+                if intermediates.len() != 0 {
+                    return;
+                }
+                let amount = match params.len() {
+                    1 if params[0] > 0 => params[0] as usize,
+                    _ => 1
+                };
+                let up = c == 'S';
+                log::debug!("Scroll {} by {}", if up { "up" } else { "down" }, amount);
+                for _ in 0..amount {
+                    self.scroll_region(up, self.terminal_state.margin);
+                }
+            },
             'c' => { // Send device attributes
                 if !params.is_empty() && params[0] != 0 {
                     return;
