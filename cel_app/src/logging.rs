@@ -4,7 +4,11 @@ pub struct ConsoleLogger;
 
 impl log::Log for ConsoleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info
+        if cfg!(debug_assertions) {
+            metadata.level() <= Level::Trace
+        } else {
+            metadata.level() <= Level::Info
+        }
     }
 
     fn log(&self, record: &Record) {

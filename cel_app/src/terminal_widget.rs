@@ -253,7 +253,7 @@ impl TerminalWidget {
         let max_chars = ((width_px - padding_px[0] * 2.0) / self.char_size_px) as u32;
         let rc = renderer.compute_render_constants(max_chars, &self.padding_px);
         let num_screen_lines = renderer.compute_max_lines(&rc, 1.0);
-        let line_size_screen = rc.char_size_y_screen * rc.line_height;
+        let line_size_screen = rc.char_size_y_screen;
         let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
         let max_terminal_lines = num_screen_lines.min(num_actual_lines);
 
@@ -307,7 +307,7 @@ impl TerminalWidget {
         self.last_rendered_lines = (clamped_height / line_size_screen).ceil() as u32;
         self.last_line_height_screen = line_size_screen;
 
-        self.last_char_width_screen = rc.char_root_size * rc.char_size_x_screen;
+        self.last_char_width_screen = rc.char_size_x_screen;
 
         self.last_computed_height = self.last_rendered_lines as f32 * line_size_screen + padding[1] * 2.0;
     }

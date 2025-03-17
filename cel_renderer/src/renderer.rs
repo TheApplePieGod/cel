@@ -1,4 +1,4 @@
-use cel_core::ansi::{CursorStyle, StyleFlags, TerminalState};
+use cel_core::ansi::{CellContent, CursorStyle, StyleFlags, TerminalState};
 use std::time::{Duration, SystemTime};
 use std::{
     cell::RefCell,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    font::{FaceMetrics, Font, RenderType},
+    font::{Font, RenderType},
     glchk,
     util::Util,
 };
@@ -17,18 +17,27 @@ const MAX_CHARACTERS: u32 = 50000;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct QuadData {
+pub struct FgQuadData {
     pub position: [f32; 4],  // x0, y0, x1, y1
     pub tex_coord: [f32; 4], // u0, v0, u1, v1
-    pub color: [u32; 3],     // r, g, b (fg, bg)
+    pub color: [f32; 3],     // r, g, b (fg)
     pub flags: StyleFlags
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct BgQuadData {
+    pub position: [f32; 4],  // x0, y0, x1, y1
+    pub color: [f32; 3],     // r, g, b (bg)
+    pub padding: u32
 }
 
 pub struct Renderer {
     msdf_program: u32,
     raster_program: u32,
     bg_program: u32,
-    quad_vao: u32,
+    fg_quad_vao: u32,
+    bg_quad_vao: u32,
     quad_ibo: u32,
     instance_vbo: u32,
     width: u32,
@@ -38,24 +47,24 @@ pub struct Renderer {
 }
 
 pub struct RenderConstants {
-    pub char_root_size: f32, // Fundamental base size of one character cell
     pub char_size_x_px: f32,
     pub char_size_y_px: f32,
     pub char_size_x_screen: f32,
     pub char_size_y_screen: f32,
-    pub line_height: f32,
+    pub atlas_pixel_size: f32
 }
 
 impl Renderer {
     pub fn new(width: i32, height: i32, scale: [f32; 2], default_font: Rc<RefCell<Font>>) -> Self {
         // Generate buffers
-        let mut quad_vao: u32 = 0;
-        let mut quad_ibo: u32 = 0;
+        let mut fg_quad_vao: u32 = 0;
+        let mut bg_quad_vao: u32 = 0;
         let mut instance_vbo: u32 = 0;
+        let mut quad_ibo: u32 = 0;
         unsafe {
-            // VAO
-            gl::GenVertexArrays(1, &mut quad_vao);
-            gl::BindVertexArray(quad_vao);
+            // FG VAO
+            gl::GenVertexArrays(1, &mut fg_quad_vao);
+            gl::BindVertexArray(fg_quad_vao);
 
             let base_indices: [u32; 6] = [0, 2, 3, 0, 1, 2];
 
@@ -74,19 +83,19 @@ impl Renderer {
             gl::BindBuffer(gl::ARRAY_BUFFER, instance_vbo);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
-                (size_of::<QuadData>() * MAX_CHARACTERS as usize) as isize,
+                (size_of::<FgQuadData>() * MAX_CHARACTERS as usize) as isize,
                 null(),
                 gl::DYNAMIC_DRAW,
             );
 
-            // VAO attributes
-            let instance_stride = size_of::<QuadData>() as i32;
+            // FG VAO attributes
+            let instance_stride = size_of::<FgQuadData>() as i32;
             let pos_stride = size_of::<f32>() as i32 * 4;
             let coord_stride = size_of::<f32>() as i32 * 4 + pos_stride;
-            let color_stride = size_of::<u32>() as i32 * 3 + coord_stride;
+            let color_stride = size_of::<f32>() as i32 * 3 + coord_stride;
             gl::VertexAttribPointer(0, 4, gl::FLOAT, gl::FALSE, instance_stride, null());
             gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, instance_stride, pos_stride as _);
-            gl::VertexAttribPointer(2, 3, gl::UNSIGNED_INT, gl::FALSE, instance_stride, coord_stride as _);
+            gl::VertexAttribPointer(2, 3, gl::FLOAT, gl::FALSE, instance_stride, coord_stride as _);
             gl::VertexAttribPointer(3, 1, gl::UNSIGNED_INT, gl::FALSE, instance_stride, color_stride as _);
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
@@ -96,32 +105,38 @@ impl Renderer {
             gl::VertexAttribDivisor(1, 1);
             gl::VertexAttribDivisor(2, 1);
             gl::VertexAttribDivisor(3, 1);
+
+            // BG VAO
+            gl::GenVertexArrays(1, &mut bg_quad_vao);
+            gl::BindVertexArray(bg_quad_vao);
+
+            // Bind IBO
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, quad_ibo);
+
+            // BG VAO attributes
+            let instance_stride = size_of::<BgQuadData>() as i32;
+            let pos_stride = size_of::<f32>() as i32 * 4;
+            gl::VertexAttribPointer(0, 4, gl::FLOAT, gl::FALSE, instance_stride, null());
+            gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, instance_stride, pos_stride as _);
+            gl::EnableVertexAttribArray(0);
+            gl::EnableVertexAttribArray(1);
+            gl::VertexAttribDivisor(0, 1);
+            gl::VertexAttribDivisor(1, 1);
         }
 
-        let vert_shader_source = b"
+        let fg_vert_shader_source = b"
             #version 400 core
 
             layout (location = 0) in vec4 inPos;
             layout (location = 1) in vec4 inTexCoord;
-            layout (location = 2) in uvec3 inColor;
+            layout (location = 2) in vec3 inColor;
             layout (location = 3) in uint inFlags;
 
             out vec2 texCoord;
             out vec3 fgColor;
-            out vec3 bgColor;
             flat out uint flags;
 
             uniform mat4 model;
-            uniform vec2 scale;
-
-            uint half2float(uint h) {
-                return ((h & uint(0x8000)) << uint(16)) | ((( h & uint(0x7c00)) + uint(0x1c000)) << uint(13)) | ((h & uint(0x03ff)) << uint(13));
-            }
-
-            vec2 unpackHalf2x16(uint v) {	
-                return vec2(uintBitsToFloat(half2float(v & uint(0xffff))),
-                        uintBitsToFloat(half2float(v >> uint(16))));
-            }
 
             const vec2 offsets[4] = vec2[](
                 vec2(0.0, 0.0), // Bottom-left
@@ -149,24 +164,44 @@ impl Renderer {
                 vec2 tex1 = inTexCoord.zw;
                 vec2 coord = mix(tex0, tex1, offset);
 
-                vec2 r = unpackHalf2x16(inColor.r);
-                vec2 g = unpackHalf2x16(inColor.g);
-                vec2 b = unpackHalf2x16(inColor.b);
-
-                // TODO: make this a uniform
-                mat4 scalingMat = mat4(
-                    scale[0], 0.0, 0.0, 0.0,
-                    0.0, -scale[1], 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    0.0, 0.0, 0.0, 1.0
-                );
-
-                gl_Position = scalingMat * model * vec4(pos, 0.0, 1.0)
+                gl_Position = model * vec4(pos, 0.0, 1.0)
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
-                fgColor = vec3(r.x, g.x, b.x);
-                bgColor = vec3(r.y, g.y, b.y);
+                fgColor = inColor;
                 flags = inFlags;
+            }
+        \0";
+
+        let bg_vert_shader_source = b"
+            #version 400 core
+
+            layout (location = 0) in vec4 inPos;
+            layout (location = 1) in vec3 inColor;
+
+            out vec3 bgColor;
+
+            uniform mat4 model;
+
+            const vec2 offsets[4] = vec2[](
+                vec2(0.0, 0.0), // Bottom-left
+                vec2(1.0, 0.0), // Bottom-right
+                vec2(1.0, 1.0), // Top-right
+                vec2(0.0, 1.0)  // Top-left
+            );
+
+            void main()
+            {
+                // Extract quad corners
+                vec2 p0 = inPos.xy;
+                vec2 p1 = inPos.zw;
+
+                // Compute vertex position based on gl_VertexID
+                vec2 offset = offsets[gl_VertexID % 4];
+                vec2 pos = mix(p0, p1, offset);
+
+                gl_Position = model * vec4(pos, 0.0, 1.0)
+                    + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
+                bgColor = inColor;
             }
         \0";
 
@@ -175,7 +210,6 @@ impl Renderer {
 
             in vec2 texCoord;
             in vec3 fgColor;
-            in vec3 bgColor;
             flat in uint flags;
 
             out vec4 fragColor;
@@ -183,7 +217,7 @@ impl Renderer {
             uniform sampler2D atlasTex;
             uniform float pixelRange;
 
-            float Median(float r, float g, float b, float a) {
+            float median(float r, float g, float b, float a) {
                 return max(min(r, g), min(max(r, g), b));
             }
 
@@ -191,11 +225,11 @@ impl Renderer {
             {
                 float sdFactor = 1.05 + (flags & 1U) * 0.15 - (flags & 2U) * 0.05;
                 vec4 msd = texture(atlasTex, texCoord);
-                float sd = Median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
+                float sd = median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
                 float screenPxDistance = pixelRange * (sd - 0.5);
                 float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
                 
-                fragColor = vec4(mix(bgColor, fgColor, opacity), 1.f);
+                fragColor = vec4(fgColor, opacity);
             }
         \0";
 
@@ -204,7 +238,6 @@ impl Renderer {
 
             in vec2 texCoord;
             in vec3 fgColor;
-            in vec3 bgColor;
 
             out vec4 fragColor;
 
@@ -213,7 +246,7 @@ impl Renderer {
             void main()
             {
                 vec4 color = texture(atlasTex, texCoord);
-                fragColor = vec4(mix(bgColor, color.rgb, color.a), 1.f);
+                fragColor = vec4(color.rgb * fgColor, color.a);
             }
         \0";
 
@@ -233,7 +266,11 @@ impl Renderer {
         \0";
 
         // Compile shaders & generate program
-        let vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, vert_shader_source) {
+        let fg_vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, fg_vert_shader_source) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to compile vertex shader: {}", msg),
+        };
+        let bg_vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, bg_vert_shader_source) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile vertex shader: {}", msg),
         };
@@ -252,22 +289,23 @@ impl Renderer {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile bg frag shader: {}", msg),
         };
-        let msdf_program = match Self::link_program(vert_shader, msdf_frag_shader) {
+        let msdf_program = match Self::link_program(fg_vert_shader, msdf_frag_shader) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to link msdf program: {}", msg),
         };
-        let raster_program = match Self::link_program(vert_shader, raster_frag_shader) {
+        let raster_program = match Self::link_program(fg_vert_shader, raster_frag_shader) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to link raster program: {}", msg),
         };
-        let bg_program = match Self::link_program(vert_shader, bg_frag_shader) {
+        let bg_program = match Self::link_program(bg_vert_shader, bg_frag_shader) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to link bg program: {}", msg),
         };
 
         // Free shaders
         unsafe {
-            gl::DeleteShader(vert_shader);
+            gl::DeleteShader(fg_vert_shader);
+            gl::DeleteShader(bg_vert_shader);
             gl::DeleteShader(msdf_frag_shader);
             gl::DeleteShader(raster_frag_shader);
             gl::DeleteShader(bg_frag_shader);
@@ -277,7 +315,8 @@ impl Renderer {
             msdf_program,
             raster_program,
             bg_program,
-            quad_vao,
+            fg_quad_vao,
+            bg_quad_vao,
             quad_ibo,
             instance_vbo,
             width: width as u32,
@@ -306,7 +345,7 @@ impl Renderer {
     }
 
     pub fn compute_max_lines(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
-        let lines_per_screen = (1.0 / (rc.line_height * rc.char_size_y_screen)).floor();
+        let lines_per_screen = (1.0 / rc.char_size_y_screen).floor();
 
         (lines_per_screen * screen_height) as u32
     }
@@ -335,16 +374,16 @@ impl Renderer {
         let base_x = ((screen_offset[0] / rc.char_size_x_screen) * rc.char_size_x_px).floor() / rc.char_size_x_px;
         let base_y = ((screen_offset[1] / rc.char_size_y_screen) * rc.char_size_y_px).floor() / rc.char_size_y_px;
         let mut x = base_x;
-        let mut y = base_y - rc.line_height;
+        let mut y = base_y - 1.0;
         let mut should_render_cursor = debug_show_cursor
             || (terminal_state.cursor_state.visible
                 && (!terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5));
         let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
         let mut max_line_count = 0;
-        let mut msdf_quads: Vec<QuadData> = vec![]; // TODO: reuse
-        let mut raster_quads: Vec<QuadData> = vec![];
-        let mut bg_quads: Vec<QuadData> = vec![];
+        let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
+        let mut raster_quads: Vec<FgQuadData> = vec![];
+        let mut bg_quads: Vec<BgQuadData> = vec![];
 
         //
         // Populate vertex buffers
@@ -355,7 +394,7 @@ impl Renderer {
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
             rendered_line_count += 1;
             x = base_x;
-            y += rc.line_height;
+            y += 1.0;
 
             let max_offscreen_lines = 10.0;
             let y_pos_screen = y * rc.char_size_y_screen;
@@ -365,7 +404,7 @@ impl Renderer {
                     let line = &terminal_state.screen_buffer[line_idx];
                     let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
                     rendered_line_count += line_occupancy;
-                    y += rc.line_height * line_occupancy as f32;
+                    y += line_occupancy as f32;
                 } else {
                     break;
                 }
@@ -381,7 +420,7 @@ impl Renderer {
                 let line = &terminal_state.screen_buffer[line_idx];
                 let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
                 rendered_line_count += line_occupancy;
-                y += rc.line_height * line_occupancy as f32;
+                y += line_occupancy as f32;
 
                 // TODO: should break here, but the rendered line count gets messed
                 // up which breaks other things
@@ -404,18 +443,17 @@ impl Renderer {
                         _ => 1.0,
                     };
                     let pos_min = [
-                        base_x + (cursor[0] % chars_per_line as usize) as f32 * rc.char_root_size,
-                        y + rc.line_height * (cursor[0] / chars_per_line as usize) as f32,
+                        base_x + (cursor[0] % chars_per_line as usize) as f32,
+                        y + (cursor[0] / chars_per_line as usize) as f32,
                     ];
-                    Self::push_quad(
-                        &[0.0, 0.0, 0.0],
+                    Self::push_fg_quad(
                         &[1.0, 0.0, 0.0],
-                        &[0.0, 0.0],
-                        &[0.0, 0.0],
+                        &[rc.atlas_pixel_size, rc.atlas_pixel_size],
+                        &[rc.atlas_pixel_size, rc.atlas_pixel_size],
                         &pos_min,
                         &[
-                            pos_min[0] + rc.char_root_size * width,
-                            pos_min[1] + rc.line_height * height,
+                            pos_min[0] + width,
+                            pos_min[1] + height,
                         ],
                         StyleFlags::default(),
                         &mut raster_quads,
@@ -448,21 +486,21 @@ impl Renderer {
                     break 'outer;
                 }
 
-                let max_x = base_x + rc.char_root_size * chars_per_line as f32 - 0.001;
+                let max_x = base_x + chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
                     max_line_count += 1;
                     rendered_line_count += 1;
                     x = base_x;
-                    y += rc.line_height;
+                    y += 1.0;
                     prev_bg_color = terminal_state.background_color;
                 }
 
-                let c = line[char_idx];
+                let elem = &line[char_idx];
 
                 // TODO: store in separate buffer?
-                let fg_color = c.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
-                let bg_color = c
+                let fg_color = elem.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
+                let bg_color = elem
                     .style
                     .bg_color
                     .as_ref()
@@ -478,44 +516,72 @@ impl Renderer {
 
                     prev_bg_color = *bg_color;
 
-                    Self::push_quad(
-                        fg_color,
+                    Self::push_bg_quad(
                         bg_color,
-                        &[0.0, 0.0],
-                        &[0.0, 0.0],
                         &[x, y],
-                        &[x + rc.char_root_size, y + rc.line_height],
-                        StyleFlags::default(),
-                        &mut bg_quads,
+                        &[x + 1.0, y + 1.0],
+                        &mut bg_quads
                     );
-                } else if c.style.bg_color.is_some() {
-                    Self::extend_previous_quad(x + rc.char_root_size, &mut bg_quads);
+                } else if elem.style.bg_color.is_some() {
+                    Self::extend_previous_quad(x + 1.0, &mut bg_quads);
                 }
 
-                if c.elem.is_whitespace() || c.elem == '\0' {
-                    x += rc.char_root_size;
+                let mut char_to_draw = None;
+                let mut width = 1.0;
+                let mut skip = false;
+                match &elem.elem {
+                    CellContent::Char(c, c_width) => {
+                        // Skip rendering if this is a whitespace char
+                        if c.is_whitespace() || *c == '\0' {
+                            skip = true;
+                        } else {
+                            char_to_draw = Some(*c);
+                            width = *c_width as f32;
+                        }
+                    },
+                    CellContent::Grapheme(str, width) => {
+                        self.push_unicode_quad(
+                            str,
+                            &rc,
+                            fg_color,
+                            &[x, y],
+                            *width as f32,
+                            elem.style.flags,
+                            &mut msdf_quads,
+                            &mut raster_quads,
+                        );
+                    },
+                    CellContent::Continuation(_) => skip = true,
+                    CellContent::Empty => skip = true
+                };
+
+                if skip {
+                    x += 1.0;
                     continue;
                 }
 
-                let char_to_draw = match debug_line_number {
-                    true => char::from_u32((line_idx as u32) % 10 + 48).unwrap(),
-                    false if debug_col_number => {
+                if debug_line_number || debug_col_number {
+                    char_to_draw = Some(if debug_line_number {
+                        char::from_u32((line_idx as u32) % 10 + 48).unwrap()
+                    } else {
                         char::from_u32((char_idx as u32) % 10 + 48).unwrap()
-                    }
-                    false => c.elem,
-                };
-                self.push_char_quad(
-                    char_to_draw,
-                    &rc,
-                    fg_color,
-                    bg_color,
-                    &[x, y],
-                    c.style.flags,
-                    &mut msdf_quads,
-                    &mut raster_quads,
-                );
+                    });
+                }
 
-                x += rc.char_root_size;
+                if let Some(char_to_draw) = char_to_draw {
+                    self.push_char_quad(
+                        char_to_draw,
+                        &rc,
+                        fg_color,
+                        &[x, y],
+                        width,
+                        elem.style.flags,
+                        &mut msdf_quads,
+                        &mut raster_quads,
+                    );
+                }
+
+                x += 1.0;
             }
         }
 
@@ -530,7 +596,7 @@ impl Renderer {
         bg_size_screen: &[f32; 2],
         bg_color: &[f32; 3],
     ) {
-        let mut bg_quads: Vec<QuadData> = vec![];
+        let mut bg_quads: Vec<BgQuadData> = vec![];
 
         // Draw background, separately from text
         let bg_model_mat: [f32; 16] = [
@@ -539,15 +605,11 @@ impl Renderer {
             0.0, 0.0, 1.0, 0.0,
             screen_offset[0], screen_offset[1], 0.0, 1.0,
         ];
-        Self::push_quad(
-            &[0.0, 0.0, 0.0],
+        Self::push_bg_quad(
             bg_color,
             &[0.0, 0.0],
-            &[0.0, 0.0],
-            &[0.0, 0.0],
             &bg_size_screen,
-            StyleFlags::default(),
-            &mut bg_quads,
+            &mut bg_quads
         );
         self.draw_background_quads(&bg_quads, &bg_model_mat);
     }
@@ -567,18 +629,18 @@ impl Renderer {
 
         let mut x = 0.0;
         let mut y = 0.0;
-        let mut msdf_quads: Vec<QuadData> = vec![]; // TODO: reuse
-        let mut raster_quads: Vec<QuadData> = vec![];
+        let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
+        let mut raster_quads: Vec<FgQuadData> = vec![];
 
         for c in text.chars() {
             if c == '\n' {
                 x = 0.0;
-                y += rc.line_height;
+                y += 1.0;
                 continue;
             }
 
             if c.is_whitespace() || c == '\0' {
-                x += rc.char_root_size;
+                x += 1.0;
                 continue;
             }
 
@@ -586,14 +648,14 @@ impl Renderer {
                 c,
                 &rc,
                 fg_color,
-                bg_color,
                 &[x, y],
+                1.0,
                 StyleFlags::default(),
                 &mut msdf_quads,
                 &mut raster_quads,
             );
 
-            x += rc.char_root_size;
+            x += 1.0;
         }
 
         self.draw_quad(screen_offset, bg_size_screen, bg_color);
@@ -601,7 +663,7 @@ impl Renderer {
         // Draw text, centered on background
         let centered_offset = [
             screen_offset[0] + (bg_size_screen[0] - x * rc.char_size_x_screen) * 0.5,
-            screen_offset[1] + (bg_size_screen[1] - rc.line_height * rc.char_size_y_screen) * 0.5,
+            screen_offset[1] + (bg_size_screen[1] - rc.char_size_y_screen) * 0.5,
         ];
         self.draw_text_quads(
             &rc,
@@ -621,19 +683,20 @@ impl Renderer {
         padding_px: &[f32; 2],
     ) -> RenderConstants {
         let real_width = self.width as f32 - padding_px[0] * 2.0;
-        let face_metrics = self.font.as_ref().borrow().get_face_metrics();
-        let char_size_px = (real_width / chars_per_line as f32 / face_metrics.width).floor();
-        let char_size_x_screen = char_size_px / self.width as f32;
-        let char_size_y_screen = char_size_px / self.height as f32;
+        let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
+        let char_size_x_px = (real_width / chars_per_line as f32).round();
+        let char_size_y_px = (char_size_x_px * face_metrics.height).round();
+        let char_size_x_screen = char_size_x_px / self.width as f32;
+        let char_size_y_screen = char_size_y_px / self.height as f32;
+        let atlas_size = self.font.as_ref().borrow().get_atlas_size();
+        let atlas_pixel_size = 1.0 / atlas_size as f32;
 
-        // Ensure all sizes are pixel-aligned
         RenderConstants {
-            char_root_size: (face_metrics.width * char_size_px).ceil() / char_size_px,
-            char_size_x_px: char_size_px,
-            char_size_y_px: char_size_px,
+            char_size_x_px,
+            char_size_y_px,
             char_size_x_screen,
             char_size_y_screen,
-            line_height: ((1.0 + face_metrics.descender) * char_size_px).ceil() / char_size_px,
+            atlas_pixel_size
         }
     }
 
@@ -647,7 +710,7 @@ impl Renderer {
         self.width as f32 / self.height as f32
     }
 
-    fn extend_previous_quad(new_x: f32, quads: &mut Vec<QuadData>) {
+    fn extend_previous_quad(new_x: f32, quads: &mut Vec<BgQuadData>) {
         match quads.last_mut() {
             Some(quad) => quad.position[2] = new_x,
             None => {}
@@ -655,27 +718,34 @@ impl Renderer {
     }
 
     // Min: TL, max: BR
-    fn push_quad(
+    fn push_fg_quad(
         fg_color: &[f32; 3],
-        bg_color: &[f32; 3],
         uv_min: &[f32; 2],
         uv_max: &[f32; 2],
         pos_min: &[f32; 2],
         pos_max: &[f32; 2],
         flags: StyleFlags,
-        arr: &mut Vec<QuadData>,
+        arr: &mut Vec<FgQuadData>,
     ) {
-        let color = [
-            Util::pack_floats(fg_color[0], bg_color[0]),
-            Util::pack_floats(fg_color[1], bg_color[1]),
-            Util::pack_floats(fg_color[2], bg_color[2]),
-        ];
-
-        arr.push(QuadData {
+        arr.push(FgQuadData {
             position: [pos_min[0], pos_max[1], pos_max[0], pos_min[1]],
             tex_coord: [uv_min[0], uv_max[1], uv_max[0], uv_min[1]],
-            color,
+            color: *fg_color,
             flags
+        });
+    }
+
+    // Min: TL, max: BR
+    fn push_bg_quad(
+        bg_color: &[f32; 3],
+        pos_min: &[f32; 2],
+        pos_max: &[f32; 2],
+        arr: &mut Vec<BgQuadData>
+    ) {
+        arr.push(BgQuadData {
+            position: [pos_min[0], pos_max[1], pos_max[0], pos_min[1]],
+            color: *bg_color,
+            padding: 0
         });
     }
 
@@ -684,25 +754,24 @@ impl Renderer {
         c: char,
         rc: &RenderConstants,
         fg_color: &[f32; 3],
-        bg_color: &[f32; 3],
         pos: &[f32; 2], // In character space
+        width: f32, // In character space
         flags: StyleFlags,
-        msdf_arr: &mut Vec<QuadData>,
-        raster_arr: &mut Vec<QuadData>,
+        msdf_arr: &mut Vec<FgQuadData>,
+        raster_arr: &mut Vec<FgQuadData>,
     ) {
         let mut mut_font = self.font.as_ref().borrow_mut();
         let glyph_metrics = &mut_font.get_glyph_data(c);
         let glyph_bound = &glyph_metrics.glyph_bound;
         let atlas_uv = &glyph_metrics.atlas_uv;
 
-        Self::push_quad(
+        Self::push_fg_quad(
             fg_color,
-            bg_color,
             &[atlas_uv.left, atlas_uv.top],
             &[atlas_uv.right, atlas_uv.bottom],
             &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
             &[
-                pos[0] + glyph_bound.right,
+                pos[0] + glyph_bound.right * width,
                 pos[1] + 1.0 - glyph_bound.bottom,
             ],
             flags,
@@ -711,6 +780,40 @@ impl Renderer {
                 RenderType::RASTER => raster_arr,
             },
         );
+    }
+
+    fn push_unicode_quad(
+        &mut self,
+        str: &str,
+        rc: &RenderConstants,
+        fg_color: &[f32; 3],
+        pos: &[f32; 2], // In character space
+        width: f32, // In character space
+        flags: StyleFlags,
+        msdf_arr: &mut Vec<FgQuadData>,
+        raster_arr: &mut Vec<FgQuadData>,
+    ) {
+        let mut mut_font = self.font.as_ref().borrow_mut();
+        for metrics in mut_font.get_grapheme_data(str).iter() {
+            let glyph_bound = &metrics.glyph_bound;
+            let atlas_uv = &metrics.atlas_uv;
+
+            Self::push_fg_quad(
+                fg_color,
+                &[atlas_uv.left, atlas_uv.top],
+                &[atlas_uv.right, atlas_uv.bottom],
+                &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
+                &[
+                    pos[0] + glyph_bound.right * width,
+                    pos[1] + 1.0 - glyph_bound.bottom,
+                ],
+                flags,
+                match metrics.render_type {
+                    RenderType::MSDF => msdf_arr,
+                    RenderType::RASTER => raster_arr,
+                },
+            );
+        }
     }
 
     fn compute_pixel_range(&self, size_px: f32) -> f32 {
@@ -723,9 +826,9 @@ impl Renderer {
         &self,
         rc: &RenderConstants,
         screen_offset: &[f32; 2],
-        bg_quads: &Vec<QuadData>,
-        msdf_quads: &Vec<QuadData>,
-        raster_quads: &Vec<QuadData>,
+        bg_quads: &Vec<BgQuadData>,
+        msdf_quads: &Vec<FgQuadData>,
+        raster_quads: &Vec<FgQuadData>,
     ) {
         let pixel_range = self.compute_pixel_range(rc.char_size_x_px);
         let model_mat: [f32; 16] = [
@@ -747,14 +850,13 @@ impl Renderer {
         }
     }
 
-    fn draw_msdf_quads(&self, arr: &[QuadData], model: &[f32; 16], pixel_range: f32) {
+    fn draw_msdf_quads(&self, arr: &[FgQuadData], model: &[f32; 16], pixel_range: f32) {
         let font = self.font.as_ref().borrow();
 
         // Bind program data
         unsafe {
             gl::UseProgram(self.msdf_program);
-            gl::BindVertexArray(self.quad_vao);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.quad_ibo);
+            gl::BindVertexArray(self.fg_quad_vao);
         }
 
         // Update instance data
@@ -778,17 +880,18 @@ impl Renderer {
 
         self.bind_vertex_shader_data(self.msdf_program, model);
 
+        self.enable_blending();
         self.draw_indexed_instanced(arr.len() as i32);
+        self.disable_blending();
     }
 
-    fn draw_raster_quads(&self, arr: &[QuadData], model: &[f32; 16]) {
+    fn draw_raster_quads(&self, arr: &[FgQuadData], model: &[f32; 16]) {
         let font = self.font.as_ref().borrow();
 
         // Bind program data
         unsafe {
             gl::UseProgram(self.raster_program);
-            gl::BindVertexArray(self.quad_vao);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.quad_ibo);
+            gl::BindVertexArray(self.fg_quad_vao);
         }
 
         // Update instance data
@@ -804,15 +907,16 @@ impl Renderer {
 
         self.bind_vertex_shader_data(self.raster_program, model);
 
+        self.enable_blending();
         self.draw_indexed_instanced(arr.len() as i32);
+        self.disable_blending();
     }
 
-    fn draw_background_quads(&self, arr: &[QuadData], model: &[f32; 16]) {
+    fn draw_background_quads(&self, arr: &[BgQuadData], model: &[f32; 16]) {
         // Bind program data
         unsafe {
             gl::UseProgram(self.bg_program);
-            gl::BindVertexArray(self.quad_vao);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.quad_ibo);
+            gl::BindVertexArray(self.bg_quad_vao);
         }
 
         // Update instance data
@@ -824,6 +928,13 @@ impl Renderer {
     }
 
     fn bind_vertex_shader_data(&self, program_id: u32, model: &[f32; 16]) {
+        // Scale model mat by the global scale (TODO: should probably do a proper matmul)
+        let mut model: [f32; 16] = model.clone();
+        model[0] *= self.scale[0];
+        model[5] *= -self.scale[1];
+        model[12] *= self.scale[0];
+        model[13] *= -self.scale[1];
+
         // Set global model matrix (column major)
         unsafe {
             gl::UniformMatrix4fv(
@@ -833,21 +944,25 @@ impl Renderer {
                 model.as_ptr(),
             );
         }
-
-        // Set content scale
-        unsafe {
-            gl::Uniform2fv(
-                self.get_uniform_location(program_id, "scale"),
-                1,
-                self.scale.as_ptr(),
-            );
-        }
     }
 
     fn enable_backface_culling(&self) {
         unsafe {
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
+        }
+    }
+
+    fn enable_blending(&self) {
+        unsafe {
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+        }
+    }
+
+    fn disable_blending(&self) {
+        unsafe {
+            gl::Disable(gl::BLEND);
         }
     }
 
@@ -936,7 +1051,7 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        let del_vao: [u32; 1] = [self.quad_vao];
+        let del_vao: [u32; 2] = [self.fg_quad_vao, self.bg_quad_vao];
         let del_buf: [u32; 2] = [self.quad_ibo, self.instance_vbo];
         unsafe {
             gl::DeleteVertexArrays(del_vao.len() as i32, del_vao.as_ptr());
