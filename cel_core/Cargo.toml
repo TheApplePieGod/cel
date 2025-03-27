@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dirs = "6.0.0"
 log = { version = "0.4", features = ["release_max_level_info"] }
 portable-pty = "0.8.1"
 vte = "0.13.0"

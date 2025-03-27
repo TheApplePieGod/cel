@@ -69,7 +69,7 @@ impl TerminalWidget {
         self.ansi_handler.consume_output_stream()
     }
 
-    pub fn push_chars(&mut self, chars: &[u8], stop_early: bool) -> Option<u32> {
+    pub fn push_chars(&mut self, chars: &[u8], stop_early: bool) -> Option<(u32, bool)> {
         //self.char_buffer.push(char);
         self.ansi_handler.handle_sequence_bytes(chars, stop_early)
     }
