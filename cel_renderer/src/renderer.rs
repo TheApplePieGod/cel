@@ -167,7 +167,7 @@ impl Renderer {
                 vec2 coord = mix(tex0, tex1, offset);
 
                 gl_Position = model * vec4(pos, 0.0, 1.0)
-                    * vec4(2.f, 2.f, 1.f, 1.f) // Scale up by 2
+                    * vec4(2.f, -2.f, 1.f, 1.f) // Scale up by 2 & flip y
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = inColor;
@@ -203,7 +203,7 @@ impl Renderer {
                 vec2 pos = mix(p0, p1, offset);
 
                 gl_Position = model * vec4(pos, 0.0, 1.0)
-                    * vec4(2.f, 2.f, 1.f, 1.f) // Scale up by 2
+                    * vec4(2.f, -2.f, 1.f, 1.f) // Scale up by 2
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 bgColor = inColor;
             }
@@ -959,13 +959,6 @@ impl Renderer {
     }
 
     fn bind_vertex_shader_data(&self, program_id: u32, model: &[f32; 16]) {
-        // Scale model mat by the global scale (TODO: should probably do a proper matmul)
-        let mut model: [f32; 16] = model.clone();
-        model[0] *= self.scale[0];
-        model[5] *= -self.scale[1];
-        model[12] *= self.scale[0];
-        model[13] *= -self.scale[1];
-
         // Set global model matrix (column major)
         unsafe {
             gl::UniformMatrix4fv(

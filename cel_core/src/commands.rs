@@ -1,6 +1,8 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, PtyPair};
 use std::{default, sync::mpsc, thread};
 
+use crate::config;
+
 #[derive(PartialEq, Eq, Debug)]
 enum ShellState {
     Init,
@@ -19,9 +21,6 @@ pub struct Commands {
     rows: u32,
     cols: u32,
 
-    shell_state: ShellState,
-    parsing_id: String,
-    prompt_id: u32,
 }
 
 impl Commands {
@@ -53,14 +52,31 @@ impl Commands {
 
         log::debug!("Using shell '{}'", shell);
 
+        let config_dir = config::get_config_dir();
+
         if shell.contains("zsh") {
-            //cmd.args(["-c", &format!("\"{}\"", command)]);
-            //cmd.args(["-c", command]);
-            //cmd.args(["-is"]);
-            //cmd.args(["-i", "-c", "{}; exec {} -i"]);
             cmd.args([
                 "-il", "+o", "promptsp", "+o", "histignorespace"
             ]);
+            cmd.env("ZDOTDIR", config_dir.to_str().unwrap());
+
+            let init = r#"
+                # Injected initialization commands
+                autoload -Uz add-zsh-hook
+                precmd() {
+                    CEL_PROMPT_ID=$((CEL_PROMPT_ID + 1))
+                    printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
+                }
+                add-zsh-hook precmd precmd
+
+                # Source the user's original .zshrc if it exists
+                if [ -f "$HOME/.zshrc" ]; then
+                    source "$HOME/.zshrc"
+                fi
+            "#;
+
+            // Copy zsh init to config dir
+            let _ = std::fs::write(config_dir.join(".zshrc"), init);
         }
 
         cmd.get_argv_mut()[0] = shell.clone().into();
@@ -76,9 +92,7 @@ impl Commands {
         //writer.write_all(b"ls -la\r\n\0");
 
         if shell.contains("zsh") {
-            writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x15$CEL_PROMPT_ID\\\\x15\\\"'\r".as_bytes());
-            writer.write_all(" precmd() { CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1)); eval \"$PROMPT_COMMAND\" }\r".as_bytes());
-            writer.write_all(" \r".as_bytes());
+            // Handled above
         } else if shell.contains("powershell") {
             writer.write_all("$global:CEL_PROMPT_ID = 0\r\n".as_bytes());
             writer.write_all("function prompt {\r\n".as_bytes());
@@ -115,10 +129,6 @@ impl Commands {
             output: vec![],
             rows: default_rows as u32,
             cols: default_cols as u32,
-
-            shell_state: ShellState::Init,
-            parsing_id: String::new(),
-            prompt_id: 0,
         }
     }
 
