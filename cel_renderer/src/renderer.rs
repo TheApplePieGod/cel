@@ -362,7 +362,7 @@ impl Renderer {
         padding_px: &[f32; 2],
         chars_per_line: u32,
         lines_per_screen: u32,
-        line_offset: f32,
+        line_offset: u32,
         wrap: bool,
         debug_line_number: bool,
         debug_col_number: bool,
@@ -385,7 +385,6 @@ impl Renderer {
         let mut should_render_cursor = debug_show_cursor
             || (terminal_state.cursor_state.visible
                 && (!terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5));
-        let mut can_scroll_down = true;
         let mut rendered_line_count = 0;
         let mut max_line_count = 0;
         let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
@@ -396,43 +395,31 @@ impl Renderer {
         // Populate vertex buffers
         //
 
-        let wrap_offset = line_offset.fract();
         let line_offset = line_offset as usize;
         'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
             rendered_line_count += 1;
             x = base_x;
             y += 1.0;
 
-            let max_offscreen_lines = 10.0;
+            let line_exists = line_idx < terminal_state.screen_buffer.len();
             let y_pos_screen = y * rc.char_size_y_screen;
-            if y_pos_screen < 0.0 - rc.char_size_y_screen * max_offscreen_lines {
-                // Account for the size of wrapped offscreen lines
-                if line_idx < terminal_state.screen_buffer.len() {
-                    let line = &terminal_state.screen_buffer[line_idx];
-                    let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
-                    rendered_line_count += line_occupancy;
-                    y += line_occupancy as f32;
-                } else {
-                    break;
-                }
-                max_line_count = rendered_line_count;
-                continue;
-            }
-            if y_pos_screen > 1.0 + rc.char_size_y_screen * max_offscreen_lines {
-                if line_idx >= terminal_state.screen_buffer.len() {
+
+            // Handle offscreen lines
+            if y_pos_screen < 0.0 || y_pos_screen > 1.0 {
+                if !line_exists {
                     break;
                 }
 
-                // Account for the size of wrapped offscreen lines
                 let line = &terminal_state.screen_buffer[line_idx];
-                let line_occupancy = (line.len() as u32 / chars_per_line) as u32;
-                rendered_line_count += line_occupancy;
-                y += line_occupancy as f32;
+                let line_occupancy = (line.len().max(1) - 1) as u32 / chars_per_line + 1;
+                if y_pos_screen + rc.char_size_y_screen * line_occupancy as f32 <= 0.0 {
+                    // Skip rendering iff this line is completely offscreen
+                    rendered_line_count += line_occupancy - 1;
+                    y += (line_occupancy  - 1) as f32;
+                    max_line_count = rendered_line_count;
 
-                // TODO: should break here, but the rendered line count gets messed
-                // up which breaks other things
-                max_line_count = rendered_line_count;
-                continue;
+                    continue;
+                }
             }
 
             // Render cursor
@@ -483,26 +470,18 @@ impl Renderer {
                 }
             }
 
-            if line_idx >= terminal_state.screen_buffer.len() {
-                can_scroll_down = false;
+            if !line_exists {
+                // Continue instead of breaking here so we can render the cursor
                 continue;
             }
 
             max_line_count = rendered_line_count;
 
-            let line = &terminal_state.screen_buffer[line_idx];
-            let line_occupancy = line.len() / chars_per_line as usize + 1;
-            let mut start_char = 0;
-            if line_idx == line_offset {
-                // Account for partially visible wrapped first line
-                start_char =
-                    (line_occupancy as f32 * wrap_offset) as usize * chars_per_line as usize;
-            }
-
             // Store bg color per line for optimization
             let mut prev_bg_color = terminal_state.background_color;
 
-            for char_idx in start_char..line.len() {
+            let line = &terminal_state.screen_buffer[line_idx];
+            for char_idx in 0..line.len() {
                 if rendered_line_count > lines_per_screen {
                     max_line_count = lines_per_screen;
                     break 'outer;
@@ -521,7 +500,6 @@ impl Renderer {
 
                 let elem = &line[char_idx];
 
-                // TODO: store in separate buffer?
                 let fg_color = elem.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
                 let bg_color = elem
                     .style
