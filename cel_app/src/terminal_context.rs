@@ -43,6 +43,8 @@ impl TerminalContext {
         any_event
     }
 
+    pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }
+    pub fn get_primary_widget_mut(&mut self) -> &mut TerminalWidget { self.widgets.last_mut().unwrap() }
     pub fn get_widgets(&self) -> &Vec<TerminalWidget> { &self.widgets }
     pub fn get_widgets_mut(&mut self) -> &mut Vec<TerminalWidget> { &mut self.widgets }
     pub fn just_split(&self) -> bool { self.just_split }
@@ -122,6 +124,7 @@ impl TerminalContext {
                 Some((i, split)) => {
                     self.output_buffer.drain(0..=(i as usize));
                     if split && !self.debug_disable_splits {
+                        // Primary widget is always the last one
                         self.widgets.last_mut().unwrap().set_primary(false);
                         self.widgets.push(TerminalWidget::new());
                         self.just_split = true;

@@ -71,22 +71,28 @@ impl Layout {
         input: &Input
     ) -> bool {
         let widget_height = self.widget_height_px / self.height as f32;
+        let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
 
         let mut should_rerender = false;
         let mut count = 0;
         let mut last_local_offset = 0.0;
-        let mut last_global_offset = 0.0;
-        self.map_onscreen_widgets(|ctx, local_offset, global_offset| {
+        self.map_onscreen_widgets(|ctx, local_offset, _global_offset| {
+            // Skip processing of non-primary if fullscreen
+            if !ctx.get_primary() && primary_fullscreen {
+                ctx.reset_render_stats();
+                return;
+            }
+
             let max_size = match ctx.get_expanded() {
                 true => 9999999.0,
                 false => widget_height
             };
 
-            // Render terminal widget
             if !ctx.get_primary() {
                 last_local_offset = local_offset;
-                last_global_offset = global_offset;
             }
+
+            // Render terminal widget
             should_rerender |= ctx.render(
                 renderer,
                 input,
