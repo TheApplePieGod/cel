@@ -1,5 +1,9 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, PtyPair};
-use std::{default, sync::mpsc, thread};
+use std::thread;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, mpsc,
+};
 
 use crate::config;
 
@@ -13,10 +17,11 @@ enum ShellState {
 
 pub struct Commands {
     io_rx: mpsc::Receiver<Vec<u8>>,
-    //reader: Box<dyn std::io::Read + Send>,
     pty_pair: PtyPair,
     writer: Box<dyn std::io::Write + Send>,
+    //reader: Box<dyn std::io::Read + Send>,
     child: Box<dyn Child + Send + Sync>,
+    active: Arc<AtomicBool>,
     output: Vec<u8>,
     rows: u32,
     cols: u32,
@@ -107,13 +112,19 @@ impl Commands {
         }
 
         let (tx, rx) = mpsc::channel();
+        let active = Arc::new(AtomicBool::new(true));
+        let active_thread = active.clone();
         thread::spawn(move || {
-            let mut buf: Vec<u8> = vec![0; 1024];
+            let mut buf: Vec<u8> = vec![0; 2048];
             loop {
+                if !active_thread.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 // Blocking (pretty sure)
                 match reader.read(&mut buf) {
                     Ok(n) => if n > 0 {
-                        let _ = tx.send(Vec::from(&buf[0..n]));
+                        let _ = tx.send(Vec::from(&buf[..n]));
                     }
                     Err(_) => {}
                 }
@@ -122,10 +133,10 @@ impl Commands {
 
         Self {
             io_rx: rx,
-            //reader,
             pty_pair: pair,
             writer,
             child,
+            active,
             output: vec![],
             rows: default_rows as u32,
             cols: default_cols as u32,
@@ -166,5 +177,11 @@ impl Commands {
 
     pub fn clear_output(&mut self) {
         self.output.clear();
+    }
+}
+
+impl Drop for Commands {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Relaxed);
     }
 }
