@@ -9,8 +9,8 @@ log = "0.4"
 gl = "0.10"
 lru = "0.12"
 rust-fontconfig = { git = "https://github.com/TheApplePieGod/rust-fontconfig.git" }
-ttf-parser = "0.18"
-msdfgen = { version = "0.2.1", default-features = false, features = ["ttf-parser"] }
+ttf-parser = "0.19"
+msdfgen = { git = "https://github.com/TheApplePieGod/msdfgen-rs.git", default-features = false, features = ["ttf-parser", "bindgen"] }
 half = "2.3.1"
 harfbuzz_rs = "2.0.1"
 image = { version = "0.24.7", default-features = false, features = ["png"] }

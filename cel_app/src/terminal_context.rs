@@ -107,19 +107,26 @@ impl TerminalContext {
     }
 
     fn handle_process_io(&mut self) -> bool {
-        let did_split = self.commands.poll_io();
+        self.commands.poll_io();
+
         let output = self.commands.get_output();
+        let any_event = self.commands.get_output().len() > 0;
 
-        let any_event = self.commands.get_output()[0].len() > 0 || self.commands.get_output()[1].len() > 0;
-
-        self.output_buffer.extend_from_slice(&output[0]);
+        self.just_split = false;
+        self.output_buffer.extend_from_slice(&output);
         for _ in 0..self.max_sequences_to_process {
             match self.widgets.last_mut().unwrap().push_chars(
                 &self.output_buffer,
                 self.debug_discrete_processing
             ) {
-                Some(i) => {
+                Some((i, split)) => {
                     self.output_buffer.drain(0..=(i as usize));
+                    if split && !self.debug_disable_splits {
+                        self.widgets.last_mut().unwrap().set_primary(false);
+                        self.widgets.push(TerminalWidget::new());
+                        self.just_split = true;
+                    }
+                    self.just_split = split;
                 },
                 None => {
                     self.output_buffer.clear();
@@ -127,19 +134,6 @@ impl TerminalContext {
                 }
             }
         }
-
-        if did_split && !self.debug_disable_splits {
-            let widget_len = self.widgets.len();
-            if widget_len > 1 {
-                //self.widgets[widget_len - 2].set_expanded(false);
-            }
-
-            self.widgets.last_mut().unwrap().set_primary(false);
-
-            self.widgets.push(TerminalWidget::new());
-            self.widgets.last_mut().unwrap().push_chars(&output[1], false);
-        }
-        self.just_split = did_split;
 
         let last_widget = self.widgets.last_mut().unwrap();
         let last_widget_size = last_widget.get_terminal_size();

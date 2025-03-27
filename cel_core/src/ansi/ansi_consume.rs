@@ -29,13 +29,15 @@ impl AnsiHandler {
         &mut self,
         seq: &[u8],
         stop_early: bool
-    ) -> Option<u32> {
+    ) -> Option<(u32, bool)> {
+        let starting_prompt = self.performer.prompt_id;
         self.performer.action_performed = false;
         for (i, c) in seq.iter().enumerate() {
             //print!("{:?} ", *c as char);
             self.state_machine.advance(&mut self.performer, *c);
-            if stop_early && self.performer.action_performed {
-                return Some(i as u32)
+            let prompt_change = starting_prompt != self.performer.prompt_id;
+            if (stop_early && self.performer.action_performed) || prompt_change {
+                return Some((i as u32, prompt_change))
             }
         }
 
@@ -226,6 +228,7 @@ impl Performer {
             screen_height: height as usize,
             output_stream: vec![],
             is_empty: true,
+            prompt_id: 0,
             action_performed: false,
 
             terminal_state: Default::default(),
@@ -246,7 +249,7 @@ impl Performer {
         res
     }
 
-    fn parse_osc_command(&self, bytes: &[u8]) -> u16 {
+    fn parse_ascii_integer(&self, bytes: &[u8]) -> u16 {
         let mut result = 0;
 
         // Convert each byte to its integer rep from ascii
@@ -1201,7 +1204,7 @@ impl Perform for Performer {
 
         // TODO: investigate the bell, seems like it is relevant for many commands
 
-        let command = self.parse_osc_command(all_params[0]);
+        let command = self.parse_ascii_integer(all_params[0]);
         let params = match all_params.len() {
             1 => vec![],
             _ => all_params[1].to_vec()
@@ -1220,6 +1223,13 @@ impl Perform for Performer {
                 }
             },
             */
+            1337 => { // Update prompt id
+                if params.len() == 0 {
+                    return;
+                }
+
+                self.prompt_id = self.parse_ascii_integer(&params) as u32;
+            },
             _ => {
                 log::debug!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
             }

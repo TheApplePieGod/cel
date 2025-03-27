@@ -167,6 +167,7 @@ impl Renderer {
                 vec2 coord = mix(tex0, tex1, offset);
 
                 gl_Position = model * vec4(pos, 0.0, 1.0)
+                    * vec4(2.f, 2.f, 1.f, 1.f) // Scale up by 2
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 texCoord = coord;
                 fgColor = inColor;
@@ -202,6 +203,7 @@ impl Renderer {
                 vec2 pos = mix(p0, p1, offset);
 
                 gl_Position = model * vec4(pos, 0.0, 1.0)
+                    * vec4(2.f, 2.f, 1.f, 1.f) // Scale up by 2
                     + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
                 bgColor = inColor;
             }
@@ -370,6 +372,7 @@ impl Renderer {
 
         // Setup render state
         let rc = self.compute_render_constants(chars_per_line, padding_px);
+
         let timestamp_seconds = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::new(0, 0))
