@@ -18,8 +18,8 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['H', 'e', 'l', 'l', 'o'],
-            vec!['W', 'o', 'r', 'l', 'd'],
+            vec!["H", "e", "l", "l", "o"],
+            vec!["W", "o", "r", "l", "d"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(state.wants_wrap);
@@ -38,10 +38,10 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', 'X', '3', '4', '5'],
-            vec!['A', 'B', 'C', 'D', 'E'],
+            vec!["1", "2", "3", "4", "5",
+                 "6", "7", "8", "9", "0",
+                 "1", "X", "3", "4", "5"],
+            vec!["A", "B", "C", "D", "E"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -58,8 +58,8 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['X', '2', '3', '4', '5'],
-            vec!['6', '7', '8', '9', '0']
+            vec!["X", "2", "3", "4", "5"],
+            vec!["6", "7", "8", "9", "0"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -73,7 +73,7 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5'],
+            vec!["1", "2", "3", "4", "5"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -94,9 +94,9 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['.', '4'],
-            vec!['.', '1',],
-            vec!['3', '.', '2'],
+            vec![".", "4"],
+            vec![".", "1",],
+            vec!["3", ".", "2"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -116,8 +116,8 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', 'H',
-                 '6', '7', '8', 'W', '0']
+            vec!["1", "2", "3", "4", "H",
+                 "6", "7", "8", "W", "0"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -135,8 +135,8 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '.', '.', 'H']
+            vec!["1", "2", "3", "4", "5",
+                 "6", "7", ".", ".", "H"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(state.wants_wrap);
@@ -154,8 +154,8 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 'H', '7']
+            vec!["1", "2", "3", "4", "5",
+                 "H", "7"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -170,8 +170,8 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5'],
-            vec!['H']
+            vec!["1", "2", "3", "4", "5"],
+            vec!["H"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -194,11 +194,11 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['H', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5']
+            vec!["H", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert!(!state.wants_wrap);
@@ -213,12 +213,12 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', '2', '3',],
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', '2', '3']
+            vec!["1", "2", "3", "4", "5",
+                 "6", "7", "8", "9", "0",
+                 "1", "2", "3",],
+            vec!["1", "2", "3", "4", "5",
+                 "6", "7", "8", "9", "0",
+                 "1", "2", "3"]
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert_eq!(state.global_cursor_home, [5, 0]);
@@ -239,10 +239,10 @@ mod tests {
         // state. If this changes in the future, now you know why.
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['6', '7', '8', '9', '0'],
-            vec!['1', '2', '3'],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["6", "7", "8", "9", "0"],
+            vec!["1", "2", "3"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert_eq!(state.margin.top, 1);
@@ -265,12 +265,12 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0'],
+            vec!["1", "2", "3", "4", "5",
+                 "6", "7", "8", "9", "0"],
             vec![],
             vec![],
-            vec!['1', '2', '3',],
-            vec!['S', 'A', 'F', 'E'],
+            vec!["1", "2", "3",],
+            vec!["S", "A", "F", "E"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert_eq!(state.margin.top, 1);
@@ -291,16 +291,96 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 'A', '7', '8', '9', '0',
-                 '1', '2', '3'],
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', '2', '3'],
+            vec!["1", "2", "3", "4", "5",
+                 "A", "7", "8", "9", "0",
+                 "1", "2", "3"],
+            vec!["1", "2", "3", "4", "5",
+                 "6", "7", "8", "9", "0",
+                 "1", "2", "3"],
         ];
         assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
         assert_eq!(state.global_cursor_home, [5, 0]);
         assert_eq!(state.screen_cursor, [1, 0]);
         assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn backspace_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("12345")
+            .add_backspace()
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor, [4, 0]);
+        assert_eq!(state.screen_cursor, [4, 0]);
+       assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn basic_unicode_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("😀😀")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1"]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor, [4, 0]);
+        assert_eq!(state.screen_cursor, [4, 0]);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn basic_unicode_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("😀😀")
+            .set_cursor_pos(2, 1)
+            .add_text("😀")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1"]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor, [2, 0]);
+        assert_eq!(state.screen_cursor, [2, 0]);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn unicode_wrap_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("😀😀😀")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1", "😀", "+1"]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor, [6, 0]);
+        assert_eq!(state.screen_cursor, [1, 1]);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
+    fn unicode_wrap_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("😀😀😀")
+            .set_cursor_pos(1, 2)
+            .add_text("A")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1", "A", "."]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor, [4, 0]);
+        assert_eq!(state.screen_cursor, [4, 0]);
+        assert!(state.wants_wrap);
     }
 }

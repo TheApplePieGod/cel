@@ -250,14 +250,15 @@ impl Performer {
     }
 
     fn parse_ascii_integer(&self, bytes: &[u8]) -> u16 {
-        let mut result = 0;
+        let mut result: u16 = 0;
 
         // Convert each byte to its integer rep from ascii
         let mut power = 1;
-        for i in 0..bytes.len() {
+        for i in 0..bytes.len().min(5) {
             let byte = bytes[bytes.len() - i - 1];
-            result += (byte - 48) as u16 * power;
-            power *= 10;
+            // Ensure no overflow
+            result = result.saturating_add(((byte.saturating_sub(48)) as u16).saturating_mul(power));
+            power = power.saturating_mul(10);
         }
         
         result
@@ -410,8 +411,6 @@ impl Performer {
                     cur_global[1] + (target_screen[1] - cur_screen[1])
                 ];
             }
-
-            // log::warn!("Line {}", cur_global[1]);
 
             // TODO: this could definitely be optimized
             let line_count = self.get_remaining_wrapped_line_count(&cur_global) + 1;
@@ -895,6 +894,9 @@ impl Performer {
     }
 
     fn put_char_at_cursor(&mut self, c: char) -> usize {
+        // TODO: definitely still lots of edge cases in here when dealing with
+        // continuations. Wrapping behavior still unclear, and splitting lines
+        // will break continuatinos
         let state = &mut self.terminal_state;
 
         while state.global_cursor[1] >= state.screen_buffer.len() {
@@ -908,7 +910,15 @@ impl Performer {
         match &buffer_line[state.global_cursor[0]].elem {
             // Mutate cursor and navigate to start of character. This makes behavior
             // much more predictable and easy to implement
-            CellContent::Continuation(width) => state.global_cursor[0] -= width,
+            CellContent::Continuation(width) => {
+                state.global_cursor[0] -= width;
+                // TODO: this sucks, also won't work if a cell is over two lines
+                let screen_diff = state.screen_cursor[0] + self.screen_width - width;
+                state.screen_cursor[0] = screen_diff % self.screen_width;
+                if screen_diff < self.screen_width {
+                    state.screen_cursor[1] -= 1;
+                }
+            },
             _ => {}
         };
 
@@ -920,13 +930,14 @@ impl Performer {
             return self.put_wide_char_unchecked(cur_pos, cur_style, c);
         }
 
-        let (left_cells, _) = buffer_line.split_at_mut(state.global_cursor[0]);
         if state.global_cursor[0] > 0 {
             // Get the previous cell, accounting for continuations
-            let last_cell = match &left_cells.last().unwrap().elem {
-                CellContent::Continuation(width) => &mut left_cells[left_cells.len() - width - 1],
-                _ => left_cells.last_mut().unwrap()
+            let last_pos = state.global_cursor[0] - 1;
+            let last_pos = match &buffer_line[last_pos].elem {
+                CellContent::Continuation(width) => [last_pos - width, state.global_cursor[1]],
+                _ => [last_pos, state.global_cursor[1]]
             };
+            let last_cell = &mut buffer_line[last_pos[0]];
             let last_style = last_cell.style;
             match &mut last_cell.elem {
                 CellContent::Char(old_c, old_width) => {
@@ -937,11 +948,14 @@ impl Performer {
                     match str.graphemes(true).count() {
                         0..=1 => {
                             let width = *old_width;
-                            let new_width = str.width();
-                            let num_continutations = new_width - width;
+                            let new_width = str.width().max(1);
                             last_cell.elem = CellContent::Grapheme(str.to_string(), new_width);
-                            self.update_continuations(cur_pos, last_style, num_continutations, 0, width);
-                            num_continutations
+                            self.update_continuations(last_pos, last_style, width - 1, new_width - 1, 0);
+                            if new_width >= width {
+                                new_width - width
+                            } else {
+                                0
+                            }
                         },
                         _ => {
                             self.put_wide_char_unchecked(cur_pos, cur_style, c)
@@ -954,11 +968,14 @@ impl Performer {
                     match str.graphemes(true).count() {
                         0..=1 => {
                             let width = *old_width;
-                            let new_width = str.width();
-                            let num_continutations = new_width - width;
-                            *old_width = new_width;
-                            self.update_continuations(cur_pos, last_style, num_continutations, 0, width);
-                            num_continutations
+                            let new_width = str.width().max(1);
+                            last_cell.elem = CellContent::Grapheme(str.to_string(), new_width);
+                            self.update_continuations(last_pos, last_style, width - 1, new_width - 1, 0);
+                            if new_width >= width {
+                                new_width - width
+                            } else {
+                                0
+                            }
                         },
                         _ => {
                             str.pop();
@@ -967,7 +984,7 @@ impl Performer {
                     }
                 }
                 CellContent::Continuation(_) => {
-                    log::warn!("BUG! This should never happen.");
+                    debug_assert!(false, "BUG! This should never happen.");
                     self.put_wide_char_unchecked(cur_pos, cur_style, c)
                 }
                 CellContent::Empty => {
@@ -1164,13 +1181,17 @@ impl Perform for Performer {
             0x08 => { // Backspace
                 // Move cursor back by one with back-wrapping
                 let state = &mut self.terminal_state;
-                if state.global_cursor[0] > 0 {
-                    state.global_cursor[0] -= 1;
-                    if state.screen_cursor[0] > 0 {
-                        state.screen_cursor[0] -= 1;
-                    } else if state.screen_cursor[1] > 0 {
-                        state.screen_cursor[0] = self.screen_width - 1;
-                        state.screen_cursor[1] -= 1;
+                if state.wants_wrap {
+                    state.wants_wrap = false;
+                } else {
+                    if state.global_cursor[0] > 0 {
+                        state.global_cursor[0] -= 1;
+                        if state.screen_cursor[0] > 0 {
+                            state.screen_cursor[0] -= 1;
+                        } else if state.screen_cursor[1] > 0 {
+                            state.screen_cursor[0] = self.screen_width - 1;
+                            state.screen_cursor[1] -= 1;
+                        }
                     }
                 }
             },
