@@ -22,6 +22,7 @@ pub struct Layout {
 
     widget_height_px: f32,
     widget_gap_px: f32,
+    primary_min_lines: f32,
 }
 
 impl Layout {
@@ -37,6 +38,7 @@ impl Layout {
 
             widget_height_px: 54.0,
             widget_gap_px: 3.0,
+            primary_min_lines: 5.0
         }
     }
 
@@ -73,13 +75,17 @@ impl Layout {
         let widget_height = self.widget_height_px / self.height as f32;
         let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
 
+        // Reset all render stats
+        for ctx in self.context.get_widgets_mut().iter_mut() {
+            ctx.reset_render_stats();
+        }
+
         let mut should_rerender = false;
         let mut count = 0;
         let mut last_local_offset = 0.0;
         self.map_onscreen_widgets(|ctx, local_offset, _global_offset| {
             // Skip processing of non-primary if fullscreen
             if !ctx.get_primary() && primary_fullscreen {
-                ctx.reset_render_stats();
                 return;
             }
 
@@ -175,11 +181,13 @@ impl Layout {
         }
 
         // Last (primary) widget is always rendered at the bottom
+        // It should snap to the bottom of the last widget when scrolling
+        // such that it grows when scrolling down and shrinks when scrolling up,
+        // up to a minimum size
         let last_widget = self.context.get_widgets_mut().last_mut().unwrap();
-        func(
-            last_widget,
-            1.0 - last_widget.get_last_computed_height(),
-            1.0
-        );
+        let min = 1.0 - last_widget.get_last_line_height_screen() * self.primary_min_lines;
+        let start = 1.0 - last_widget.get_last_computed_height();
+        let start = (start - self.scroll_offset).min(min);
+        func(last_widget, start, 1.0);
     }
 }

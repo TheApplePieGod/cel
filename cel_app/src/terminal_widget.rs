@@ -122,6 +122,7 @@ impl TerminalWidget {
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
+    pub fn get_last_line_height_screen(&self) -> f32 { self.last_line_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
