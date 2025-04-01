@@ -60,6 +60,7 @@ impl Commands {
         let config_dir = config::get_config_dir();
 
         if shell.contains("zsh") {
+            let og_dir = std::env::var("ZDOTDIR").unwrap_or("$HOME".to_string());
             cmd.args([
                 "-il", "+o", "promptsp", "+o", "histignorespace"
             ]);
@@ -74,11 +75,20 @@ impl Commands {
                 }
                 add-zsh-hook precmd precmd
 
-                # Source the user's original .zshrc if it exists
-                if [ -f "$HOME/.zshrc" ]; then
-                    source "$HOME/.zshrc"
+                # Source the user's original .zshxx files if they exist
+                if [ -f "$ZDOTDIR/.zshenv" ]; then
+                    source "$ZDOTDIR/.zshenv"
                 fi
-            "#;
+                if [ -f "$ZDOTDIR/.zprofile" ]; then
+                    source "$ZDOTDIR/.zprofile"
+                fi
+                if [ -f "$ZDOTDIR/.zshrc" ]; then
+                    source "$ZDOTDIR/.zshrc"
+                fi
+                if [ -f "$ZDOTDIR/.zlogin" ]; then
+                    source "$ZDOTDIR/.zlogin"
+                fi
+            "#.replace("$ZDOTDIR", &og_dir);
 
             // Copy zsh init to config dir
             let _ = std::fs::write(config_dir.join(".zshrc"), init);
