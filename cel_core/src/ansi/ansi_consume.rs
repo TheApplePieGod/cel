@@ -1,5 +1,5 @@
-use bitflags::Flags;
-use unicode_segmentation::{UnicodeSegmentation, GraphemeCursor};
+use either::Either;
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vte::{Parser, Params, Perform};
 use std::fmt;
@@ -187,6 +187,19 @@ impl AnsiHandler {
         self.performer.terminal_state.alt_screen_buffer_state == BufferState::Active
     }
 
+    pub fn get_element(&self, pos: Cursor) -> Option<ScreenBufferElement> {
+        let global_cursor = self.performer.get_cursor_pos_absolute(&pos);
+        let buf = &self.performer.terminal_state.screen_buffer; 
+        if global_cursor[1] >= buf.len() {
+            return None;
+        }
+        let line = &buf[global_cursor[1]];
+        if global_cursor[0] >= line.len() {
+            return None;
+        }
+        return Some(line[global_cursor[0]].clone());
+    }
+
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
         self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32);
@@ -201,6 +214,7 @@ impl AnsiHandler {
     pub fn set_terminal_color(&mut self, color: &[f32; 3]) {
         self.performer.terminal_state.background_color = *color;
     }
+
 
     fn convert_num_to_ascii(&self, val: u32) -> Vec<u8> {
         if val == 0 {
@@ -876,21 +890,26 @@ impl Performer {
 
     // Replaces cell content at cursor position, accounting for inserting and removing continuation cells.
     // This assumes that pos is not out of bounds, and the content at pos is NOT empty or a continuation
-    fn put_wide_char_unchecked(&mut self, pos: Cursor, style: StyleState, c: char) -> usize {
-        // TODO: optimize
-        let width = c.width().unwrap_or(1).max(1);
+    fn put_wide_content_unchecked(&mut self, pos: Cursor, style: StyleState, content: Either<String, char>) -> usize {
         let cell = &mut self.terminal_state.screen_buffer[pos[1]][pos[0]];
+        let new_width = match &content {
+            Either::Left(str) => str.width(),
+            Either::Right(c) => c.width().unwrap_or(1)
+        }.max(1);
         let old_width = match cell.elem {
             CellContent::Char(_, w) => w,
             CellContent::Grapheme(_, w) => w,
             _ => 1
         };
-        cell.elem = CellContent::Char(c, width);
-        cell.style = style;
         let continuations_pos = [pos[0] + 1, pos[1]];
-        self.update_continuations(continuations_pos, style, old_width - 1, width - 1, 0);
+        cell.style = style;
+        cell.elem = match content {
+            Either::Left(str) => CellContent::Grapheme(str, new_width),
+            Either::Right(c) => CellContent::Char(c, new_width)
+        };
+        self.update_continuations(continuations_pos, style, old_width - 1, new_width - 1, 0);
 
-        width
+        new_width
     }
 
     fn put_char_at_cursor(&mut self, c: char) -> usize {
@@ -927,7 +946,7 @@ impl Performer {
 
         // Fast-path: if the new char is ASCII, skip grapheme merging
         if c.is_ascii() {
-            return self.put_wide_char_unchecked(cur_pos, cur_style, c);
+            return self.put_wide_content_unchecked(cur_pos, cur_style, Either::Right(c));
         }
 
         if state.global_cursor[0] > 0 {
@@ -947,18 +966,13 @@ impl Performer {
                     let str = std::str::from_utf8(&buf[..len1 + len2]).unwrap();
                     match str.graphemes(true).count() {
                         0..=1 => {
-                            let width = *old_width;
-                            let new_width = str.width().max(1);
-                            last_cell.elem = CellContent::Grapheme(str.to_string(), new_width);
-                            self.update_continuations(last_pos, last_style, width - 1, new_width - 1, 0);
-                            if new_width >= width {
-                                new_width - width
-                            } else {
-                                0
-                            }
+                            let new_str = str.to_string();
+                            let old_width = *old_width;
+                            let new_width = self.put_wide_content_unchecked(last_pos, last_style, Either::Left(new_str));
+                            new_width.saturating_sub(old_width)
                         },
                         _ => {
-                            self.put_wide_char_unchecked(cur_pos, cur_style, c)
+                            self.put_wide_content_unchecked(cur_pos, cur_style, Either::Right(c))
                         }
                     }
                 }
@@ -967,32 +981,28 @@ impl Performer {
                     str.push(c);
                     match str.graphemes(true).count() {
                         0..=1 => {
-                            let width = *old_width;
-                            let new_width = str.width().max(1);
-                            last_cell.elem = CellContent::Grapheme(str.to_string(), new_width);
-                            self.update_continuations(last_pos, last_style, width - 1, new_width - 1, 0);
-                            if new_width >= width {
-                                new_width - width
-                            } else {
-                                0
-                            }
+                            // TODO: dont need to clone since we mutated
+                            let new_str = str.clone();
+                            let old_width = *old_width;
+                            let new_width = self.put_wide_content_unchecked(last_pos, last_style, Either::Left(new_str));
+                            new_width.saturating_sub(old_width)
                         },
                         _ => {
                             str.pop();
-                            self.put_wide_char_unchecked(cur_pos, cur_style, c)
+                            self.put_wide_content_unchecked(cur_pos, cur_style, Either::Right(c))
                         }
                     }
                 }
                 CellContent::Continuation(_) => {
                     debug_assert!(false, "BUG! This should never happen.");
-                    self.put_wide_char_unchecked(cur_pos, cur_style, c)
+                    self.put_wide_content_unchecked(cur_pos, cur_style, Either::Right(c))
                 }
                 CellContent::Empty => {
-                    self.put_wide_char_unchecked(cur_pos, cur_style, c)
+                    self.put_wide_content_unchecked(cur_pos, cur_style, Either::Right(c))
                 }
             }
         } else {
-            self.put_wide_char_unchecked(cur_pos, cur_style, c)
+            self.put_wide_content_unchecked(cur_pos, cur_style, Either::Right(c))
         }
     }
 

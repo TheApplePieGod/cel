@@ -383,4 +383,19 @@ mod tests {
         assert_eq!(state.screen_cursor, [4, 0]);
         assert!(state.wants_wrap);
     }
+
+    #[test]
+    fn unicode_merge_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("a🧑‍🧑‍🧒‍🧒a")
+        );
+
+        let final_buffer = vec![
+            vec!["a", "🧑‍🧑‍🧒‍🧒", "+1", "a"]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert_eq!(state.global_cursor, [4, 0]);
+        assert_eq!(state.screen_cursor, [4, 0]);
+        assert!(!state.wants_wrap);
+    }
 }
