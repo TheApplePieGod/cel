@@ -1,4 +1,4 @@
-use cel_core::ansi::{self, AnsiHandler, BufferState};
+use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent};
 use cel_renderer::renderer::{RenderStats, Renderer};
 
 use crate::{button::Button, input::Input, layout::LayoutPosition};
@@ -14,11 +14,13 @@ pub struct TerminalWidget {
     ansi_handler: AnsiHandler,
     chars_per_line: u32,
     lines_per_screen: u32,
+    
     last_render_stats: RenderStats,
     last_computed_height: f32,
     last_rendered_lines: u32,
     last_line_height_screen: f32,
     last_char_width_screen: f32,
+    last_mouse_pos_cell: [usize; 2],
 
     primary: bool,
     closed: bool,
@@ -44,11 +46,13 @@ impl TerminalWidget {
             ansi_handler: AnsiHandler::new(chars_per_line, lines_per_screen),
             chars_per_line,
             lines_per_screen,
+
             last_render_stats: Default::default(),
             last_computed_height: 0.0,
             last_rendered_lines: 0,
             last_line_height_screen: 1.0, // To prevent the 'excess space' from blowing up on initial render
             last_char_width_screen: 0.0,
+            last_mouse_pos_cell: [0, 0],
 
             primary: true,
             closed: false,
@@ -118,6 +122,39 @@ impl TerminalWidget {
         self.render_overlay(input, renderer, &real_position)
     }
 
+    pub fn get_debug_lines(&self) -> Vec<String> {
+        let state = self.ansi_handler.get_terminal_state();
+        let active_size = self.get_terminal_size();
+        let cur_elem = self.ansi_handler.get_element(self.last_mouse_pos_cell);
+        
+        let mut text_lines = vec![
+            format!("Active size: {}x{}", active_size[0], active_size[1]),
+            format!("Total lines: {}", state.screen_buffer.len()),
+            format!("Rendered lines: {}", self.last_rendered_lines),
+            format!("Height: {}", self.last_computed_height),
+            format!("Line height: {}", self.last_line_height_screen),
+            format!("Char width: {}", self.last_char_width_screen),
+            format!("Chars per line: {}", self.chars_per_line),
+            format!("Hovered cell:"),
+            format!("  Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
+        ];
+
+        text_lines.extend(
+            match cur_elem {
+                // TODO: show style
+                Some(elem) => vec![match elem.elem {
+                    CellContent::Char(c, l) => format!("  Char {:?} (W{})", c, l),
+                    CellContent::Grapheme(s, l) => format!("  Grapheme {:?} (W{})", s, l),
+                    CellContent::Continuation(i) => format!("  Continuation (-{})", i),
+                    CellContent::Empty => format!("  Empty")
+                }],
+                None => vec![format!("  Uninitialized")]
+            }
+        );
+
+        text_lines
+    }
+
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
@@ -145,7 +182,14 @@ impl TerminalWidget {
 
         // Compute the target cell based on the mouse position and widget position
 
-        let last_height = self.last_computed_height;
+        let padding = match self.ansi_handler.is_alt_screen_buf_active() {
+            true => [0.0, 0.0],
+            false => [
+                self.padding_px[0] / renderer.get_width() as f32,
+                self.padding_px[1] / renderer.get_height() as f32
+            ]
+        };
+        let last_height = self.last_line_height_screen * self.last_rendered_lines as f32;
         let last_width = self.last_char_width_screen * self.chars_per_line as f32;
         let mouse_pos_px = input.get_mouse_pos();
         let mouse_pos_screen = [
@@ -153,8 +197,8 @@ impl TerminalWidget {
             mouse_pos_px[1] / renderer.get_height() as f32,
         ];
         let mouse_pos_widget = [
-            (mouse_pos_screen[0] - position.offset[0]) / last_width,
-            (mouse_pos_screen[1] - position.offset[1]) / last_height,
+            (mouse_pos_screen[0] - position.offset[0] - padding[0]) / last_width,
+            (mouse_pos_screen[1] - position.offset[1] - padding[1]) / last_height,
         ];
 
         let line_count = self.last_rendered_lines;
@@ -184,6 +228,9 @@ impl TerminalWidget {
         if input.is_ctrl_down() {
             flags.insert(ansi::KeyboardModifierFlags::Control);
         }
+        if input.is_alt_down() {
+            flags.insert(ansi::KeyboardModifierFlags::Alt);
+        }
 
         for entry in MOUSE_BUTTON_MAPPING {
             self.ansi_handler.handle_mouse_button(
@@ -202,6 +249,8 @@ impl TerminalWidget {
             flags,
             &cursor
         );
+
+        self.last_mouse_pos_cell = cursor;
     }
 
     fn render_background(

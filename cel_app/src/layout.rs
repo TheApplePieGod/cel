@@ -139,16 +139,20 @@ impl Layout {
         }
 
         let active = widgets.last().unwrap();
-        let active_size = active.get_terminal_size();
-        vec![
+        let mut text_lines = vec![
             format!("Total widgets: {}", widgets.len()),
             format!("Rendered widgets: {}", self.last_num_onscreen_widgets),
-            format!("Active size: {}x{}", active_size[0], active_size[1]),
             format!("Total fg quads: {}", stats.num_fg_instances),
             format!("Total bg quads: {}", stats.num_bg_instances),
             format!("Total rendered lines: {}", stats.rendered_line_count),
             format!("Total wrapped lines: {}", stats.wrapped_line_count),
-        ]
+            String::from("\n"),
+            format!("Active Widget"),
+        ];
+
+        text_lines.extend(active.get_debug_lines());
+
+        text_lines
     }
 
     fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }

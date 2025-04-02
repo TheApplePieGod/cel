@@ -308,11 +308,17 @@ impl Window {
 
     fn render_debug_widget(&self, renderer: &mut Renderer, dt_ms: f64) {
         let layouts = self.layouts.as_ref().borrow();
+        let input = self.input.as_ref().borrow();
 
+        let mouse_screen = [
+            input.get_mouse_pos()[0] / self.get_width() as f32,
+            input.get_mouse_pos()[1] / self.get_height() as f32
+        ];
         let mut text_lines: Vec<String> = vec![
             String::from("cel_ debug"),
             format!("Frametime (ms): {:.1}", dt_ms),
             format!("Window size: {}x{}", self.get_width(), self.get_height()),
+            format!("Mouse pos: ({}, {})", mouse_screen[0], mouse_screen[1]),
             format!("Content scale: {}x{}", self.get_scale()[0], self.get_scale()[1]),
             format!("Num layouts: {}", layouts.len()),
             format!("Active layout: {}", self.active_layout_idx),

@@ -25,6 +25,7 @@ pub enum MouseButton {
 bitflags! {
     #[derive(Copy, Clone, Default)]
     pub struct KeyboardModifierFlags: u32 {
+        const Alt = 2;
         const Shift = 4;
         const Meta = 8;
         const Control = 16;
