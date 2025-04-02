@@ -148,7 +148,7 @@ impl Window {
         {
             // Update layout
             let active_layout = &mut self.layouts.as_ref().borrow_mut()[self.active_layout_idx];
-            any_event |= active_layout.update(self.input.as_ref().borrow().deref());
+            any_event |= active_layout.update(self.input.as_ref().borrow_mut().deref_mut());
 
             if any_event {
                 self.last_event_time = Instant::now();

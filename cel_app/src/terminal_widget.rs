@@ -157,6 +157,7 @@ impl TerminalWidget {
 
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
+    pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
     pub fn get_last_line_height_screen(&self) -> f32 { self.last_line_height_screen }

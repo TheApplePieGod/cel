@@ -1,5 +1,4 @@
 use glfw::{Action, Key, Modifiers, MouseButton, WindowEvent};
-use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
 #[derive(Default, Copy, Clone, PartialEq, Eq)]
 pub enum PressState {
@@ -12,7 +11,6 @@ pub enum PressState {
 }
 
 pub struct Input {
-    clipboard_context: Option<ClipboardContext>,
     input_buffer: Vec<u8>,
     utf8_buffer: [u8; 8],
     key_states: [(PressState, u64); 512],
@@ -27,20 +25,12 @@ pub struct Input {
     pub event_next_tab: bool,
     pub event_prev_tab: bool,
     pub event_del_tab: bool,
+    pub event_paste: bool,
 }
 
 impl Input {
     pub fn new() -> Self {
-        let clipboard_context = match ClipboardContext::new() {
-            Ok(ctx) => Some(ctx),
-            Err(err) => {
-                log::error!("Failed to initialize clipboard context: {}", err);
-                None
-            }
-        };
-
         Self {
-            clipboard_context,
             input_buffer: vec![],
             utf8_buffer: [0; 8],
             key_states: [Default::default(); 512],
@@ -53,7 +43,8 @@ impl Input {
             event_new_tab: false,
             event_next_tab: false,
             event_prev_tab: false,
-            event_del_tab: false
+            event_del_tab: false,
+            event_paste: false,
         }
     }
 
@@ -85,12 +76,7 @@ impl Input {
                     if mods.contains(modifier_key) {
                         let mut handled = true;
                         match *key {
-                            Key::V if self.clipboard_context.is_some() => { // Paste
-                                match self.clipboard_context.as_mut().unwrap().get_contents() {
-                                    Ok(contents) => self.input_buffer.extend(contents.as_bytes()),
-                                    Err(_) => {}
-                                }
-                            },
+                            Key::V  => self.event_paste = true,
                             _ => handled = false
                         }
 

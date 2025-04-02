@@ -42,7 +42,7 @@ impl Layout {
         }
     }
 
-    pub fn update(&mut self, input: &Input) -> bool {
+    pub fn update(&mut self, input: &mut Input) -> bool {
         let mut any_event = false;
 
         any_event |= self.context.update(input);

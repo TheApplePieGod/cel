@@ -1,10 +1,12 @@
 use cel_core::commands::Commands;
+use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
 use crate::input::Input;
 use crate::terminal_widget::TerminalWidget;
 
 pub struct TerminalContext {
     commands: Commands,
+    clipboard: Option<ClipboardContext>,
     widgets: Vec<TerminalWidget>,
 
     input_buffer: Vec<u8>,
@@ -19,7 +21,16 @@ pub struct TerminalContext {
 
 impl TerminalContext {
     pub fn new() -> Self {
+        let clipboard = match ClipboardContext::new() {
+            Ok(ctx) => Some(ctx),
+            Err(err) => {
+                log::error!("Failed to initialize clipboard context: {}", err);
+                None
+            }
+        };
+
         Self {
+            clipboard,
             commands: Commands::new(),
             widgets: vec![TerminalWidget::new()],
 
@@ -34,8 +45,21 @@ impl TerminalContext {
         }
     }
 
-    pub fn update(&mut self, input: &Input) -> bool {
+    pub fn update(&mut self, input: &mut Input) -> bool {
         let mut any_event = false;
+
+        if input.event_paste && self.clipboard.is_some() {
+            any_event = true;
+            input.event_paste = false;
+            let text = self.clipboard.as_mut().unwrap().get_contents().unwrap_or(String::new());
+            match self.widgets.last_mut().unwrap().is_bracketed_paste_enabled() {
+                true => {
+                    let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                    self.input_buffer.extend_from_slice(bracketed.as_bytes())
+                },
+                false => self.input_buffer.extend_from_slice(text.as_bytes()),
+            };
+        }
 
         any_event |= self.handle_user_io(input);
         any_event |= self.handle_process_io();

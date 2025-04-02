@@ -1521,7 +1521,7 @@ impl Perform for Performer {
                                     BufferState::Enabled => self.terminal_state.alt_screen_buffer_state = BufferState::Disabled,
                                     BufferState::Disabled => {}
                                 }
-                            }
+                            },
                             // These should technically do different things, but this implementation  
                             // always saves & restores the cursor so we can just treat them as the same
                             1047 | 1049 => match self.terminal_state.alt_screen_buffer_state {
@@ -1533,7 +1533,8 @@ impl Perform for Performer {
                                 }
                                 BufferState::Disabled => {}
                                 _ => {}
-                            }
+                            },
+                            2004 => self.terminal_state.bracketed_paste_enabled = enabled,
                             _ => {}
                         }
                     }

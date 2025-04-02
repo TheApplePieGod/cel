@@ -118,7 +118,8 @@ pub struct TerminalState {
     pub global_cursor: Cursor,
     pub screen_cursor: Cursor,
     pub mouse_mode: MouseMode,
-    pub mouse_tracking_mode: MouseTrackingMode
+    pub mouse_tracking_mode: MouseTrackingMode,
+    pub bracketed_paste_enabled: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -190,7 +191,8 @@ impl Default for TerminalState {
             global_cursor: [0, 0],
             screen_cursor: [0, 0],
             mouse_mode: MouseMode::Default,
-            mouse_tracking_mode: MouseTrackingMode::Disabled
+            mouse_tracking_mode: MouseTrackingMode::Disabled,
+            bracketed_paste_enabled: false
         }
     }
 }
