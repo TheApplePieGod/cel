@@ -1206,7 +1206,7 @@ impl Perform for Performer {
                 }
             },
             _ => {
-                log::debug!("[execute] {:02x}", byte);
+                log::debug!("<Unhandled> [execute] {:02x}", byte);
             }
         }
     }
@@ -1262,7 +1262,7 @@ impl Perform for Performer {
                 self.prompt_id = self.parse_ascii_integer(&params) as u32;
             },
             _ => {
-                log::debug!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
+                log::debug!("<Unhandled> [osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
             }
         }
 
@@ -1535,7 +1535,7 @@ impl Perform for Performer {
                                 _ => {}
                             },
                             2004 => self.terminal_state.bracketed_paste_enabled = enabled,
-                            _ => {}
+                            _ => log::debug!("<Unhandled> Mode {} = {}", params[0], enabled)
                         }
                     }
                 }
@@ -1644,7 +1644,7 @@ impl Perform for Performer {
             },
             _ => {
                 log::debug!(
-                    "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
+                    "<Unhandled> [csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
                     params, intermediates, ignore, c
                 );
             }
@@ -1680,7 +1680,7 @@ impl Perform for Performer {
             0x5c => self.ignore_print = false,
             _ => {
                 log::debug!(
-                    "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
+                    "<Unhandled> [esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
                     intermediates, ignore, byte
                 );
             }

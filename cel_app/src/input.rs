@@ -239,91 +239,143 @@ impl Input {
     }
 
     // Convert an ascii character to its relative control character (when ctrl is down)
-    fn ascii_to_control(&self, key: u8) -> u8 {
+    fn ascii_to_control(&self, key: u8) -> Option<u8> {
+        // Skip some problematic characters (commented)
         match key {
-            b' '  => 0,
-            b'/'  => 31,
-            b'0'  => 48,
-            b'1'  => 49,
-            b'2'  => 0,
-            b'3'  => 27,
-            b'4'  => 28,
-            b'5'  => 29,
-            b'6'  => 30,
-            b'7'  => 31,
-            b'8'  => 127,
-            b'9'  => 57,
-            b'?'  => 127,
-            b'@'  => 0,
-            b'['  => 27,
-            b'\\' => 28,
-            b']'  => 29,
-            b'^'  => 30,
-            b'_'  => 31,
-            b'~'  => 30,
-            b'A'..=b'Z' => key - 64,
-            _ => key
+            b' '  => Some(0),
+            b'/'  => Some(31),
+            b'0'  => Some(48),
+            b'1'  => Some(49),
+            b'2'  => Some(0),
+            b'3'  => Some(27),
+            b'4'  => Some(28),
+            b'5'  => Some(29),
+            b'6'  => Some(30),
+            b'7'  => Some(31),
+            b'8'  => Some(127),
+            b'9'  => Some(57),
+            b'?'  => Some(127),
+            //b'@'  => Some(0),
+            //b'['  => Some(27),
+            b'\\' => Some(28),
+            b']'  => Some(29),
+            b'^'  => Some(30),
+            b'_'  => Some(31),
+            b'~'  => Some(30),
+            b'a'..=b'z' if key != b'm' && key != b'i'
+                => Some(key - 96),
+            _ => None
         }
+    }
+
+    fn serialize_input_key(&self, c: u8, trailer: char, mods: Modifiers) -> Vec<u8> {
+        if mods.is_empty() {
+            return vec![c]
+        }
+
+        let encode = |mods: i32| format!("\x1b[{};{}{}", c, mods, trailer).into_bytes();
+
+        let mut result = vec![];
+        let mut mods_int = 1;
+        let unicode_trailer = trailer == 'u';
+        if unicode_trailer {
+            if mods.contains(Modifiers::Shift) {
+                mods_int += 1;
+            }
+            if mods.contains(Modifiers::Alt) {
+                mods_int += 2;
+                result.push(0x1b);
+            }
+            if mods.contains(Modifiers::Control) {
+                mods_int += 4;
+                match self.ascii_to_control(c) {
+                    // Attempt to map to legacy control, fallback to encoding if necessary
+                    Some(ctrl) => result.push(ctrl),
+                    None => result = encode(mods_int)
+                }
+            } else {
+                result.push(c);
+            }
+        } else {
+            if mods.contains(Modifiers::Shift) {
+                mods_int += 1;
+            }
+            if mods.contains(Modifiers::Alt) {
+                mods_int += 2;
+            }
+            if mods.contains(Modifiers::Control) {
+                mods_int += 4;
+            }
+
+            result = encode(mods_int);
+        }
+
+
+        result
     }
 
     // https://github.com/kovidgoyal/kitty/blob/master/kitty/key_encoding.c#L148
     // http://www.leonerd.org.uk/hacks/fixterms/
     fn encode_input_key(&self, key: Key, mods: Modifiers) -> Vec<u8> {
-        let mut result = vec![];
-
         // TODO: Keypad keys
         // TODO: https://stackoverflow.com/questions/12382499/looking-for-altleftarrowkey-solution-in-zsh
         // TODO: https://github.com/kovidgoyal/kitty/issues/838
 
-        match self.glfw_key_to_ascii(key) {
+        let result = match self.glfw_key_to_ascii(key) { 
             Some(mut k) => { // Printable
-                // Do not handle raw characters since the char callback does this 
-                if !mods.is_empty() && mods != Modifiers::Shift {
-                    if mods.contains(Modifiers::Alt) {
-                        result.push(0x1b);
+                // Do not handle raw characters nor alt chars since the char callback does this 
+                let modified = !mods.is_empty() && mods != Modifiers::Shift;
+                let is_alt = mods == Modifiers::Alt && !k.is_ascii_control();
+                if modified && !is_alt {
+                    let mut adjusted_mods = mods.clone();
+                    if k >= b'A' && k <= b'Z' {
+                        if mods.contains(Modifiers::Shift) {
+                            // Shift already handled
+                            adjusted_mods.set(Modifiers::Shift, false);
+                        } else {
+                            // Shift to lowercase
+                            k += 32;
+                        }
                     }
-                    if mods.contains(Modifiers::Control) {
-                        k = self.ascii_to_control(k);
-                    }
-                    result.push(k);
+
+                    self.serialize_input_key(k, 'u', adjusted_mods)
+                } else {
+                    vec![]
                 }
             },
-            None => 'handled: { // Function character
-                let esc_char = match key {
-                    Key::Up => b'A',
-                    Key::Down => b'B',
-                    Key::Right => b'C',
-                    Key::Left => b'D',
-                    Key::End => b'F',
-                    Key::Home => b'H',
-                    Key::F1 => b'P',
-                    Key::F2 => b'Q',
-                    Key::F3 => b'R',
-                    Key::F4 => b'S',
-                    _ => 0
+            None => { // Function character
+                let (esc_char, trailer) = match key {
+                    Key::Up => (1, 'A'),
+                    Key::Down => (1, 'B'),
+                    Key::Right => (1, 'C'),
+                    Key::Left => (1, 'D'),
+                    Key::End => (1, 'F'),
+                    Key::Home => (1, 'H'),
+                    Key::Tab => (b'\t', 'u'),
+                    Key::Enter => (b'\r', 'u'),
+                    Key::Escape => (0x1b, 'u'),
+                    Key::Backspace => (0x7f, 'u'), // 0x08
+                    Key::Delete => (0x7f, 'u'),
+                    Key::F1 => (1, 'P'),
+                    Key::F2 => (1, 'Q'),
+                    Key::F3 => (1, 'R'),
+                    Key::F4 => (1, 'S'),
+                    // TODO: more function keys
+                    _ => (0, 'u')
                 };
-                if esc_char > 0 {
-                    result.extend_from_slice(&[0x1b, b'O', esc_char]);
-                    break 'handled;
-                }
 
-                let esc_char = match key {
-                    Key::Tab => b'\t',
-                    Key::Enter => b'\r',
-                    Key::Escape => 0x1b,
-                    Key::Backspace => 0x7f, // 0x08
-                    Key::Delete => 0x7f,
-                    _ => 0
-                };
-                if esc_char > 0 {
-                    if mods.contains(Modifiers::Alt) {
-                        result.push(0x1b);
+                if esc_char == 0 {
+                    vec![]
+                } else if mods.is_empty() {
+                    match trailer {
+                        'u' => vec![ esc_char ],
+                        _ => vec![ 0x1b, b'[', trailer as u8 ]
                     }
-                    result.push(esc_char);
-                    break 'handled;
+                } else {
+                    self.serialize_input_key(esc_char, trailer, mods)
                 }
             }
-        }
+        };
 
         result
     }

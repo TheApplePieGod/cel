@@ -75,6 +75,10 @@ impl Commands {
                 }
                 add-zsh-hook precmd precmd
 
+                # Map alt+left/right to move by word if not already mapped
+                [[ $(builtin bindkey "^[[1;3C") == *" undefined-key" ]] && builtin bindkey "^[[1;3C" "forward-word"
+                [[ $(builtin bindkey "^[[1;3D") == *" undefined-key" ]] && builtin bindkey "^[[1;3D" "backward-word"
+
                 # Source the user's original .zshxx files if they exist
                 if [ -f "$ZDOTDIR/.zshenv" ]; then
                     source "$ZDOTDIR/.zshenv"
