@@ -7,6 +7,7 @@ use std::{
     rc::Rc,
 };
 
+use crate::font::GlyphMetrics;
 use crate::{
     font::{Font, RenderType},
     glchk,
@@ -754,6 +755,50 @@ impl Renderer {
         });
     }
 
+    fn push_glyph_quad(
+        metrics: &GlyphMetrics,
+        rc: &RenderConstants,
+        fg_color: &[f32; 3],
+        pos: &[f32; 2], // In character space
+        width: f32, // In character space
+        flags: StyleFlags,
+        msdf_arr: &mut Vec<FgQuadData>,
+        raster_arr: &mut Vec<FgQuadData>
+    ) {
+        let glyph_bound = &metrics.glyph_bound;
+        let atlas_uv = &metrics.atlas_uv;
+        let top = pos[1] + 1.0 - glyph_bound.top;
+        let bottom = pos[1] + 1.0 - glyph_bound.bottom;
+        match metrics.render_type {
+            RenderType::MSDF => {
+                Self::push_fg_quad(
+                    fg_color,
+                    &[atlas_uv.left, atlas_uv.top],
+                    &[atlas_uv.right, atlas_uv.bottom],
+                    &[pos[0] + glyph_bound.left, top],
+                    &[pos[0] + glyph_bound.right, bottom],
+                    flags,
+                    msdf_arr,
+                )
+            },
+            RenderType::RASTER => {
+                // Center position based on cell width and maintain aspect ratio
+                let real_width = glyph_bound.height() * (rc.char_size_y_px / rc.char_size_x_px);
+                let left = pos[0] + (width * 0.5) - (real_width * 0.5);
+                Self::push_fg_quad(
+                    // Ignore fg color
+                    &[1.0, 1.0, 1.0],
+                    &[atlas_uv.left, atlas_uv.top],
+                    &[atlas_uv.right, atlas_uv.bottom],
+                    &[left, top],
+                    &[left + real_width, bottom],
+                    flags,
+                    raster_arr,
+                )
+            }
+        }
+    }
+
     fn push_char_quad(
         &mut self,
         c: char,
@@ -767,23 +812,15 @@ impl Renderer {
     ) {
         let mut mut_font = self.font.as_ref().borrow_mut();
         let glyph_metrics = &mut_font.get_glyph_data(c);
-        let glyph_bound = &glyph_metrics.glyph_bound;
-        let atlas_uv = &glyph_metrics.atlas_uv;
-
-        Self::push_fg_quad(
+        Self::push_glyph_quad(
+            &glyph_metrics,
+            rc,
             fg_color,
-            &[atlas_uv.left, atlas_uv.top],
-            &[atlas_uv.right, atlas_uv.bottom],
-            &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
-            &[
-                pos[0] + glyph_bound.right * width,
-                pos[1] + 1.0 - glyph_bound.bottom,
-            ],
+            pos,
+            width,
             flags,
-            match glyph_metrics.render_type {
-                RenderType::MSDF => msdf_arr,
-                RenderType::RASTER => raster_arr,
-            },
+            msdf_arr,
+            raster_arr
         );
     }
 
@@ -801,24 +838,16 @@ impl Renderer {
         let mut count = 0;
         let mut mut_font = self.font.as_ref().borrow_mut();
         for metrics in mut_font.get_grapheme_data(str).iter() {
-            let glyph_bound = &metrics.glyph_bound;
-            let atlas_uv = &metrics.atlas_uv;
-
             count += 1;
-            Self::push_fg_quad(
+            Self::push_glyph_quad(
+                metrics,
+                rc,
                 fg_color,
-                &[atlas_uv.left, atlas_uv.top],
-                &[atlas_uv.right, atlas_uv.bottom],
-                &[pos[0] + glyph_bound.left, pos[1] + 1.0 - glyph_bound.top],
-                &[
-                    pos[0] + glyph_bound.right * width,
-                    pos[1] + 1.0 - glyph_bound.bottom,
-                ],
+                pos,
+                width,
                 flags,
-                match metrics.render_type {
-                    RenderType::MSDF => msdf_arr,
-                    RenderType::RASTER => raster_arr,
-                },
+                msdf_arr,
+                raster_arr
             );
         }
 

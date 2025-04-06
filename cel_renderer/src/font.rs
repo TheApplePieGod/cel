@@ -516,7 +516,7 @@ impl Font {
             (metrics.scale_y * (-bbox.translate.y + (bbox.rect.y - 0.5) / bbox.scale)) as f32,
         );
 
-        // Bump t/b glyph bound to ensure descender amount is normalized
+        // Bump t/b glyph bound to ensure baseline is normalized to 0
         glyph_bound.bottom += metrics.descender;
         glyph_bound.top += metrics.descender;
 
@@ -528,16 +528,6 @@ impl Font {
         );
 
         // Clamp glyph bound and adjust pixel bound accordingly 
-        if glyph_bound.left < 0.0 {
-            let adjust = glyph_bound.left.abs();
-            glyph_bound.left = 0.0;
-            pixel_bound.left += bbox.rect.x * adjust as f64;
-        }
-        if glyph_bound.right > 1.0 {
-            let adjust = glyph_bound.right - 1.0;
-            glyph_bound.right = 1.0;
-            pixel_bound.right -= bbox.rect.x * adjust as f64;
-        }
         if glyph_bound.bottom < 0.0 {
             let adjust = glyph_bound.bottom.abs();
             glyph_bound.bottom = 0.0;
@@ -553,7 +543,7 @@ impl Font {
     }
 
     fn generate_raster(&self, raster: RasterGlyphImage) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
-        let glyph_bound = Bound::new(0.0, 0.0, 1.0, 1.0);
+        let glyph_bound = Bound::new(0.0, 0.05, 1.0, 0.95);
         let pixel_bound = Bound::new(0.5, 0.5, MSDF_SIZE as f64 - 0.5, MSDF_SIZE as f64 - 0.5);
 
         let mut image = match image::load_from_memory(raster.data) {
@@ -583,7 +573,7 @@ impl Font {
         FaceMetrics {
             width: 1.0,
             height: (fixed_height / fixed_width) as f32,
-            descender: face.descender().abs() as f32 * scale,
+            descender: face.descender().abs() as f32 / fixed_height as f32,
             pixel_scale: scale as f64,
             scale_x: 1.0 / fixed_width,
             scale_y: 1.0 / fixed_height
