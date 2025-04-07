@@ -21,6 +21,9 @@ pub struct TerminalWidget {
     last_line_height_screen: f32,
     last_char_width_screen: f32,
     last_mouse_pos_cell: [usize; 2],
+    last_mouse_pos_widget: [f32; 2],
+
+    just_closed: bool,
 
     primary: bool,
     closed: bool,
@@ -28,8 +31,10 @@ pub struct TerminalWidget {
     wrap: bool,
 
     padding_px: [f32; 2],
+    overlay_padding_px: [f32; 2],
     char_size_px: f32,
-    button_size_px: f32,
+    icon_size_px: f32,
+    icon_gap_px: f32,
 
     debug_line_number: bool,
     debug_char_number: bool,
@@ -53,6 +58,9 @@ impl TerminalWidget {
             last_line_height_screen: 1.0, // To prevent the 'excess space' from blowing up on initial render
             last_char_width_screen: 0.0,
             last_mouse_pos_cell: [0, 0],
+            last_mouse_pos_widget: [0.0, 0.0],
+
+            just_closed: false,
 
             primary: true,
             closed: false,
@@ -60,8 +68,10 @@ impl TerminalWidget {
             wrap: true,
 
             padding_px: [12.0, 12.0],
+            overlay_padding_px: [6.0, 6.0],
             char_size_px: 8.0,
-            button_size_px: 20.0,
+            icon_size_px: 16.0,
+            icon_gap_px: 4.0,
 
             debug_line_number: false,
             debug_char_number: false,
@@ -85,6 +95,7 @@ impl TerminalWidget {
         }
 
         self.closed = true;
+        self.just_closed = true;
         self.reset();
     }
 
@@ -92,8 +103,9 @@ impl TerminalWidget {
         self.ansi_handler.reset();
     }
 
-    pub fn reset_render_stats(&mut self) {
+    pub fn reset_render_state(&mut self) {
         self.last_render_stats = Default::default();
+        self.just_closed = false
     }
 
     // Returns true if a rerender should occur after this one
@@ -162,6 +174,7 @@ impl TerminalWidget {
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height_screen(&self) -> f32 { self.last_computed_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
+    pub fn get_just_closed(&self) -> bool { self.just_closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
     pub fn get_primary(&self) -> bool { self.primary }
@@ -177,10 +190,6 @@ impl TerminalWidget {
         input: &Input,
         position: &LayoutPosition
     ) {
-        if !self.primary {
-            return;
-        }
-
         // Compute the target cell based on the mouse position and widget position
 
         let padding = match self.ansi_handler.is_alt_screen_buf_active() {
@@ -203,55 +212,60 @@ impl TerminalWidget {
         ];
 
         let line_count = self.last_rendered_lines;
-        let widget_row = (line_count as f32 * mouse_pos_widget[1]) as i32;
+        let widget_row = line_count as f32 * mouse_pos_widget[1];
         let screen_row =
             widget_row +
-            self.lines_per_screen.min(self.last_rendered_lines) as i32 -
-            self.last_rendered_lines as i32;
+            self.lines_per_screen.min(self.last_rendered_lines) as f32 -
+            self.last_rendered_lines as f32;
+        let screen_col = self.chars_per_line as f32 * mouse_pos_widget[0];
 
-        if screen_row < 0 || screen_row >= self.lines_per_screen as i32 {
-            return;
+        if screen_col >= 0.0 && screen_col < self.chars_per_line as f32 && screen_row >= 0.0 && screen_row < self.last_rendered_lines as f32 {
+            let cursor = [screen_col as usize, screen_row as usize];
+
+            // Only send inputs to active widget
+            if self.primary {
+                let mut flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
+                if input.is_shift_down() {
+                    flags.insert(ansi::KeyboardModifierFlags::Shift);
+                }
+                if input.is_super_down() {
+                    flags.insert(ansi::KeyboardModifierFlags::Meta);
+                }
+                if input.is_ctrl_down() {
+                    flags.insert(ansi::KeyboardModifierFlags::Control);
+                }
+                if input.is_alt_down() {
+                    flags.insert(ansi::KeyboardModifierFlags::Alt);
+                }
+
+                for entry in MOUSE_BUTTON_MAPPING {
+                    self.ansi_handler.handle_mouse_button(
+                        entry.0,
+                        input.get_mouse_down(entry.1),
+                        flags,
+                        &cursor
+                    );
+                }
+
+                let scroll_scale = 4.0 / self.char_size_px; // Empirical
+                let scroll_delta = input.get_scroll_delta();
+                self.ansi_handler.handle_scroll(
+                    scroll_delta[0] * scroll_scale,
+                    scroll_delta[1] * scroll_scale,
+                    flags,
+                    &cursor
+                );
+            }
+
+            self.last_mouse_pos_cell = cursor;
         }
 
-        let screen_col = (self.chars_per_line as f32 * mouse_pos_widget[0]) as i32;
-        if screen_col < 0 || screen_col >= self.chars_per_line as i32 {
-            return;
-        }
-
-        let cursor = [screen_col as usize, screen_row as usize];
-        let mut flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
-        if input.is_shift_down() {
-            flags.insert(ansi::KeyboardModifierFlags::Shift);
-        }
-        if input.is_super_down() {
-            flags.insert(ansi::KeyboardModifierFlags::Meta);
-        }
-        if input.is_ctrl_down() {
-            flags.insert(ansi::KeyboardModifierFlags::Control);
-        }
-        if input.is_alt_down() {
-            flags.insert(ansi::KeyboardModifierFlags::Alt);
-        }
-
-        for entry in MOUSE_BUTTON_MAPPING {
-            self.ansi_handler.handle_mouse_button(
-                entry.0,
-                input.get_mouse_down(entry.1),
-                flags,
-                &cursor
-            );
-        }
-
-        let scroll_scale = 4.0 / self.char_size_px; // Empirical
-        let scroll_delta = input.get_scroll_delta();
-        self.ansi_handler.handle_scroll(
-            scroll_delta[0] * scroll_scale,
-            scroll_delta[1] * scroll_scale,
-            flags,
-            &cursor
-        );
-
-        self.last_mouse_pos_cell = cursor;
+        // Recompute position to incorporate padding
+        let mouse_pos_widget = [
+            (mouse_pos_screen[0] - position.offset[0]) / (last_width + padding[0] * 2.0),
+            (mouse_pos_screen[1] - position.offset[1]) / (last_height + padding[1] * 2.0),
+        ];
+        self.last_mouse_pos_widget = mouse_pos_widget;
     }
 
     fn render_background(
@@ -381,37 +395,48 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
     ) -> bool {
-        let aspect = renderer.get_aspect_ratio();
-        let screen_size = [renderer.get_width() as f32, renderer.get_height() as f32];
-        let button_size = [
-            self.button_size_px / screen_size[0],
-            self.button_size_px / screen_size[0] as f32 * aspect
-        ];
+        if self.primary || !self.is_mouse_in_widget() {
+            return false;
+        }
 
         let mut should_rerender = false;
 
-        // Close button
-        if !self.primary {
-            let button = Button::new_screen(
-                screen_size,
-                button_size,
-                [1.0 - button_size[0], position.offset[1]]
+        let icons = ["📋", "❌"];
+        for (i, icon) in icons.into_iter().enumerate() {
+            let x_pos = self.icon_size_px * (i as f32 + 1.0) + self.icon_gap_px * i as f32 + self.overlay_padding_px[0];
+            let button = Button::new_px(
+                [self.icon_size_px, self.icon_size_px],
+                [
+                    renderer.get_width() as f32 - x_pos,
+                    position.offset[1] * renderer.get_height() as f32 + self.overlay_padding_px[1]
+                ]
             );
 
             button.render(
                 renderer,
                 &[1.0, 1.0, 1.0],
                 &[0.05, 0.05, 0.1],
-                self.button_size_px,
-                "✘"
+                self.icon_size_px,
+                icon
             );
 
             if button.is_clicked(input, glfw::MouseButton::Button1) {
-                self.close();
                 should_rerender = true;
+                match i {
+                    // Copy
+                    0 => {}
+                    // Close
+                    1 => self.close(),
+                    _ => {}
+                }
             }
         }
 
         should_rerender
+    }
+
+    fn is_mouse_in_widget(&self) -> bool {
+        self.last_mouse_pos_widget[0] >= 0.0 && self.last_mouse_pos_widget[0] < 1.0 &&
+        self.last_mouse_pos_widget[1] >= 0.0 && self.last_mouse_pos_widget[1] < 1.0
     }
 }

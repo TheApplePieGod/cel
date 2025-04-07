@@ -79,9 +79,14 @@ impl Layout {
         let offset_x_screen = self.offset_x_screen;
         let widget_height = self.widget_height_px / renderer.get_height() as f32;
 
-        // Reset all render stats
+        // Reset all render states
         for ctx in self.context.get_widgets_mut().iter_mut() {
-            ctx.reset_render_stats();
+            // Check if the widget was just closed. If so, update scroll offset
+            // for visual consistency
+            if ctx.get_just_closed() {
+                self.scroll_offset = (self.scroll_offset + ctx.get_last_computed_height_screen()).min(0.0);
+            }
+            ctx.reset_render_state();
         }
 
         renderer.enable_scissor();
@@ -94,7 +99,7 @@ impl Layout {
 
         let mut should_rerender = false;
         let mut count = 0;
-        let mut last_local_offset = 0.0;
+        let mut last_local_offset = 1.0;
         self.map_onscreen_widgets(renderer.get_height() as f32, |ctx, local_offset, _global_offset| {
             let max_size = match ctx.get_expanded() {
                 true => height_screen,
@@ -158,6 +163,7 @@ impl Layout {
             format!("Total bg quads: {}", stats.num_bg_instances),
             format!("Total rendered lines: {}", stats.rendered_line_count),
             format!("Total wrapped lines: {}", stats.wrapped_line_count),
+            format!("Scroll offset: {}", self.scroll_offset),
             String::from("\n"),
             format!("Active Widget"),
         ];
