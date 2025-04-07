@@ -561,7 +561,7 @@ impl Font {
             image::imageops::FilterType::Lanczos3
         );
 
-        let pixels = image.to_rgba32f().as_raw().clone();
+        let pixels = image.to_rgba32f().to_vec();
 
         (pixels, glyph_bound, pixel_bound)
     }
