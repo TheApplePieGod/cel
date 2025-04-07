@@ -158,6 +158,7 @@ impl TerminalWidget {
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
+    pub fn get_current_dir(&self) -> &str { self.ansi_handler.get_current_dir() }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height_screen(&self) -> f32 { self.last_computed_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
@@ -396,7 +397,15 @@ impl TerminalWidget {
                 button_size,
                 [1.0 - button_size[0], position.offset[1]]
             );
-            button.render(renderer, &[1.0, 1.0, 1.0], &[0.05, 0.05, 0.1],  "✘");
+
+            button.render(
+                renderer,
+                &[1.0, 1.0, 1.0],
+                &[0.05, 0.05, 0.1],
+                self.button_size_px,
+                "✘"
+            );
+
             if button.is_clicked(input, glfw::MouseButton::Button1) {
                 self.close();
                 should_rerender = true;

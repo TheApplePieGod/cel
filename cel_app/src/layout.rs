@@ -130,7 +130,7 @@ impl Layout {
         should_rerender
     }
 
-    pub fn on_layout_resized(&mut self, new_size_screen: [f32; 2], new_offset_screen: [f32; 2]) {
+    pub fn resize(&mut self, new_size_screen: [f32; 2], new_offset_screen: [f32; 2]) {
         self.width_screen = new_size_screen[0];
         self.height_screen = new_size_screen[1];
         self.offset_x_screen = new_offset_screen[0];
@@ -165,6 +165,10 @@ impl Layout {
         text_lines.extend(active.get_debug_lines());
 
         text_lines
+    }
+
+    pub fn get_name(&self) -> &str {
+        self.context.get_primary_widget().get_current_dir()
     }
 
     fn map_onscreen_widgets(

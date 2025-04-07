@@ -5,6 +5,7 @@ mod app_state;
 mod logging;
 mod window;
 mod layout;
+mod tab_group;
 mod input;
 mod terminal_context;
 mod terminal_widget;

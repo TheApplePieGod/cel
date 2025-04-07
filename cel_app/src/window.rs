@@ -1,4 +1,3 @@
-use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -8,10 +7,8 @@ use cel_renderer::renderer::Renderer;
 use glfw::{Context, fail_on_errors};
 
 use crate::app_state::AppState;
-use crate::layout::Layout;
 use crate::input::Input;
-
-const TAB_REGION_HEIGHT_PX: f32 = 20.0;
+use crate::tab_group::TabGroup;
 
 pub struct MonitorInfo {
     pub refresh_rate: u32,
@@ -23,11 +20,10 @@ pub struct Window {
     glfw_instance: glfw::Glfw,
     window: Rc<RefCell<glfw::PWindow>>,
     renderer: Rc<RefCell<Renderer>>,
-    layouts: Rc<RefCell<Vec<Layout>>>,
+    tab_group: Rc<RefCell<TabGroup>>,
     input: Rc<RefCell<Input>>,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
     background_color: [f32; 3],
-    active_layout_idx: usize,
 
     last_event_time: Instant,
     last_render_time: Instant,
@@ -82,13 +78,12 @@ impl Window {
                 scale.into(),
                 AppState::current().as_ref().borrow().font.clone()
             ))),
-            layouts: Rc::new(RefCell::new(vec![Layout::new(1.0, 1.0)])),
+            tab_group: Rc::new(RefCell::new(TabGroup::new(1.0, 1.0))),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
             //background_color: [0.0, 0.0, 0.0],
             //background_color: [1.0, 0.0, 0.0],
-            active_layout_idx: 0,
 
             last_event_time: Instant::now(),
             last_render_time: Instant::now(),
@@ -101,32 +96,30 @@ impl Window {
 
     pub fn update_and_render(&mut self, dt_ms: f64) {
         let renderer_ptr = self.renderer.clone();
-        let layout_ptr = self.layouts.clone();
+        let tab_group_ptr = self.tab_group.clone();
         let window_ptr = self.window.clone();
         let input_ptr = self.input.clone();
         let clear_color = self.background_color;
-        let active_layout_idx = self.active_layout_idx;
         self.window.as_ref().borrow_mut().set_refresh_callback(move |w| {
-            let mut layouts = layout_ptr.as_ref().borrow_mut();
+            let renderer = &mut renderer_ptr.as_ref().borrow_mut();
+            let tab_group = &mut tab_group_ptr.as_ref().borrow_mut();
 
             // Update
             Self::on_resized_wrapper(
                 w.get_size().into(),
-                renderer_ptr.as_ref().borrow_mut().deref_mut(),
-                &mut layouts
+                renderer,
+                tab_group
             );
 
-            let active_layout = &mut layouts[active_layout_idx];
-
             // !Glitchy!
-            //active_layout.update(input_ptr.as_ref().borrow().deref());
+            //tab_group.update(input_ptr.as_ref().borrow_mut().deref_mut());
 
             // Render
             Self::render_wrapper(
                 true,
                 &clear_color,
-                renderer_ptr.as_ref().borrow_mut().deref_mut(),
-                active_layout,
+                renderer,
+                tab_group,
                 window_ptr.as_ref().borrow_mut().deref_mut(),
                 input_ptr.as_ref().borrow().deref()
             );
@@ -145,9 +138,10 @@ impl Window {
         any_event |= self.poll_events();
 
         {
-            // Update layout
-            let active_layout = &mut self.layouts.as_ref().borrow_mut()[self.active_layout_idx];
-            any_event |= active_layout.update(self.input.as_ref().borrow_mut().deref_mut());
+            // Update tab group
+            let renderer = &mut self.renderer.as_ref().borrow_mut();
+            let tab_group = &mut self.tab_group.as_ref().borrow_mut();
+            any_event |= tab_group.update(renderer, self.input.as_ref().borrow_mut().deref_mut());
 
             if any_event {
                 self.last_event_time = Instant::now();
@@ -167,8 +161,8 @@ impl Window {
                 self.rerender_requested = Self::render_wrapper(
                     false,
                     &self.background_color,
-                    self.renderer.as_ref().borrow_mut().deref_mut(),
-                    active_layout,
+                    renderer,
+                    tab_group,
                     self.window.as_ref().borrow_mut().deref_mut(),
                     self.input.as_ref().borrow().deref()
                 );
@@ -205,35 +199,6 @@ impl Window {
     pub fn get_is_focused(&self) -> bool { self.window.as_ref().borrow().is_focused() }
     pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
     pub fn get_monitor_info(&mut self) -> Option<MonitorInfo> { self.get_monitor() }
-
-    fn push_layout(&mut self) {
-        let mut layouts = self.layouts.as_ref().borrow_mut();
-        layouts.push(Layout::new(1.0, 1.0));
-        self.active_layout_idx = layouts.len() - 1;
-        Self::on_resized_wrapper(
-            [self.get_width(), self.get_height()],
-            &mut self.renderer.as_ref().borrow_mut(),
-            &mut layouts
-        );
-    }
-
-    fn pop_active_layout(&mut self) {
-        let mut layouts = self.layouts.as_ref().borrow_mut();
-        if layouts.len() <= 1 {
-            return;
-        }
-
-        layouts.remove(self.active_layout_idx);
-        self.active_layout_idx = self.active_layout_idx.min(
-            layouts.len() - 1
-        );
-
-        Self::on_resized_wrapper(
-            [self.get_width(), self.get_height()],
-            &mut self.renderer.as_ref().borrow_mut(),
-            &mut layouts
-        );
-    }
 
     fn get_monitor(&mut self) -> Option<MonitorInfo> {
         let window = self.window.as_ref().borrow();
@@ -291,35 +256,12 @@ impl Window {
             }
         }
         if resize {
-            let mut layouts = self.layouts.as_ref().borrow_mut();
+            let mut tab_group = self.tab_group.as_ref().borrow_mut();
             Self::on_resized_wrapper(
                 self.get_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
-                &mut layouts
+                &mut tab_group
             );
-        }
-
-        // Handle input events
-        if input.event_new_tab {
-            input.event_new_tab = false;
-            self.push_layout();
-        }
-        if input.event_del_tab {
-            input.event_del_tab = false;
-            self.pop_active_layout();
-        }
-        if input.event_prev_tab {
-            let layouts = self.layouts.as_ref().borrow();
-            input.event_prev_tab = false;
-            self.active_layout_idx = match self.active_layout_idx {
-                0 => layouts.len() - 1,
-                _ => self.active_layout_idx - 1
-            };
-        }
-        if input.event_next_tab {
-            let layouts = self.layouts.as_ref().borrow();
-            input.event_next_tab = false;
-            self.active_layout_idx = (self.active_layout_idx + 1) % layouts.len();
         }
 
         // Handle window keystrokes
@@ -332,8 +274,8 @@ impl Window {
     }
 
     fn render_debug_widget(&self, renderer: &mut Renderer, dt_ms: f64) {
-        let layouts = self.layouts.as_ref().borrow();
         let input = self.input.as_ref().borrow();
+        let tab_group = self.tab_group.as_ref().borrow();
 
         let mouse_screen = [
             input.get_mouse_pos()[0] / self.get_width() as f32,
@@ -345,26 +287,21 @@ impl Window {
             format!("Window size: {}x{}", self.get_width(), self.get_height()),
             format!("Mouse pos: ({}, {})", mouse_screen[0], mouse_screen[1]),
             format!("Content scale: {}x{}", self.get_scale()[0], self.get_scale()[1]),
-            format!("Num layouts: {}", layouts.len()),
-            format!("Active layout: {}", self.active_layout_idx),
             String::from("\n"),
         ];
 
-        
-        let active_layout = &layouts[self.active_layout_idx];
-        text_lines.extend(active_layout.get_debug_lines());
+        text_lines.extend(tab_group.get_debug_lines());
 
         let bg_color = [0.5, 0.1, 0.1];
         let size_x = self.debug_widget_width_px / self.get_width() as f32;
         renderer.draw_quad(
             &[1.0 - size_x, 0.0],
-            &[size_x, 0.5],
+            &[size_x, 0.75],
             &bg_color
         );
 
-        let chars_per_line = self.get_width() as f32 / 6.0;
         renderer.draw_text(
-            chars_per_line as u32,
+            10.0,
             &[1.0 - size_x, 0.0],
             &[0.0, 0.0],
             &[1.0, 1.0, 1.0],
@@ -378,12 +315,14 @@ impl Window {
         end_frame: bool,
         clear_color: &[f32; 3],
         renderer: &mut Renderer,
-        layout: &mut Layout,
+        tab_group: &mut TabGroup,
         window: &mut glfw::PWindow,
         input: &Input
     ) -> bool {
         Self::begin_frame(clear_color);
-        let should_rerender = layout.render(Some(*clear_color), renderer, input);
+
+        let should_rerender = tab_group.render(Some(*clear_color), renderer, input);
+
         if end_frame {
             Self::end_frame(window);
         }
@@ -394,22 +333,14 @@ impl Window {
     fn on_resized_wrapper(
         new_size: [i32; 2],
         renderer: &mut Renderer,
-        layouts: &mut Vec<Layout>
+        tab_group: &mut TabGroup
     ) {
         renderer.update_viewport_size(new_size[0], new_size[1]);
-        let mut real_size = new_size;
-        let mut real_offset = [0, 0];
-        if layouts.len() > 1 {
-            // Display tabs when >1
-            real_size[1] -= TAB_REGION_HEIGHT_PX as i32;
-            real_offset[1] = TAB_REGION_HEIGHT_PX as i32;
-        }
-        for layout in layouts {
-            layout.on_layout_resized(
-                renderer.to_screen_i32(real_size),
-                renderer.to_screen_i32(real_offset)
-            );
-        }
+        tab_group.resize(
+            renderer,
+            renderer.to_screen_i32(new_size),
+            renderer.to_screen_i32([0, 0])
+        );
     }
 
     fn begin_frame(clear_color: &[f32; 3]) {

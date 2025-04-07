@@ -640,7 +640,7 @@ impl Renderer {
     // Origin top left to bottom right
     pub fn draw_text(
         &mut self,
-        chars_per_line: u32,
+        char_height_px: f32,
         screen_offset: &[f32; 2],
         bg_size_screen: &[f32; 2],
         fg_color: &[f32; 3],
@@ -648,7 +648,7 @@ impl Renderer {
         centered: bool,
         text: &str,
     ) {
-        let rc = self.compute_render_constants(1.0, chars_per_line);
+        let rc = self.compute_render_constants_from_height(char_height_px);
 
         let mut x = 0.0;
         let mut y = 0.0;
@@ -709,6 +709,27 @@ impl Renderer {
         let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
         let char_size_x_px = (width_px / chars_per_line as f32).round();
         let char_size_y_px = (char_size_x_px * face_metrics.height).round();
+        let char_size_x_screen = char_size_x_px / self.width as f32;
+        let char_size_y_screen = char_size_y_px / self.height as f32;
+        let atlas_size = self.font.as_ref().borrow().get_atlas_size();
+        let atlas_pixel_size = 1.0 / atlas_size as f32;
+
+        RenderConstants {
+            char_size_x_px,
+            char_size_y_px,
+            char_size_x_screen,
+            char_size_y_screen,
+            atlas_pixel_size
+        }
+    }
+
+    pub fn compute_render_constants_from_height(
+        &self,
+        height_px: f32,
+    ) -> RenderConstants {
+        let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
+        let char_size_y_px = height_px;
+        let char_size_x_px = (char_size_y_px / face_metrics.height).round();
         let char_size_x_screen = char_size_x_px / self.width as f32;
         let char_size_y_screen = char_size_y_px / self.height as f32;
         let atlas_size = self.font.as_ref().borrow().get_atlas_size();

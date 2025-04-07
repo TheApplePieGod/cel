@@ -35,12 +35,13 @@ impl Button {
         renderer: &mut Renderer,
         fg_color: &[f32; 3],
         bg_color: &[f32; 3],
+        char_height_px: f32,
         text: &str
     ) {
         let width = renderer.get_width() as f32;
         let height = renderer.get_height() as f32;
         renderer.draw_text(
-            150,
+            char_height_px,
             &[self.offset[0] / width, self.offset[1] / height],
             &[self.size[0] / width, self.size[1] / height],
             fg_color,

@@ -187,6 +187,10 @@ impl AnsiHandler {
         self.performer.terminal_state.alt_screen_buffer_state == BufferState::Active
     }
 
+    pub fn get_current_dir(&self) -> &str {
+        &self.performer.current_dir
+    }
+
     pub fn get_element(&self, pos: Cursor) -> Option<ScreenBufferElement> {
         let global_cursor = self.performer.get_cursor_pos_absolute(&pos);
         let buf = &self.performer.terminal_state.screen_buffer; 
@@ -243,6 +247,7 @@ impl Performer {
             output_stream: vec![],
             is_empty: true,
             prompt_id: 0,
+            current_dir: String::new(),
             action_performed: false,
 
             terminal_state: Default::default(),
@@ -273,6 +278,16 @@ impl Performer {
             // Ensure no overflow
             result = result.saturating_add(((byte.saturating_sub(48)) as u16).saturating_mul(power));
             power = power.saturating_mul(10);
+        }
+        
+        result
+    }
+
+    fn parse_ascii_string(&self, bytes: &[u8]) -> String {
+        let mut result = String::new();
+
+        for i in 0..bytes.len().min(9999) {
+            result.push(char::from(bytes[i]));
         }
         
         result
@@ -1260,6 +1275,13 @@ impl Perform for Performer {
                 }
 
                 self.prompt_id = self.parse_ascii_integer(&params) as u32;
+            },
+            1338 => { // Update current dir
+                if params.len() == 0 {
+                    return;
+                }
+
+                self.current_dir = self.parse_ascii_string(&params);
             },
             _ => {
                 log::debug!("<Unhandled> [osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);

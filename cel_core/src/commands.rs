@@ -7,14 +7,6 @@ use std::sync::{
 
 use crate::config;
 
-#[derive(PartialEq, Eq, Debug)]
-enum ShellState {
-    Init,
-    PromptIdA,
-    PromptIdB,
-    Ready,
-}
-
 pub struct Commands {
     io_rx: mpsc::Receiver<Vec<u8>>,
     pty_pair: PtyPair,
@@ -67,11 +59,11 @@ impl Commands {
             cmd.env("ZDOTDIR", config_dir.to_str().unwrap());
 
             let init = r#"
-                # Injected initialization commands
                 autoload -Uz add-zsh-hook
                 precmd() {
                     CEL_PROMPT_ID=$((CEL_PROMPT_ID + 1))
                     printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
+                    printf '\033]1338;%s\007' "$(pwd)"
                 }
                 add-zsh-hook precmd precmd
 

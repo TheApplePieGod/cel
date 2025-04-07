@@ -135,6 +135,7 @@ struct Performer {
     pub output_stream: Vec<u8>,
     pub is_empty: bool,
     pub prompt_id: u32,
+    pub current_dir: String,
     action_performed: bool,
 
     // State associated with one specific 'terminal' / 'buffer'
