@@ -11,6 +11,8 @@ use crate::app_state::AppState;
 use crate::layout::Layout;
 use crate::input::Input;
 
+const TAB_REGION_HEIGHT_PX: f32 = 20.0;
+
 pub struct MonitorInfo {
     pub refresh_rate: u32,
     pub position: (i32, i32),
@@ -80,10 +82,7 @@ impl Window {
                 scale.into(),
                 AppState::current().as_ref().borrow().font.clone()
             ))),
-            layouts: Rc::new(RefCell::new(vec![Layout::new(
-                initial_size_px.0,
-                initial_size_px.1
-            )])),
+            layouts: Rc::new(RefCell::new(vec![Layout::new(1.0, 1.0)])),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
@@ -207,6 +206,35 @@ impl Window {
     pub fn get_time_seconds(&self) -> f64 { self.glfw_instance.get_time() }
     pub fn get_monitor_info(&mut self) -> Option<MonitorInfo> { self.get_monitor() }
 
+    fn push_layout(&mut self) {
+        let mut layouts = self.layouts.as_ref().borrow_mut();
+        layouts.push(Layout::new(1.0, 1.0));
+        self.active_layout_idx = layouts.len() - 1;
+        Self::on_resized_wrapper(
+            [self.get_width(), self.get_height()],
+            &mut self.renderer.as_ref().borrow_mut(),
+            &mut layouts
+        );
+    }
+
+    fn pop_active_layout(&mut self) {
+        let mut layouts = self.layouts.as_ref().borrow_mut();
+        if layouts.len() <= 1 {
+            return;
+        }
+
+        layouts.remove(self.active_layout_idx);
+        self.active_layout_idx = self.active_layout_idx.min(
+            layouts.len() - 1
+        );
+
+        Self::on_resized_wrapper(
+            [self.get_width(), self.get_height()],
+            &mut self.renderer.as_ref().borrow_mut(),
+            &mut layouts
+        );
+    }
+
     fn get_monitor(&mut self) -> Option<MonitorInfo> {
         let window = self.window.as_ref().borrow();
         let (win_x, win_y) = window.get_pos();
@@ -242,8 +270,8 @@ impl Window {
 
         // Handle window events
         self.glfw_instance.poll_events();
-        let mut input = self.input.as_ref().borrow_mut();
-        let mut layouts = self.layouts.as_ref().borrow_mut();
+        let input = self.input.clone();
+        let mut input = input.as_ref().borrow_mut();
         for (_, event) in glfw::flush_messages(&self.event_receiver) {
             if input.handle_window_event(&event) {
                 any_event = true;
@@ -263,6 +291,7 @@ impl Window {
             }
         }
         if resize {
+            let mut layouts = self.layouts.as_ref().borrow_mut();
             Self::on_resized_wrapper(
                 self.get_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
@@ -273,19 +302,14 @@ impl Window {
         // Handle input events
         if input.event_new_tab {
             input.event_new_tab = false;
-            layouts.push(Layout::new(self.get_width(), self.get_height()));
-            self.active_layout_idx = layouts.len() - 1;
+            self.push_layout();
         }
         if input.event_del_tab {
             input.event_del_tab = false;
-            if layouts.len() > 1 {
-                layouts.remove(self.active_layout_idx);
-                self.active_layout_idx = self.active_layout_idx.min(
-                    layouts.len() - 1
-                );
-            }
+            self.pop_active_layout();
         }
         if input.event_prev_tab {
+            let layouts = self.layouts.as_ref().borrow();
             input.event_prev_tab = false;
             self.active_layout_idx = match self.active_layout_idx {
                 0 => layouts.len() - 1,
@@ -293,6 +317,7 @@ impl Window {
             };
         }
         if input.event_next_tab {
+            let layouts = self.layouts.as_ref().borrow();
             input.event_next_tab = false;
             self.active_layout_idx = (self.active_layout_idx + 1) % layouts.len();
         }
@@ -372,8 +397,18 @@ impl Window {
         layouts: &mut Vec<Layout>
     ) {
         renderer.update_viewport_size(new_size[0], new_size[1]);
+        let mut real_size = new_size;
+        let mut real_offset = [0, 0];
+        if layouts.len() > 1 {
+            // Display tabs when >1
+            real_size[1] -= TAB_REGION_HEIGHT_PX as i32;
+            real_offset[1] = TAB_REGION_HEIGHT_PX as i32;
+        }
         for layout in layouts {
-            layout.on_window_resized(new_size);
+            layout.on_layout_resized(
+                renderer.to_screen_i32(real_size),
+                renderer.to_screen_i32(real_offset)
+            );
         }
     }
 

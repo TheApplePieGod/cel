@@ -16,7 +16,7 @@ pub struct TerminalWidget {
     lines_per_screen: u32,
     
     last_render_stats: RenderStats,
-    last_computed_height: f32,
+    last_computed_height_screen: f32,
     last_rendered_lines: u32,
     last_line_height_screen: f32,
     last_char_width_screen: f32,
@@ -48,7 +48,7 @@ impl TerminalWidget {
             lines_per_screen,
 
             last_render_stats: Default::default(),
-            last_computed_height: 0.0,
+            last_computed_height_screen: 0.0,
             last_rendered_lines: 0,
             last_line_height_screen: 1.0, // To prevent the 'excess space' from blowing up on initial render
             last_char_width_screen: 0.0,
@@ -108,7 +108,7 @@ impl TerminalWidget {
         // Align the widget such that the first line is at the top of the screen, rather
         // than the bottom always being at the bottom if the lines do not fully fill up
         // the screen space
-        let excess_space = 1.0 - (self.last_line_height_screen * self.lines_per_screen as f32);
+        let excess_space = position.max_size[1] - (self.last_line_height_screen * self.lines_per_screen as f32);
         let mut real_position = *position;
         real_position.offset[1] -= excess_space;
 
@@ -131,7 +131,7 @@ impl TerminalWidget {
             format!("Active size: {}x{}", active_size[0], active_size[1]),
             format!("Total lines: {}", state.screen_buffer.len()),
             format!("Rendered lines: {}", self.last_rendered_lines),
-            format!("Height: {}", self.last_computed_height),
+            format!("Height (screen): {}", self.last_computed_height_screen),
             format!("Line height: {}", self.last_line_height_screen),
             format!("Char width: {}", self.last_char_width_screen),
             format!("Chars per line: {}", self.chars_per_line),
@@ -159,8 +159,7 @@ impl TerminalWidget {
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
-    pub fn get_last_computed_height(&self) -> f32 { self.last_computed_height }
-    pub fn get_last_line_height_screen(&self) -> f32 { self.last_line_height_screen }
+    pub fn get_last_computed_height_screen(&self) -> f32 { self.last_computed_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
@@ -271,7 +270,7 @@ impl TerminalWidget {
 
         renderer.draw_quad(
             &position.offset,
-            &[1.0, self.get_last_computed_height().max(default_height) + extra_height],
+            &[1.0, self.get_last_computed_height_screen().max(default_height) + extra_height],
             &bg_color
         );
     }
@@ -307,26 +306,23 @@ impl TerminalWidget {
             padding_px = [0.0, 0.0];
         }
 
-        let padding = [padding_px[0] / renderer.get_width() as f32, padding_px[1] / renderer.get_height() as f32];
         let width_px = renderer.get_width() as f32 * position.max_size[0];
         let max_chars = ((width_px - padding_px[0] * 2.0) / self.char_size_px) as u32;
-        let rc = renderer.compute_render_constants(max_chars, &self.padding_px);
-        let num_screen_lines = renderer.compute_max_lines(&rc, 1.0);
+        let rc = renderer.compute_render_constants(position.max_size[0], max_chars);
+        let num_screen_lines = renderer.compute_max_lines(&rc, position.max_size[1]);
         let line_size_screen = rc.char_size_y_screen;
-        let num_actual_lines = (position.max_size[1] / line_size_screen) as u32;
-        let max_terminal_lines = num_screen_lines.min(num_actual_lines);
 
         // Cap max render lines based on the alt screen buffer. Here, the state can
         // never be larger than the screen, so never render more than we are supposed
         // to, otherwise dead cells may become visible after resizing
         let max_render_lines = match self.ansi_handler.get_terminal_state().alt_screen_buffer_state {
-            BufferState::Active => max_terminal_lines,
-            _ => num_actual_lines
+            BufferState::Active => num_screen_lines,
+            _ => 99999999
         };
 
-        if max_chars != self.chars_per_line || max_terminal_lines != self.lines_per_screen {
+        if max_chars != self.chars_per_line || num_screen_lines != self.lines_per_screen {
             self.chars_per_line = max_chars;
-            self.lines_per_screen = max_terminal_lines;
+            self.lines_per_screen = num_screen_lines;
 
             //log::info!("CPL: {}, LPS: {}", self.chars_per_line, self.lines_per_screen);
 
@@ -338,14 +334,20 @@ impl TerminalWidget {
             self.ansi_handler.hide_cursor();
         }
 
-        let padded_offset = [
-            position.offset[0] + padding[0],
-            position.offset[1] + padding[1]
+        let padding_screen = [padding_px[0] / renderer.get_width() as f32, padding_px[1] / renderer.get_height() as f32];
+        let render_offset = [
+            position.offset[0] + padding_screen[0],
+            position.offset[1] + padding_screen[1]
         ];
+        let render_size = [
+            position.max_size[0] - 2.0 * padding_screen[0],
+            position.max_size[1] - 2.0 * padding_screen[1],
+        ];
+
         let render_stats = renderer.render_terminal(
             &self.ansi_handler.get_terminal_state(),
-            &padded_offset,
-            &self.padding_px,
+            &render_size,
+            &render_offset,
             max_chars,
             max_render_lines,
             line_offset,
@@ -355,12 +357,10 @@ impl TerminalWidget {
             self.debug_show_cursor
         );
 
-        //log::warn!("RL: {}", rendered_lines);
         let clamped_height = (
             render_stats.rendered_line_count as f32 * line_size_screen
         )
-         .max(default_height)
-         .min(position.max_size[1]);
+         .max(default_height);
 
         // Set the rendered lines based on the height rather than the actual amount of lines
         self.last_rendered_lines = (clamped_height / line_size_screen).ceil() as u32;
@@ -368,7 +368,7 @@ impl TerminalWidget {
 
         self.last_char_width_screen = rc.char_size_x_screen;
 
-        self.last_computed_height = self.last_rendered_lines as f32 * line_size_screen + padding[1] * 2.0;
+        self.last_computed_height_screen = self.last_rendered_lines as f32 * line_size_screen + padding_screen[1] * 2.0;
 
         self.last_render_stats = render_stats;
     }

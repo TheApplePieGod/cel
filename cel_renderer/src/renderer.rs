@@ -349,6 +349,23 @@ impl Renderer {
         self.height = height as u32;
     }
 
+    pub fn enable_scissor(&self) {
+        unsafe { gl::Enable(gl::SCISSOR_TEST); }
+    }
+
+    pub fn disable_scissor(&self) {
+        unsafe { gl::Disable(gl::SCISSOR_TEST); }
+    }
+
+    pub fn update_scissor_screen(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        let scaled_width = (width * self.scale[0] * self.width as f32) as i32;
+        let scaled_height = (height * self.scale[1] * self.height as f32) as i32;
+        let scaled_x = (x * self.scale[0] * self.width as f32) as i32;
+        // Flip y
+        let scaled_y = (((1.0 - height - y) * self.height as f32) * self.scale[1]) as i32;
+        unsafe { gl::Scissor(scaled_x, scaled_y, scaled_width, scaled_height) }
+    }
+
     pub fn compute_max_lines(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
         let lines_per_screen = (1.0 / rc.char_size_y_screen).floor();
 
@@ -359,8 +376,8 @@ impl Renderer {
     pub fn render_terminal(
         &mut self,
         terminal_state: &TerminalState,
+        screen_size: &[f32; 2],
         screen_offset: &[f32; 2],
-        padding_px: &[f32; 2],
         chars_per_line: u32,
         lines_per_screen: u32,
         line_offset: u32,
@@ -372,7 +389,7 @@ impl Renderer {
         let mut stats = RenderStats::default();
 
         // Setup render state
-        let rc = self.compute_render_constants(chars_per_line, padding_px);
+        let rc = self.compute_render_constants(screen_size[0], chars_per_line);
 
         let timestamp_seconds = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -631,7 +648,7 @@ impl Renderer {
         centered: bool,
         text: &str,
     ) {
-        let rc = self.compute_render_constants(chars_per_line, &[0.0, 0.0]);
+        let rc = self.compute_render_constants(1.0, chars_per_line);
 
         let mut x = 0.0;
         let mut y = 0.0;
@@ -685,12 +702,12 @@ impl Renderer {
 
     pub fn compute_render_constants(
         &self,
-        chars_per_line: u32,
-        padding_px: &[f32; 2],
+        width_screen: f32,
+        chars_per_line: u32
     ) -> RenderConstants {
-        let real_width = self.width as f32 - padding_px[0] * 2.0;
+        let width_px = width_screen * self.width as f32;
         let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
-        let char_size_x_px = (real_width / chars_per_line as f32).round();
+        let char_size_x_px = (width_px / chars_per_line as f32).round();
         let char_size_y_px = (char_size_x_px * face_metrics.height).round();
         let char_size_x_screen = char_size_x_px / self.width as f32;
         let char_size_y_screen = char_size_y_px / self.height as f32;
@@ -706,15 +723,17 @@ impl Renderer {
         }
     }
 
-    pub fn get_width(&self) -> u32 {
-        self.width
+    pub fn to_screen_i32(&self, pos: [i32; 2]) -> [f32; 2] {
+        [pos[0] as f32 / self.width as f32, pos[1] as f32 / self.height as f32]
     }
-    pub fn get_height(&self) -> u32 {
-        self.height
+
+    pub fn to_screen_u32(&self, pos: [u32; 2]) -> [f32; 2] {
+        [pos[0] as f32 / self.width as f32, pos[1] as f32 / self.height as f32]
     }
-    pub fn get_aspect_ratio(&self) -> f32 {
-        self.width as f32 / self.height as f32
-    }
+
+    pub fn get_width(&self) -> u32 { self.width }
+    pub fn get_height(&self) -> u32 { self.height }
+    pub fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
 
     fn extend_previous_quad(new_x: f32, quads: &mut Vec<BgQuadData>) {
         match quads.last_mut() {

@@ -12,8 +12,10 @@ pub struct LayoutPosition {
 }
 
 pub struct Layout {
-    width: u32,
-    height: u32,
+    width_screen: f32,
+    height_screen: f32,
+    offset_x_screen: f32,
+    offset_y_screen: f32,
     can_scroll_up: bool,
     scroll_offset: f32,
     context: TerminalContext,
@@ -21,15 +23,17 @@ pub struct Layout {
     last_num_onscreen_widgets: u32,
 
     widget_height_px: f32,
-    widget_gap_px: f32,
-    primary_min_lines: f32,
+    widget_gap_px: f32
 }
 
 impl Layout {
-    pub fn new(width: i32, height: i32) -> Self {
+    pub fn new(width_screen: f32, height_screen: f32) -> Self {
         Self {
-            width: width as u32,
-            height: height as u32,
+            width_screen,
+            height_screen,
+            offset_x_screen: 0.0,
+            offset_y_screen: 0.0,
+
             can_scroll_up: false,
             scroll_offset: 0.0,
             context: TerminalContext::new(),
@@ -37,8 +41,7 @@ impl Layout {
             last_num_onscreen_widgets: 0,
 
             widget_height_px: 54.0,
-            widget_gap_px: 3.0,
-            primary_min_lines: 5.0
+            widget_gap_px: 3.0
         }
     }
 
@@ -72,25 +75,29 @@ impl Layout {
         renderer: &mut Renderer,
         input: &Input
     ) -> bool {
-        let widget_height = self.widget_height_px / self.height as f32;
-        let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
+        let height_screen = self.height_screen;
+        let offset_x_screen = self.offset_x_screen;
+        let widget_height = self.widget_height_px / renderer.get_height() as f32;
 
         // Reset all render stats
         for ctx in self.context.get_widgets_mut().iter_mut() {
             ctx.reset_render_stats();
         }
 
+        renderer.enable_scissor();
+        renderer.update_scissor_screen(
+            self.offset_x_screen,
+            self.offset_y_screen,
+            self.width_screen,
+            self.height_screen
+        );
+
         let mut should_rerender = false;
         let mut count = 0;
         let mut last_local_offset = 0.0;
-        self.map_onscreen_widgets(|ctx, local_offset, _global_offset| {
-            // Skip processing of non-primary if fullscreen
-            if !ctx.get_primary() && primary_fullscreen {
-                return;
-            }
-
+        self.map_onscreen_widgets(renderer.get_height() as f32, |ctx, local_offset, _global_offset| {
             let max_size = match ctx.get_expanded() {
-                true => 9999999.0,
+                true => height_screen,
                 false => widget_height
             };
 
@@ -103,7 +110,7 @@ impl Layout {
                 renderer,
                 input,
                 &LayoutPosition {
-                    offset: [0.0, local_offset],
+                    offset: [offset_x_screen, local_offset],
                     max_size: [1.0, max_size],
                 },
                 widget_height,
@@ -113,16 +120,21 @@ impl Layout {
             count += 1;
         });
 
+        renderer.disable_scissor();
+
         // Lock scrolling to the last widget
-        self.can_scroll_up = last_local_offset < 0.0;
+        let top = self.offset_y_screen;
+        self.can_scroll_up = last_local_offset < top;
         self.last_num_onscreen_widgets = count;
 
         should_rerender
     }
 
-    pub fn on_window_resized(&mut self, new_size: [i32; 2]) {
-        self.width = new_size[0] as u32;
-        self.height = new_size[1] as u32;
+    pub fn on_layout_resized(&mut self, new_size_screen: [f32; 2], new_offset_screen: [f32; 2]) {
+        self.width_screen = new_size_screen[0];
+        self.height_screen = new_size_screen[1];
+        self.offset_x_screen = new_offset_screen[0];
+        self.offset_y_screen = new_offset_screen[1];
     }
 
     pub fn get_debug_lines(&self) -> Vec<String> {
@@ -155,29 +167,42 @@ impl Layout {
         text_lines
     }
 
-    fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }
-
     fn map_onscreen_widgets(
         &mut self,
+        renderer_height: f32,
         mut func: impl FnMut(&mut TerminalWidget, f32, f32)
     ) {
+        let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
+        let scroll_offset = match primary_fullscreen {
+            true => 0.0,
+            false => self.scroll_offset
+        };
+
         // Draw visible widgets except the primary
-        let widget_gap = self.widget_gap_px / self.height as f32;
-        let mut cur_offset = 1.0;
+        let widget_height = self.widget_height_px / renderer_height;
+        let widget_gap = self.widget_gap_px / renderer_height;
+        let top = self.offset_y_screen;
+        let bottom = self.height_screen + self.offset_y_screen;
+        let mut cur_offset = bottom;
         for ctx in self.context.get_widgets_mut().iter_mut().rev() {
+            // Skip processing of non-primary if fullscreen
+            if !ctx.get_primary() && primary_fullscreen {
+                continue;
+            }
+
             if ctx.get_closed() || ctx.is_empty() {
                 continue;
             }
 
-            let last_height = ctx.get_last_computed_height();
-            let start_offset = cur_offset - self.scroll_offset - last_height;
+            let last_height = ctx.get_last_computed_height_screen();
+            let start_offset = cur_offset - scroll_offset - last_height;
 
-            if !ctx.get_primary() && start_offset < 1.0 {
+            if !ctx.get_primary() && start_offset < bottom {
                 func(ctx, start_offset, cur_offset);
             }
 
             let end_offset = start_offset + last_height;
-            if end_offset <= 0.0 {
+            if end_offset <= top {
                 break;
             }
 
@@ -189,9 +214,8 @@ impl Layout {
         // such that it grows when scrolling down and shrinks when scrolling up,
         // up to a minimum size
         let last_widget = self.context.get_widgets_mut().last_mut().unwrap();
-        let min = 1.0 - last_widget.get_last_line_height_screen() * self.primary_min_lines;
-        let start = 1.0 - last_widget.get_last_computed_height();
-        let start = (start - self.scroll_offset).min(min);
-        func(last_widget, start, 1.0);
+        let start = bottom - last_widget.get_last_computed_height_screen();
+        let start = (start - scroll_offset).min(bottom - widget_height);
+        func(last_widget, start, bottom);
     }
 }
