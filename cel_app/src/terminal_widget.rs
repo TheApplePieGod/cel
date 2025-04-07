@@ -1,5 +1,6 @@
 use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent};
 use cel_renderer::renderer::{RenderStats, Renderer};
+use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
 use crate::{button::Button, input::Input, layout::LayoutPosition};
 
@@ -10,7 +11,6 @@ const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
 ];
 
 pub struct TerminalWidget {
-    char_buffer: Vec<u8>,
     ansi_handler: AnsiHandler,
     chars_per_line: u32,
     lines_per_screen: u32,
@@ -47,7 +47,6 @@ impl TerminalWidget {
         let lines_per_screen = 40;
 
         Self {
-            char_buffer: vec![],
             ansi_handler: AnsiHandler::new(chars_per_line, lines_per_screen),
             chars_per_line,
             lines_per_screen,
@@ -84,7 +83,6 @@ impl TerminalWidget {
     }
 
     pub fn push_chars(&mut self, chars: &[u8], stop_early: bool) -> Option<(u32, bool)> {
-        //self.char_buffer.push(char);
         self.ansi_handler.handle_sequence_bytes(chars, stop_early)
     }
 
@@ -165,6 +163,18 @@ impl TerminalWidget {
         );
 
         text_lines
+    }
+
+    pub fn copy_text(&self) {
+        match ClipboardContext::new() {
+            Ok(mut ctx) => {
+                let text = self.ansi_handler.get_text();
+                let _ = ctx.set_contents(text);
+            }
+            Err(err) => {
+                log::error!("Failed to initialize clipboard context: {}", err);
+            }
+        };
     }
 
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
@@ -424,7 +434,7 @@ impl TerminalWidget {
                 should_rerender = true;
                 match i {
                     // Copy
-                    0 => {}
+                    0 => self.copy_text(),
                     // Close
                     1 => self.close(),
                     _ => {}

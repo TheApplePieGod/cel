@@ -204,6 +204,25 @@ impl AnsiHandler {
         return Some(line[global_cursor[0]].clone());
     }
 
+    pub fn get_text(&self) -> String {
+        let mut raw_lines = vec![];
+
+        for buf_line in &self.performer.terminal_state.screen_buffer {
+            let mut line = String::new();
+            for elem in buf_line {
+                match &elem.elem {
+                    CellContent::Char(c, _) => line.push(*c),
+                    CellContent::Grapheme(s, _) => line.push_str(&s),
+                    CellContent::Continuation(_) => {}
+                    CellContent::Empty => {}
+                }
+            }
+            raw_lines.push(line);
+        }
+
+        raw_lines.join("\n")
+    }
+
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
         self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32);
