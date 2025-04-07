@@ -106,7 +106,13 @@ impl Font {
 
         let mut font_data = vec![];
         for name in name_list {
-            match Self::load_font_by_name(&font_cache, &name) {
+            let mut loaded = Self::load_font_from_resources(&name);
+            if loaded.is_err() {
+                // Fallback to name query
+                loaded = Self::load_font_by_name(&font_cache, &name);
+            }
+
+            match loaded {
                 Ok(data) => {
                     let face = Face::parse(data.as_slice(), 0).unwrap();
                     font_data.push(FontData {
@@ -600,6 +606,11 @@ impl Font {
             Some(res) => Self::load_font_data(&res.path),
             None => Err(format!("Font '{name}' not found!"))
         }
+    }
+
+    fn load_font_from_resources(name: &str) -> Result<Vec<u8>, String> {
+        let path = crate::resources::get_resource_path(name);
+        Self::load_font_data(path.to_str().unwrap())
     }
 
     fn load_font_by_glyph(cache: &FontCache, c: char) -> Result<Vec<u8>, String> {
