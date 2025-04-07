@@ -13,6 +13,8 @@ pub struct TabGroup {
     layouts: Vec<Layout>,
     active_layout_idx: usize,
 
+    tab_underline_px: f32,
+    tab_active_underline_px: f32,
     tab_text_px: f32,
     tab_width_px: f32,
     tab_height_px: f32,
@@ -30,9 +32,11 @@ impl TabGroup {
             active_layout_idx: 0,
             layouts: vec![Layout::new(1.0, 1.0)],
 
+            tab_underline_px: 2.0,
+            tab_active_underline_px: 2.0,
             tab_text_px: 10.0,
             tab_width_px: 200.0,
-            tab_height_px: 20.0,
+            tab_height_px: 25.0,
             tab_gap_px: 2.0,
         }
     }
@@ -116,11 +120,20 @@ impl TabGroup {
                 false => self.tab_width_px
             };
             let max_chars = (tab_width_real / self.tab_text_px).ceil() as usize;
+            let underline_y_screen = self.offset_y_screen + (self.tab_height_px - self.tab_active_underline_px) / renderer.get_height() as f32;
+
+            // Tab underline
+            renderer.draw_quad(
+                &[self.offset_x_screen, underline_y_screen],
+                &[self.width_screen, self.tab_underline_px / renderer.get_height() as f32],
+                &[0.133, 0.133, 0.25]
+            );
 
             let mut cur_offset = self.offset_x_screen * renderer.get_width() as f32;
             for i in 0..self.layouts.len() {
+                let is_active = i == self.active_layout_idx;
                 let button = Button::new_px(
-                    [tab_width_real, self.tab_height_px],
+                    [tab_width_real, self.tab_height_px - self.tab_active_underline_px],
                     [cur_offset, self.offset_y_screen * renderer.get_height() as f32]
                 );
 
@@ -132,13 +145,27 @@ impl TabGroup {
                         name.to_string()
                     }
                 };
+
+                let text_color = match is_active {
+                    true => [1.0, 1.0, 1.0],
+                    false => [0.5, 0.5, 0.5],
+                };
+
                 button.render(
                     renderer,
-                    &[1.0, 1.0, 1.0],
-                    &[1.0, 0.0, 0.1],
+                    &text_color,
+                    &[0.05, 0.05, 0.1],
                     self.tab_text_px,
                     &name
                 );
+
+                if is_active {
+                    renderer.draw_quad(
+                        &[cur_offset / renderer.get_width() as f32, underline_y_screen],
+                        &renderer.to_screen_f32([tab_width_real, self.tab_active_underline_px]),
+                        &[0.933, 0.388, 0.321]
+                    );
+                }
 
                 if button.is_clicked(input, glfw::MouseButton::Button1) {
                     self.active_layout_idx = i;

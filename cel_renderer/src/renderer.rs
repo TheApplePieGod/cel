@@ -752,6 +752,10 @@ impl Renderer {
         [pos[0] as f32 / self.width as f32, pos[1] as f32 / self.height as f32]
     }
 
+    pub fn to_screen_f32(&self, pos: [f32; 2]) -> [f32; 2] {
+        [pos[0] / self.width as f32, pos[1] / self.height as f32]
+    }
+
     pub fn get_width(&self) -> u32 { self.width }
     pub fn get_height(&self) -> u32 { self.height }
     pub fn get_aspect_ratio(&self) -> f32 { self.width as f32 / self.height as f32 }

@@ -281,12 +281,12 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition
     ) {
-        let size_px = 1.0;
+        let size_px = 2.0;
         let size = size_px / renderer.get_height() as f32;
         renderer.draw_quad(
             &[position.offset[0], position.offset[1]],
             &[1.0, size],
-            &[0.933, 0.388, 0.321]
+            &[0.133, 0.133, 0.25]
         );
     }
 
