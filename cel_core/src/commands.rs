@@ -72,6 +72,9 @@ impl Commands {
                 [[ $(builtin bindkey "^[[1;3C") == *" undefined-key" ]] && builtin bindkey "^[[1;3C" "forward-word"
                 [[ $(builtin bindkey "^[[1;3D") == *" undefined-key" ]] && builtin bindkey "^[[1;3D" "backward-word"
 
+                # Enable UTF8
+                export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
                 # Source the user's original .zshxx files if they exist
                 if [ -f "$ZDOTDIR/.zshenv" ]; then
                     source "$ZDOTDIR/.zshenv"

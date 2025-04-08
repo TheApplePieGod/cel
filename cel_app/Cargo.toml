@@ -15,6 +15,7 @@ log = "0.4"
 
 [package.metadata.bundle]
 name = "cel"
+icon = ["icons/256x256.png"]
 identifier = "com.theapplepiegod.cel"
 osx_minimum_system_version = "10.11"
 resources = ["resources/*"]
