@@ -127,7 +127,7 @@ impl Renderer {
         }
 
         let fg_vert_shader_source = b"
-            #version 400 core
+            #version 330 core
 
             layout (location = 0) in vec4 inPos;
             layout (location = 1) in vec4 inTexCoord;
@@ -176,7 +176,7 @@ impl Renderer {
         \0";
 
         let bg_vert_shader_source = b"
-            #version 400 core
+            #version 330 core
 
             layout (location = 0) in vec4 inPos;
             layout (location = 1) in vec4 inColor;
@@ -210,7 +210,7 @@ impl Renderer {
         \0";
 
         let msdf_frag_shader_source = b"
-            #version 400 core
+            #version 330 core
 
             in vec2 texCoord;
             in vec3 fgColor;
@@ -238,7 +238,7 @@ impl Renderer {
         \0";
 
         let raster_frag_shader_source = b"
-            #version 400 core
+            #version 330 core
 
             in vec2 texCoord;
             in vec3 fgColor;
@@ -255,7 +255,7 @@ impl Renderer {
         \0";
 
         let bg_frag_shader_source = b"
-            #version 400 core
+            #version 330 core
 
             in vec2 texCoord;
             in vec4 bgColor;

@@ -55,7 +55,7 @@ impl Window {
         glfw_instance.window_hint(glfw::WindowHint::TransparentFramebuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::DoubleBuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::Resizable(true));
-        glfw_instance.window_hint(glfw::WindowHint::ContextVersion(4, 0));
+        glfw_instance.window_hint(glfw::WindowHint::ContextVersion(3, 3));
         glfw_instance.window_hint(glfw::WindowHint::OpenGlForwardCompat(true));
         glfw_instance.window_hint(glfw::WindowHint::OpenGlProfile(
             glfw::OpenGlProfileHint::Core
