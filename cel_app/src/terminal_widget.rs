@@ -113,8 +113,8 @@ impl TerminalWidget {
         input: &Input,
         position: &LayoutPosition,
         default_height: f32,
-        bg_color: Option<[f32; 3]>,
-        divider_color: Option<[f32; 3]>,
+        bg_color: Option<[f32; 4]>,
+        divider_color: Option<[f32; 4]>,
     ) -> bool {
         // Align the widget such that the first line is at the top of the screen, rather
         // than the bottom always being at the bottom if the lines do not fully fill up
@@ -125,8 +125,8 @@ impl TerminalWidget {
 
         self.update_mouse_input(renderer, input, &real_position);
 
-        let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
-        let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1]);
+        let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+        let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1, 1.0]);
         self.render_background(renderer, &real_position, default_height, &bg_color);
         self.render_divider(renderer, &real_position, &divider_color);
         self.render_terminal(renderer, &real_position, default_height, &bg_color);
@@ -286,12 +286,12 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
         default_height: f32,
-        bg_color: &[f32; 3]
+        bg_color: &[f32; 4]
     ) {
         renderer.draw_quad(
             &position.offset,
             &[1.0, self.get_last_computed_height_screen().max(default_height)],
-            &[bg_color[0], bg_color[1], bg_color[2], 1.0]
+            bg_color
         );
     }
 
@@ -299,14 +299,14 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
-        color: &[f32; 3]
+        color: &[f32; 4]
     ) {
         let size_px = 2.0;
         let size = size_px / renderer.get_height() as f32;
         renderer.draw_quad(
             &[position.offset[0], position.offset[1]],
             &[1.0, size],
-            &[color[0], color[1], color[2], 1.0]
+            color
         );
     }
 
@@ -315,7 +315,7 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
         default_height: f32,
-        bg_color: &[f32; 3]
+        bg_color: &[f32; 4]
     ) {
         let mut line_offset = 0;
         let mut padding_px = self.padding_px;
@@ -350,7 +350,8 @@ impl TerminalWidget {
             self.ansi_handler.resize(self.chars_per_line, self.lines_per_screen);
         }
 
-        self.ansi_handler.set_terminal_color(&bg_color);
+        let term_color = [bg_color[0], bg_color[1], bg_color[2]];
+        self.ansi_handler.set_terminal_color(&term_color);
         if !self.primary {
             self.ansi_handler.hide_cursor();
         }

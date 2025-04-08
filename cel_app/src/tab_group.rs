@@ -103,15 +103,16 @@ impl TabGroup {
     // Returns true if a rerender should occur after this one
     pub fn render(
         &mut self,
-        bg_color: Option<[f32; 3]>,
+        bg_color: Option<[f32; 4]>,
         renderer: &mut Renderer,
         input: &Input
     ) -> bool {
         let mut should_rerender = false;
 
-        let err_bg_color = Some([0.3, 0.03, 0.03]);
-        let divider_color = Some([0.133, 0.133, 0.25]);
-        let err_divider_color = Some([0.5, 0.08, 0.08]);
+        let opacity = bg_color.map(|c| c[3]).unwrap_or(1.0);
+        let err_bg_color = Some([0.3, 0.03, 0.03, opacity]);
+        let divider_color = Some([0.133, 0.133, 0.25, opacity]);
+        let err_divider_color = Some([0.5, 0.08, 0.08, opacity]);
 
         let active_layout = &mut self.layouts[self.active_layout_idx];
         should_rerender |= active_layout.render(

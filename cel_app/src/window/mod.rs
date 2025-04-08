@@ -10,6 +10,12 @@ use crate::app_state::AppState;
 use crate::input::Input;
 use crate::tab_group::TabGroup;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(target_os = "macos")]
+use self::macos::setup_platform_window;
+
 pub struct MonitorInfo {
     pub refresh_rate: u32,
     pub position: (i32, i32),
@@ -23,7 +29,7 @@ pub struct Window {
     tab_group: Rc<RefCell<TabGroup>>,
     input: Rc<RefCell<Input>>,
     event_receiver: glfw::GlfwReceiver<(f64, glfw::WindowEvent)>,
-    background_color: [f32; 3],
+    background_color: [f32; 4],
 
     last_event_time: Instant,
     last_render_time: Instant,
@@ -37,7 +43,7 @@ impl Window {
     pub fn new() -> Self {
         let mut glfw_instance = glfw::init(fail_on_errors!()).unwrap();
 
-        //glfw_instance.window_hint(glfw::WindowHint::Decorated(false));
+        glfw_instance.window_hint(glfw::WindowHint::TransparentFramebuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::DoubleBuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::Resizable(true));
         glfw_instance.window_hint(glfw::WindowHint::ContextVersion(4, 0));
@@ -61,6 +67,8 @@ impl Window {
         window.set_scroll_polling(true);
         window.set_content_scale_polling(true);
         window.set_resizable(true);
+
+        setup_platform_window(&window);
         
         gl::load_with(|s| window.get_proc_address(s) as *const _);
 
@@ -81,7 +89,7 @@ impl Window {
             tab_group: Rc::new(RefCell::new(TabGroup::new(1.0, 1.0))),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
-            background_color: [0.05, 0.05, 0.1],
+            background_color: [0.05, 0.05, 0.1, 0.95],
 
             last_event_time: Instant::now(),
             last_render_time: Instant::now(),
@@ -311,7 +319,7 @@ impl Window {
 
     fn render_wrapper(
         end_frame: bool,
-        clear_color: &[f32; 3],
+        clear_color: &[f32; 4],
         renderer: &mut Renderer,
         tab_group: &mut TabGroup,
         window: &mut glfw::PWindow,
@@ -341,13 +349,13 @@ impl Window {
         );
     }
 
-    fn begin_frame(clear_color: &[f32; 3]) {
+    fn begin_frame(clear_color: &[f32; 4]) {
         unsafe {
             gl::ClearColor(
                 clear_color[0],
                 clear_color[1],
                 clear_color[2],
-                0.0
+                clear_color[3]
             );
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }

@@ -69,10 +69,10 @@ impl Layout {
     // Returns true if a rerender should occur after this one
     pub fn render(
         &mut self,
-        bg_color: Option<[f32; 3]>,
-        divider_color: Option<[f32; 3]>,
-        err_bg_color: Option<[f32; 3]>,
-        err_divider_color: Option<[f32; 3]>,
+        bg_color: Option<[f32; 4]>,
+        divider_color: Option<[f32; 4]>,
+        err_bg_color: Option<[f32; 4]>,
+        err_divider_color: Option<[f32; 4]>,
         renderer: &mut Renderer,
         input: &Input
     ) -> bool {
