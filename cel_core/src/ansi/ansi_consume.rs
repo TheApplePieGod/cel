@@ -903,6 +903,8 @@ impl Performer {
         self.saved_terminal_state = self.terminal_state.clone();
         self.terminal_state = Default::default();
 
+        self.terminal_state.screen_buffer.resize(self.screen_height, vec![]);
+
         // Reset default margins
         self.terminal_state.margin = Margin::get_from_screen_size(
             self.screen_width as u32,
