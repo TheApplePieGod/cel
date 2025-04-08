@@ -82,8 +82,6 @@ impl Window {
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.05, 0.05, 0.1],
-            //background_color: [0.0, 0.0, 0.0],
-            //background_color: [1.0, 0.0, 0.0],
 
             last_event_time: Instant::now(),
             last_render_time: Instant::now(),

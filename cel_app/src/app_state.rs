@@ -10,7 +10,7 @@ pub struct AppState {
 
 impl AppState {
     fn new() -> Self {
-        let primary_font_name = "Martian Mono Regular";
+        let primary_font_name = "MartianMonoRegular.ttf";
         let secondary_font_name = "HackNerdMonoRegular.ttf";
         #[cfg(target_os = "macos")]
         let mut fallback_fonts = vec!["Courier New", "Apple Color Emoji", "Apple Symbols", "Arial Unicode MS"];
