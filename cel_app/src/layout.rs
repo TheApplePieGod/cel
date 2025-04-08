@@ -100,16 +100,14 @@ impl Layout {
 
         let mut should_rerender = false;
         let mut count = 0;
-        let mut last_local_offset = 1.0;
+        let mut min_local_offset: f32 = 1.0;
         self.map_onscreen_widgets(renderer.get_height() as f32, |ctx, local_offset, _global_offset| {
             let max_size = match ctx.get_expanded() {
                 true => height_screen,
                 false => widget_height
             };
 
-            if !ctx.get_primary() {
-                last_local_offset = local_offset;
-            }
+            min_local_offset = min_local_offset.min(local_offset);
 
             let (bg_color, divider_color) = match ctx.get_exit_code() {
                 None | Some(0) => (bg_color, divider_color),
@@ -137,7 +135,7 @@ impl Layout {
 
         // Lock scrolling to the last widget
         let top = self.offset_y_screen;
-        self.can_scroll_up = last_local_offset < top;
+        self.can_scroll_up = min_local_offset < top;
         self.last_num_onscreen_widgets = count;
 
         should_rerender

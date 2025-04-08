@@ -118,7 +118,8 @@ impl Commands {
             writer.write_all("}\r\n".as_bytes());
         } else {
             // TODO: fallback mode
-            panic!("Shell not supported");
+            log::warn!("Shell not supported!");
+            //panic!("Shell not supported");
         }
 
         let (tx, rx) = mpsc::channel();
