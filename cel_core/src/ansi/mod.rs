@@ -134,6 +134,7 @@ struct Performer {
     pub screen_height: usize,
     pub output_stream: Vec<u8>,
     pub is_empty: bool,
+    pub exit_code: Option<u32>,
     pub prompt_id: u32,
     pub current_dir: String,
     action_performed: bool,

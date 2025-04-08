@@ -109,8 +109,19 @@ impl TabGroup {
     ) -> bool {
         let mut should_rerender = false;
 
+        let err_bg_color = Some([0.3, 0.03, 0.03]);
+        let divider_color = Some([0.133, 0.133, 0.25]);
+        let err_divider_color = Some([0.5, 0.08, 0.08]);
+
         let active_layout = &mut self.layouts[self.active_layout_idx];
-        should_rerender |= active_layout.render(bg_color, renderer, input);
+        should_rerender |= active_layout.render(
+            bg_color,
+            divider_color,
+            err_bg_color,
+            err_divider_color,
+            renderer,
+            input
+        );
 
         // Render tabs
         if self.layouts.len() > 1 {
@@ -126,7 +137,7 @@ impl TabGroup {
             renderer.draw_quad(
                 &[self.offset_x_screen, underline_y_screen],
                 &[self.width_screen, self.tab_underline_px / renderer.get_height() as f32],
-                &[0.133, 0.133, 0.25]
+                &[0.133, 0.133, 0.25, 1.0]
             );
 
             let mut cur_offset = self.offset_x_screen * renderer.get_width() as f32;
@@ -154,7 +165,7 @@ impl TabGroup {
                 button.render(
                     renderer,
                     &text_color,
-                    &[0.05, 0.05, 0.1],
+                    &[0.0, 0.0, 0.0, 0.0],
                     self.tab_text_px,
                     &name
                 );
@@ -163,7 +174,7 @@ impl TabGroup {
                     renderer.draw_quad(
                         &[cur_offset / renderer.get_width() as f32, underline_y_screen],
                         &renderer.to_screen_f32([tab_width_real, self.tab_active_underline_px]),
-                        &[0.933, 0.388, 0.321]
+                        &[0.933, 0.388, 0.321, 1.0]
                     );
                 }
 

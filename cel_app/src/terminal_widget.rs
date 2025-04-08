@@ -114,6 +114,7 @@ impl TerminalWidget {
         position: &LayoutPosition,
         default_height: f32,
         bg_color: Option<[f32; 3]>,
+        divider_color: Option<[f32; 3]>,
     ) -> bool {
         // Align the widget such that the first line is at the top of the screen, rather
         // than the bottom always being at the bottom if the lines do not fully fill up
@@ -125,8 +126,9 @@ impl TerminalWidget {
         self.update_mouse_input(renderer, input, &real_position);
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0]);
-        self.render_background(renderer, &real_position, default_height, excess_space, &bg_color);
-        self.render_divider(renderer, &real_position);
+        let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1]);
+        self.render_background(renderer, &real_position, default_height, &bg_color);
+        self.render_divider(renderer, &real_position, &divider_color);
         self.render_terminal(renderer, &real_position, default_height, &bg_color);
 
         self.render_overlay(input, renderer, &real_position)
@@ -181,6 +183,7 @@ impl TerminalWidget {
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
     pub fn get_current_dir(&self) -> &str { self.ansi_handler.get_current_dir() }
+    pub fn get_exit_code(&self) -> Option<u32> { self.ansi_handler.get_exit_code() }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height_screen(&self) -> f32 { self.last_computed_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
@@ -283,34 +286,27 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
         default_height: f32,
-        excess_space: f32,
         bg_color: &[f32; 3]
     ) {
-        // Increase the size of the primary widget to compensate for the upward
-        // alignment shift so that scrolled widgets are not visible behind the primary
-        let extra_height = match self.primary {
-            true => excess_space,
-            false => 0.0
-        };
-
         renderer.draw_quad(
             &position.offset,
-            &[1.0, self.get_last_computed_height_screen().max(default_height) + extra_height],
-            &bg_color
+            &[1.0, self.get_last_computed_height_screen().max(default_height)],
+            &[bg_color[0], bg_color[1], bg_color[2], 1.0]
         );
     }
 
     fn render_divider(
         &mut self,
         renderer: &mut Renderer,
-        position: &LayoutPosition
+        position: &LayoutPosition,
+        color: &[f32; 3]
     ) {
         let size_px = 2.0;
         let size = size_px / renderer.get_height() as f32;
         renderer.draw_quad(
             &[position.offset[0], position.offset[1]],
             &[1.0, size],
-            &[0.133, 0.133, 0.25]
+            &[color[0], color[1], color[2], 1.0]
         );
     }
 
@@ -425,7 +421,7 @@ impl TerminalWidget {
             button.render(
                 renderer,
                 &[1.0, 1.0, 1.0],
-                &[0.05, 0.05, 0.1],
+                &[0.0, 0.0, 0.0, 0.0],
                 self.icon_size_px,
                 icon
             );

@@ -23,7 +23,6 @@ pub struct Layout {
     last_num_onscreen_widgets: u32,
 
     widget_height_px: f32,
-    widget_gap_px: f32
 }
 
 impl Layout {
@@ -40,8 +39,7 @@ impl Layout {
 
             last_num_onscreen_widgets: 0,
 
-            widget_height_px: 54.0,
-            widget_gap_px: 3.0
+            widget_height_px: 54.0
         }
     }
 
@@ -72,6 +70,9 @@ impl Layout {
     pub fn render(
         &mut self,
         bg_color: Option<[f32; 3]>,
+        divider_color: Option<[f32; 3]>,
+        err_bg_color: Option<[f32; 3]>,
+        err_divider_color: Option<[f32; 3]>,
         renderer: &mut Renderer,
         input: &Input
     ) -> bool {
@@ -110,6 +111,12 @@ impl Layout {
                 last_local_offset = local_offset;
             }
 
+            let (bg_color, divider_color) = match ctx.get_exit_code() {
+                None | Some(0) => (bg_color, divider_color),
+                // Error code
+                _ => (err_bg_color, err_divider_color)
+            };
+
             // Render terminal widget
             should_rerender |= ctx.render(
                 renderer,
@@ -119,7 +126,8 @@ impl Layout {
                     max_size: [1.0, max_size],
                 },
                 widget_height,
-                bg_color
+                bg_color,
+                divider_color
             );
 
             count += 1;
@@ -190,7 +198,6 @@ impl Layout {
 
         // Draw visible widgets except the primary
         let widget_height = self.widget_height_px / renderer_height;
-        let widget_gap = self.widget_gap_px / renderer_height;
         let top = self.offset_y_screen;
         let bottom = self.height_screen + self.offset_y_screen;
         let mut cur_offset = bottom;
@@ -216,7 +223,7 @@ impl Layout {
                 break;
             }
 
-            cur_offset -= last_height + widget_gap;
+            cur_offset -= last_height;
         }
 
         // Last (primary) widget is always rendered at the bottom

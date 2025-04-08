@@ -29,8 +29,7 @@ pub struct FgQuadData {
 #[derive(Copy, Clone)]
 pub struct BgQuadData {
     pub position: [f32; 4],  // x0, y0, x1, y1
-    pub color: [f32; 3],     // r, g, b (bg)
-    pub padding: u32
+    pub color: [f32; 4],     // r, g, b, a (bg)
 }
 
 #[derive(Copy, Clone, Default)]
@@ -120,7 +119,7 @@ impl Renderer {
             let instance_stride = size_of::<BgQuadData>() as i32;
             let pos_stride = size_of::<f32>() as i32 * 4;
             gl::VertexAttribPointer(0, 4, gl::FLOAT, gl::FALSE, instance_stride, null());
-            gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, instance_stride, pos_stride as _);
+            gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, instance_stride, pos_stride as _);
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
             gl::VertexAttribDivisor(0, 1);
@@ -180,9 +179,9 @@ impl Renderer {
             #version 400 core
 
             layout (location = 0) in vec4 inPos;
-            layout (location = 1) in vec3 inColor;
+            layout (location = 1) in vec4 inColor;
 
-            out vec3 bgColor;
+            out vec4 bgColor;
 
             uniform mat4 model;
 
@@ -259,14 +258,13 @@ impl Renderer {
             #version 400 core
 
             in vec2 texCoord;
-            in vec3 fgColor;
-            in vec3 bgColor;
+            in vec4 bgColor;
 
             out vec4 fragColor;
 
             void main()
             {
-                fragColor = vec4(bgColor, 1.f);
+                fragColor = bgColor;
             }
         \0";
 
@@ -536,7 +534,7 @@ impl Renderer {
                     prev_bg_color = *bg_color;
 
                     Self::push_bg_quad(
-                        bg_color,
+                        &[bg_color[0], bg_color[1], bg_color[2], 1.0],
                         &[x, y],
                         &[x + 1.0, y + 1.0],
                         &mut bg_quads
@@ -617,7 +615,7 @@ impl Renderer {
         &self,
         screen_offset: &[f32; 2],
         bg_size_screen: &[f32; 2],
-        bg_color: &[f32; 3],
+        bg_color: &[f32; 4],
     ) {
         let mut bg_quads: Vec<BgQuadData> = vec![];
 
@@ -634,7 +632,9 @@ impl Renderer {
             &bg_size_screen,
             &mut bg_quads
         );
+        self.enable_blending();
         self.draw_background_quads(&bg_quads, &bg_model_mat);
+        self.disable_blending();
     }
 
     // Origin top left to bottom right
@@ -644,7 +644,7 @@ impl Renderer {
         screen_offset: &[f32; 2],
         bg_size_screen: &[f32; 2],
         fg_color: &[f32; 3],
-        bg_color: &[f32; 3],
+        bg_color: &[f32; 4],
         centered: bool,
         text: &str,
     ) {
@@ -681,6 +681,8 @@ impl Renderer {
             x += 1.0;
         }
 
+        self.enable_blending();
+
         self.draw_quad(screen_offset, bg_size_screen, bg_color);
 
         // Draw text, centered on background
@@ -698,6 +700,8 @@ impl Renderer {
             &msdf_quads,
             &raster_quads,
         );
+
+        self.disable_blending();
     }
 
     pub fn compute_render_constants(
@@ -787,7 +791,7 @@ impl Renderer {
 
     // Min: TL, max: BR
     fn push_bg_quad(
-        bg_color: &[f32; 3],
+        bg_color: &[f32; 4],
         pos_min: &[f32; 2],
         pos_max: &[f32; 2],
         arr: &mut Vec<BgQuadData>
@@ -795,7 +799,6 @@ impl Renderer {
         arr.push(BgQuadData {
             position: [pos_min[0], pos_max[1], pos_max[0], pos_min[1]],
             color: *bg_color,
-            padding: 0
         });
     }
 

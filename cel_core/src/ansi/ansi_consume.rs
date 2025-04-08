@@ -191,6 +191,10 @@ impl AnsiHandler {
         &self.performer.current_dir
     }
 
+    pub fn get_exit_code(&self) -> Option<u32> {
+        self.performer.exit_code
+    }
+
     pub fn get_element(&self, pos: Cursor) -> Option<ScreenBufferElement> {
         let global_cursor = self.performer.get_cursor_pos_absolute(&pos);
         let buf = &self.performer.terminal_state.screen_buffer; 
@@ -265,6 +269,7 @@ impl Performer {
             screen_height: height as usize,
             output_stream: vec![],
             is_empty: true,
+            exit_code: None,
             prompt_id: 0,
             current_dir: String::new(),
             action_performed: false,
@@ -1301,6 +1306,13 @@ impl Perform for Performer {
                 }
 
                 self.current_dir = self.parse_ascii_string(&params);
+            },
+            1339 => { // Update exit code
+                if params.len() == 0 {
+                    return;
+                }
+
+                self.exit_code = Some(self.parse_ascii_integer(&params) as u32);
             },
             _ => {
                 log::debug!("<Unhandled> [osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);

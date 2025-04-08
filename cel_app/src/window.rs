@@ -292,7 +292,7 @@ impl Window {
 
         text_lines.extend(tab_group.get_debug_lines());
 
-        let bg_color = [0.5, 0.1, 0.1];
+        let bg_color = [0.5, 0.1, 0.1, 0.75];
         let size_x = self.debug_widget_width_px / self.get_width() as f32;
         renderer.draw_quad(
             &[1.0 - size_x, 0.0],

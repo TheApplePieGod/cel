@@ -34,7 +34,7 @@ impl Button {
         &self,
         renderer: &mut Renderer,
         fg_color: &[f32; 3],
-        bg_color: &[f32; 3],
+        bg_color: &[f32; 4],
         char_height_px: f32,
         text: &str
     ) {
