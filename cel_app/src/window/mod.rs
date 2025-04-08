@@ -12,9 +12,18 @@ use crate::tab_group::TabGroup;
 
 #[cfg(target_os = "macos")]
 mod macos;
-
 #[cfg(target_os = "macos")]
 use self::macos::setup_platform_window;
+
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+use self::windows::setup_platform_window;
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use self::linux::setup_platform_window;
 
 pub struct MonitorInfo {
     pub refresh_rate: u32,
