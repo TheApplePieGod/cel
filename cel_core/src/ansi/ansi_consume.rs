@@ -1485,6 +1485,24 @@ impl Perform for Performer {
                     self.scroll_region(up, self.terminal_state.margin);
                 }
             },
+            'X' => { // 'Erase' characters
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as u32;
+                log::debug!("Erase chars [{:?}]", amount);
+                // TODO: this is not great
+                let old_screen = self.terminal_state.screen_cursor; 
+                let old_cursor = self.terminal_state.global_cursor; 
+                for _ in 0..amount {
+                    if self.terminal_state.wants_wrap {
+                        break;
+                    }
+                    self.print(' ');
+                }
+                self.terminal_state.screen_cursor = old_screen;
+                self.terminal_state.global_cursor = old_cursor;
+            },
             'c' => { // Send device attributes
                 if !params.is_empty() && params[0] != 0 {
                     return;
