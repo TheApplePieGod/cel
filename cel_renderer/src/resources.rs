@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 pub fn get_resource_path(filename: &str) -> PathBuf {
     let filename = Path::new(filename);
 
-    // Check for macOS .app bundle Resources dir: ../Resources/
     if let Ok(exe_path) = std::env::current_exe() {
+        // Check for macOS .app bundle Resources dir: ../Resources/
         #[cfg(target_os = "macos")]
         {
             if let Some(resources_dir) = exe_path.parent().map(|p| p.join("../Resources/resources")) {
@@ -12,6 +12,15 @@ pub fn get_resource_path(filename: &str) -> PathBuf {
                 if candidate.exists() {
                     return candidate;
                 }
+            }
+        }
+
+        // Check for linux .deg bundle resources dir: /usr/lib/cel/resources
+        #[cfg(target_os = "linux")]
+        {
+            let candidate = PathBuf::from("/usr/lib/cel/resources");
+            if candidate.exists() {
+                return candidate;
             }
         }
 
