@@ -148,7 +148,11 @@ impl Window {
         let event_time_dist = (Instant::now() - self.last_event_time).as_secs_f32();
         let recently_updated = event_time_dist <= 3.0;
         if !recently_updated {
-            std::thread::sleep(std::time::Duration::new(0, 50e6 as u32));
+            let sleep_time = match self.get_is_focused() {
+                true => std::time::Duration::from_millis(50),
+                false => std::time::Duration::from_secs(10),
+            };
+            std::thread::sleep(sleep_time);
         }
 
         let mut any_event = false;
