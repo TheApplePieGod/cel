@@ -193,7 +193,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cel_app"
+name = "cel"
 version = "0.1.0"
 dependencies = [
  "cel_core",
