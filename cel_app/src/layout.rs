@@ -43,24 +43,27 @@ impl Layout {
         }
     }
 
-    pub fn update(&mut self, input: &mut Input) -> bool {
+    pub fn update(&mut self, input: Option<&mut Input>) -> bool {
         let mut any_event = false;
 
-        any_event |= self.context.update(input);
+        let mut input = input;
+        any_event |= self.context.update(input.as_deref_mut());
 
         if self.context.just_split() {
             self.scroll_offset = 0.0;
         }
 
         // Update scroll
-        //let speed_factor = 1.0;
-        let speed_factor = 0.01;
-        let scroll = input.get_scroll_delta()[1];
-        if scroll < 0.0 || self.can_scroll_up {
-            if scroll < 0.0 {
-                any_event |= true;
+        if let Some(input) = input {
+            //let speed_factor = 1.0;
+            let speed_factor = 0.01;
+            let scroll = input.get_scroll_delta()[1];
+            if scroll < 0.0 || self.can_scroll_up {
+                if scroll < 0.0 {
+                    any_event |= true;
+                }
+                self.scroll_offset = (self.scroll_offset - scroll * speed_factor).min(0.0);
             }
-            self.scroll_offset = (self.scroll_offset - scroll * speed_factor).min(0.0);
         }
 
         any_event
@@ -148,6 +151,18 @@ impl Layout {
         self.offset_y_screen = new_offset_screen[1];
     }
 
+    pub fn set_current_directory(&mut self, dir: String) {
+        self.context.set_current_directory(dir);
+    }
+
+    pub fn get_current_directory(&self) -> &str {
+        self.context.get_primary_widget().get_current_dir()
+    }
+
+    pub fn get_name(&self) -> &str {
+        self.get_current_directory()
+    }
+
     pub fn get_debug_lines(&self) -> Vec<String> {
         let widgets = self.context.get_widgets();
 
@@ -177,10 +192,6 @@ impl Layout {
         text_lines.extend(active.get_debug_lines());
 
         text_lines
-    }
-
-    pub fn get_name(&self) -> &str {
-        self.context.get_primary_widget().get_current_dir()
     }
 
     fn map_onscreen_widgets(

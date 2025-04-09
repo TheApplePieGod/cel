@@ -1,14 +1,33 @@
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
+use std::ops::DerefMut;
+use std::path::PathBuf;
+
+use cel_core::config::get_config_dir;
 use cel_renderer::renderer::Renderer;
+use serde::{Deserialize, Serialize};
+use anyhow::{Result, bail};
 
 use crate::button::Button;
 use crate::input::Input;
 use crate::layout::Layout;
+
+#[derive(Serialize, Deserialize, Default)]
+struct SessionTab {
+    cwd: String
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct Session {
+    tabs: Vec<SessionTab>
+}
 
 pub struct TabGroup {
     width_screen: f32,
     height_screen: f32,
     offset_x_screen: f32,
     offset_y_screen: f32,
+    session_file_path: PathBuf,
 
     layouts: Vec<Layout>,
     active_layout_idx: usize,
@@ -23,11 +42,15 @@ pub struct TabGroup {
 
 impl TabGroup {
     pub fn new(width_screen: f32, height_screen: f32) -> Self {
+        let mut sessions_file_path = get_config_dir();
+        sessions_file_path.push("session.json");
+
         Self {
             width_screen,
             height_screen,
             offset_x_screen: 0.0,
             offset_y_screen: 0.0,
+            session_file_path: sessions_file_path,
             
             active_layout_idx: 0,
             layouts: vec![Layout::new(1.0, 1.0)],
@@ -41,49 +64,68 @@ impl TabGroup {
         }
     }
 
-    fn push_layout(&mut self, renderer: &Renderer) {
-        self.layouts.push(Layout::new(1.0, 1.0));
-        self.active_layout_idx = self.layouts.len() - 1;
+    pub fn load_session(&mut self) -> Result<()> {
+        let file = File::open(&self.session_file_path)?;
+        let reader = BufReader::new(file);
+        let session: Session = serde_json::from_reader(reader)?;
 
-        // Force resize to account for tab offset shift
-        self.resize(
-            renderer,
-            [self.width_screen, self.height_screen],
-            [self.offset_x_screen, self.offset_y_screen],
-        );
-    }
-
-    fn pop_active_layout(&mut self, renderer: &Renderer) {
-        if self.layouts.len() <= 1 {
-            return;
+        self.layouts.clear();
+        for tab in session.tabs {
+            let mut layout = Layout::new(1.0, 1.0);
+            layout.set_current_directory(tab.cwd);
+            self.layouts.push(layout);
         }
 
-        self.layouts.remove(self.active_layout_idx);
-        self.active_layout_idx = self.active_layout_idx.min(self.layouts.len() - 1);
+        log::info!("Session loaded from {}", self.session_file_path.to_str().unwrap());
 
-        // Force resize to account for tab offset shift
-        self.resize(
-            renderer,
-            [self.width_screen, self.height_screen],
-            [self.offset_x_screen, self.offset_y_screen],
-        );
+        // TODO: should resize here, but we don't have renderer
+        
+        Ok(())
     }
 
+    pub fn write_session(&self) -> Result<()> {
+        let mut session: Session = Default::default();
+        for layout in &self.layouts {
+            let cwd = layout.get_current_directory().to_string();
+            if cwd.is_empty() {
+                // Do not overwrite the session if any of the tabs are currently still
+                // initializing (empty dir)
+                bail!("Not ready");
+            }
+            session.tabs.push(SessionTab { cwd });
+        }
+
+        let file = File::create(&self.session_file_path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer(writer, &session)?;
+        
+        Ok(())
+    }
 
     pub fn update(&mut self, renderer: &Renderer, input: &mut Input) -> bool {
         let mut any_event = false;
 
-        let active_layout = &mut self.layouts[self.active_layout_idx];
-        any_event |= active_layout.update(input);
+        // Update all layouts
+        let mut input = input;
+        for (i, layout) in self.layouts.iter_mut().enumerate() {
+            let input = if i == self.active_layout_idx { Some(input.deref_mut()) } else { None };
+            any_event |= layout.update(input);
+        }
+
+        // Update active layout only
+        //let active_layout = &mut self.layouts[self.active_layout_idx];
+        //any_event |= active_layout.update(input);
 
         // Handle input events
         if input.event_new_tab {
             input.event_new_tab = false;
             self.push_layout(renderer);
+            any_event = true;
         }
         if input.event_del_tab {
             input.event_del_tab = false;
             self.pop_active_layout(renderer);
+            any_event = true;
         }
         if input.event_prev_tab {
             input.event_prev_tab = false;
@@ -91,10 +133,16 @@ impl TabGroup {
                 0 => self.layouts.len() - 1,
                 _ => self.active_layout_idx - 1
             };
+            any_event = true;
         }
         if input.event_next_tab {
             input.event_next_tab = false;
             self.active_layout_idx = (self.active_layout_idx + 1) % self.layouts.len();
+            any_event = true;
+        }
+
+        if any_event {
+            let _ = self.write_session();
         }
 
         any_event
@@ -216,5 +264,33 @@ impl TabGroup {
         text_lines.extend(active_layout.get_debug_lines());
 
         text_lines
+    }
+
+    fn push_layout(&mut self, renderer: &Renderer) {
+        self.layouts.push(Layout::new(1.0, 1.0));
+        self.active_layout_idx = self.layouts.len() - 1;
+
+        // Force resize to account for tab offset shift
+        self.resize(
+            renderer,
+            [self.width_screen, self.height_screen],
+            [self.offset_x_screen, self.offset_y_screen],
+        );
+    }
+
+    fn pop_active_layout(&mut self, renderer: &Renderer) {
+        if self.layouts.len() <= 1 {
+            return;
+        }
+
+        self.layouts.remove(self.active_layout_idx);
+        self.active_layout_idx = self.active_layout_idx.min(self.layouts.len() - 1);
+
+        // Force resize to account for tab offset shift
+        self.resize(
+            renderer,
+            [self.width_screen, self.height_screen],
+            [self.offset_x_screen, self.offset_y_screen],
+        );
     }
 }

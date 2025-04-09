@@ -84,6 +84,9 @@ impl Window {
         glfw_instance.set_swap_interval(glfw::SwapInterval::None);
         //glfw_instance.set_swap_interval(glfw::SwapInterval::Sync(1));
 
+        let mut tab_group = TabGroup::new(1.0, 1.0);
+        let _ = tab_group.load_session();
+
         let scale = window.get_content_scale();
         let initial_size_px = window.get_size();
         Self {
@@ -95,7 +98,7 @@ impl Window {
                 scale.into(),
                 AppState::current().as_ref().borrow().font.clone()
             ))),
-            tab_group: Rc::new(RefCell::new(TabGroup::new(1.0, 1.0))),
+            tab_group: Rc::new(RefCell::new(tab_group)),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
             background_color: [0.05, 0.05, 0.1, 0.97],

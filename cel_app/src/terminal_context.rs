@@ -35,34 +35,43 @@ impl TerminalContext {
         }
     }
 
-    pub fn update(&mut self, input: &mut Input) -> bool {
+    pub fn update(&mut self, input: Option<&mut Input>) -> bool {
         let mut any_event = false;
 
-        if input.event_paste {
-            any_event = true;
-            input.event_paste = false;
+        self.max_sequences_to_process = std::u32::MAX;
 
-            match ClipboardContext::new() {
-                Ok(mut ctx) => {
-                    let text = ctx.get_contents().unwrap_or(String::new());
-                    match self.widgets.last_mut().unwrap().is_bracketed_paste_enabled() {
-                        true => {
-                            let bracketed = format!("\x1b[200~{}\x1b[201~", text);
-                            self.input_buffer.extend_from_slice(bracketed.as_bytes())
-                        },
-                        false => self.input_buffer.extend_from_slice(text.as_bytes()),
-                    };
-                }
-                Err(err) => {
-                    log::error!("Failed to initialize clipboard context: {}", err);
-                }
-            };
+        if let Some(input) = input {
+            if input.event_paste {
+                any_event = true;
+                input.event_paste = false;
+
+                match ClipboardContext::new() {
+                    Ok(mut ctx) => {
+                        let text = ctx.get_contents().unwrap_or(String::new());
+                        match self.widgets.last_mut().unwrap().is_bracketed_paste_enabled() {
+                            true => {
+                                let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                                self.input_buffer.extend_from_slice(bracketed.as_bytes())
+                            },
+                            false => self.input_buffer.extend_from_slice(text.as_bytes()),
+                        };
+                    }
+                    Err(err) => {
+                        log::error!("Failed to initialize clipboard context: {}", err);
+                    }
+                };
+            }
+
+            any_event |= self.handle_user_io(input);
         }
 
-        any_event |= self.handle_user_io(input);
         any_event |= self.handle_process_io();
 
         any_event
+    }
+
+    pub fn set_current_directory(&mut self, dir: String) {
+        self.commands.send_input(&format!(";cd \"{}\"\n", dir).into_bytes());
     }
 
     pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }
@@ -108,7 +117,6 @@ impl TerminalContext {
             self.debug_disable_input = !self.debug_disable_input;
         }
 
-        self.max_sequences_to_process = std::u32::MAX;
         if self.debug_discrete_processing {
             self.max_sequences_to_process = 0;
 
