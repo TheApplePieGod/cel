@@ -632,9 +632,9 @@ impl Renderer {
             &bg_size_screen,
             &mut bg_quads
         );
-        self.enable_blending();
+        //self.enable_blending();
         self.draw_background_quads(&bg_quads, &bg_model_mat);
-        self.disable_blending();
+        //self.disable_blending();
     }
 
     // Origin top left to bottom right
@@ -1034,7 +1034,12 @@ impl Renderer {
     fn enable_blending(&self) {
         unsafe {
             gl::Enable(gl::BLEND);
-            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            gl::BlendFuncSeparate(
+                gl::SRC_ALPHA,
+                gl::ONE_MINUS_SRC_ALPHA,
+                gl::ONE,
+                gl::ONE_MINUS_SRC_ALPHA
+            );
         }
     }
 

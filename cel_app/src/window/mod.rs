@@ -98,7 +98,7 @@ impl Window {
             tab_group: Rc::new(RefCell::new(TabGroup::new(1.0, 1.0))),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,
-            background_color: [0.05, 0.05, 0.1, 0.95],
+            background_color: [0.05, 0.05, 0.1, 0.97],
 
             last_event_time: Instant::now(),
             last_render_time: Instant::now(),
