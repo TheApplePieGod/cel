@@ -319,34 +319,31 @@ impl Performer {
 
     // Code is [0, 7], assumes weight is already considered
     fn parse_4_bit_color(style_flags: StyleFlags, code: u16) -> [f32; 3] {
+        const BASE_COLORS: [[f32; 3]; 8] = [
+            [0.13, 0.15, 0.17], // Black (dark gray)
+            [0.87, 0.27, 0.27], // Red
+            [0.48, 0.76, 0.29], // Green
+            [0.98, 0.72, 0.21], // Yellow
+            [0.33, 0.63, 0.87], // Blue
+            [0.82, 0.47, 0.87], // Magenta
+            [0.20, 0.80, 0.78], // Cyan
+            [0.90, 0.91, 0.91], // White (light gray)
+        ];
+
         let factor: f32 = if style_flags.contains(StyleFlags::Bold) {
             1.0
         } else if style_flags.contains(StyleFlags::Faint) {
-            0.25
-        } else {
             0.5
+        } else {
+            0.75
         };
 
-        let one = (code & 1) as f32 * factor;
-        let two = ((code & 2) >> 1) as f32 * factor;
-        let four = ((code & 4) >> 2) as f32 * factor;
-        match code {
-            1..=6 => [one, two, four],
-            0 => if style_flags.contains(StyleFlags::Bold) {
-                    [0.5, 0.5, 0.5]
-                } else if style_flags.contains(StyleFlags::Faint) {
-                    [0.25, 0.25, 0.25]
-                } else {
-                    [0.0, 0.0, 0.0]
-                },
-            7 => if style_flags.contains(StyleFlags::Bold) {
-                    [1.0, 1.0, 1.0]
-                } else if style_flags.contains(StyleFlags::Faint) {
-                    [0.5, 0.5, 0.5]
-                } else {
-                    [0.75, 0.75, 0.75]
-                },
-            _ => [0.0, 0.0, 0.0]
+        if code < 8 {
+            let base = BASE_COLORS[code as usize];
+            [base[0] * factor, base[1] * factor, base[2] * factor]
+        } else {
+            // Fallback
+            [0.0, 0.0, 0.0]
         }
     }
 

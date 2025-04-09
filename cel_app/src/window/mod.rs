@@ -117,6 +117,7 @@ impl Window {
         let clear_color = self.background_color;
         self.window.as_ref().borrow_mut().set_refresh_callback(move |w| {
             let renderer = &mut renderer_ptr.as_ref().borrow_mut();
+            let input = &mut input_ptr.as_ref().borrow_mut();
             let tab_group = &mut tab_group_ptr.as_ref().borrow_mut();
 
             // Update
@@ -127,7 +128,7 @@ impl Window {
             );
 
             // !Glitchy!
-            //tab_group.update(input_ptr.as_ref().borrow_mut().deref_mut());
+            //tab_group.update(renderer, input);
 
             // Render
             Self::render_wrapper(
@@ -136,7 +137,7 @@ impl Window {
                 renderer,
                 tab_group,
                 window_ptr.as_ref().borrow_mut().deref_mut(),
-                input_ptr.as_ref().borrow().deref()
+                input,
             );
         });
 
