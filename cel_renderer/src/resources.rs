@@ -18,7 +18,8 @@ pub fn get_resource_path(filename: &str) -> PathBuf {
         // Check for linux .deg bundle resources dir: /usr/lib/cel/resources
         #[cfg(target_os = "linux")]
         {
-            let candidate = PathBuf::from("/usr/lib/cel/resources");
+            let mut candidate = PathBuf::from("/usr/lib/cel/resources");
+            candidate.push(filename);
             if candidate.exists() {
                 return candidate;
             }

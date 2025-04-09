@@ -620,6 +620,7 @@ impl Font {
 
     fn load_font_from_resources(name: &str) -> Result<Vec<u8>, String> {
         let path = crate::resources::get_resource_path(name);
+        log::info!("Loading resource font from {}", path.to_str().unwrap());
         Self::load_font_data(path.to_str().unwrap())
     }
 
