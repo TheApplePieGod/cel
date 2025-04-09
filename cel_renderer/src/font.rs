@@ -115,10 +115,11 @@ impl Font {
             match loaded {
                 Ok(data) => {
                     let face = Face::parse(data.as_slice(), 0).unwrap();
+                    let metrics = Font::parse_face_metrics(&face);
                     font_data.push(FontData {
                         name: name.to_string(),
-                        metrics: Font::parse_face_metrics(&face),
                         bytes: data,
+                        metrics
 
                     })
                 },
@@ -187,12 +188,14 @@ impl Font {
     pub fn get_grapheme_data(&mut self, key: &str) -> Vec<GlyphMetrics> {
         // TODO: cache
         let mut output = vec![];
+
         for (font_idx, glyphs) in self.parse_grapheme(key).iter() {
             for (info, _pos) in glyphs.iter() {
                 //log::warn!("{} {} {}", key, _pos.x_advance, _pos.y_advance);
                 output.push(self.get_glyph_data_internal(info.codepoint, Some(*font_idx)));
             }
         }
+
         output
     }
 
@@ -300,7 +303,7 @@ impl Font {
                 let hb_face = harfbuzz_rs::Face::from_bytes(&font_data.bytes, 0);
                 let hb_font = harfbuzz_rs::Font::new(hb_face);
                 let hb_shape = harfbuzz_rs::shape(&hb_font, buf, &[]);
-                
+
                 let glyphs = hb_shape
                     .get_glyph_infos()
                     .iter()
@@ -360,6 +363,8 @@ impl Font {
             index += 1;
         }
 
+        //log::trace!("Found glyph {} for {:?} in '{}'", glyph_id.0, key, self.font_data[index].name);
+
         self.load_glyph(&self.font_data[index].metrics, &face, glyph_id)
     }
 
@@ -370,10 +375,12 @@ impl Font {
 
         raster = face.glyph_raster_image(id, MSDF_SIZE as u16);
         if raster.is_some() {
+            //log::trace!("Found raster for {}", id.0);
             render_type = RenderType::RASTER;
         } else {
             shape = face.glyph_shape(id);
             if shape.is_some() {
+                //log::trace!("Found msdf for {}", id.0);
                 render_type = RenderType::MSDF;
             } else {
                 log::warn!("Missing data for glyph id {}", id.0);
@@ -381,8 +388,9 @@ impl Font {
             }
         }
 
+        let advance = face.glyph_hor_advance(id).unwrap_or(1) as f32;
         let (pixels, glyph_bound, pixel_bound) = match render_type {
-            RenderType::MSDF => self.generate_msdf(metrics, shape.unwrap()),
+            RenderType::MSDF => self.generate_msdf(advance, metrics, shape.unwrap()),
             RenderType::RASTER => self.generate_raster(raster.unwrap())
         };
 
@@ -481,7 +489,7 @@ impl Font {
         bbox
     }
 
-    fn generate_msdf(&self, metrics: &FaceMetrics, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
+    fn generate_msdf(&self, advance: f32, metrics: &FaceMetrics, shape: Shape) -> (Vec<f32>, Bound<f32>, Bound<f64>) {
         let mut shape = shape;
         shape.normalize();
 
@@ -513,12 +521,14 @@ impl Font {
         }
 
         // https://github.com/Chlumsky/msdf-atlas-gen/blob/master/msdf-atlas-gen/GlyphGeometry.cpp
-        // Ensure we scale by the font's scale so that width and height are normalized
-        // to 1.0
+        // Ensure we scale by the font's scale so that height is normalized to 1.0.
+        // Also, divide by the glyph's advance since we may be pulling glyphs from
+        // non-monospaced fonts. This way, width is always normalized
+        let scale_x = 1.0 / advance as f64;
         let mut glyph_bound = Bound::new(
-            (metrics.scale_x * (-bbox.translate.x + 0.5 / bbox.scale)) as f32,
+            (scale_x * (-bbox.translate.x + 0.5 / bbox.scale)) as f32,
             (metrics.scale_y * (-bbox.translate.y + 0.5 / bbox.scale)) as f32,
-            (metrics.scale_x * (-bbox.translate.x + (bbox.rect.x - 0.5) / bbox.scale)) as f32,
+            (scale_x * (-bbox.translate.x + (bbox.rect.x - 0.5) / bbox.scale)) as f32,
             (metrics.scale_y * (-bbox.translate.y + (bbox.rect.y - 0.5) / bbox.scale)) as f32,
         );
 
