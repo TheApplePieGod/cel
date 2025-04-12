@@ -128,8 +128,10 @@ impl AnsiHandler {
                     return;
                 }
             },
-            // TODO: tracking when no buttons are pressed
-            MouseTrackingMode::AnyEvent => {},
+            MouseTrackingMode::AnyEvent => {
+                // TODO: tracking when no buttons are pressed
+                return;
+            },
         }
 
         let mut sequence: Vec<u8> = vec![0x1b, b'[']; // TODO: reuse
