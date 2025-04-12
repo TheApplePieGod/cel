@@ -6,6 +6,27 @@ use std::fmt;
 
 use super::*;
 
+impl TerminalState {
+    pub fn get_text(&self) -> String {
+        let mut raw_lines = vec![];
+
+        for buf_line in &self.screen_buffer {
+            let mut line = String::new();
+            for elem in buf_line {
+                match &elem.elem {
+                    CellContent::Char(c, _) => line.push(*c),
+                    CellContent::Grapheme(s, _) => line.push_str(&s),
+                    CellContent::Continuation(_) => {}
+                    CellContent::Empty => line.push(' ')
+                }
+            }
+            raw_lines.push(line);
+        }
+
+        raw_lines.join("\n")
+    }
+}
+
 impl AnsiHandler {
     pub fn new(width: u32, height: u32) -> Self {
         let mut obj = Self {
@@ -209,22 +230,7 @@ impl AnsiHandler {
     }
 
     pub fn get_text(&self) -> String {
-        let mut raw_lines = vec![];
-
-        for buf_line in &self.performer.terminal_state.screen_buffer {
-            let mut line = String::new();
-            for elem in buf_line {
-                match &elem.elem {
-                    CellContent::Char(c, _) => line.push(*c),
-                    CellContent::Grapheme(s, _) => line.push_str(&s),
-                    CellContent::Continuation(_) => {}
-                    CellContent::Empty => {}
-                }
-            }
-            raw_lines.push(line);
-        }
-
-        raw_lines.join("\n")
+        self.performer.terminal_state.get_text()
     }
 
     pub fn reset(&mut self) {

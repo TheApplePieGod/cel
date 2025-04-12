@@ -150,7 +150,7 @@ impl Window {
         if !recently_updated {
             let sleep_time = match self.get_is_focused() {
                 true => std::time::Duration::from_millis(50),
-                false => std::time::Duration::from_secs(10),
+                false => std::time::Duration::from_millis(100),
             };
             std::thread::sleep(sleep_time);
         }

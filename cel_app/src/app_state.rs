@@ -1,5 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
-use cel_renderer::font::Font;
+use cel_renderer::{font::Font, resources::get_resource_path};
 
 thread_local!(static APP_STATE: Rc<RefCell<AppState>> = Rc::new(RefCell::new(AppState::new())));
 
@@ -10,27 +10,17 @@ pub struct AppState {
 
 impl AppState {
     fn new() -> Self {
-        let primary_font_name = "MartianMonoRegular.ttf";
-        let secondary_font_name = "HackNerdMonoRegular.ttf";
-        #[cfg(target_os = "macos")]
-        let mut fallback_fonts = vec!["Courier New", "Apple Color Emoji", "Apple Symbols", "Arial Unicode MS"];
-        #[cfg(target_os = "linux")]
-        let mut fallback_fonts = vec!["Courier New", "Arial Unicode MS"];
-        #[cfg(target_os = "windows")]
-        let mut fallback_fonts = vec!["Courier New", "Segoe UI Emoji", "Arial Unicode MS"];
+        let priority_fonts = [
+            get_resource_path("MartianMonoRegular.ttf"),
+            get_resource_path("HackNerdMonoRegular.ttf"),
+        ];
 
-        // TODO: this is confusing and messy, and we need dynamic font search / remap
-        fallback_fonts.insert(0, secondary_font_name);
-        fallback_fonts.insert(0, primary_font_name);
-
-        let primary_font = match Font::new(&fallback_fonts) {
+        let primary_font = match Font::new("Martian Mono", &priority_fonts) {
             Ok(font) => font,
-            Err(_) => {
-                panic!("Default and fallback fonts unavailable")
-            }
+            Err(msg) => { panic!("{}", msg) }
         };
 
-        log::info!("Loaded primary font '{}'", primary_font.get_primary_name());
+        log::info!("Primary font '{}'", primary_font.get_primary_name());
 
         Self {
             running: true,

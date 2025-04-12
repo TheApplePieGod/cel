@@ -7,9 +7,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::font::GlyphMetrics;
+use crate::font::{ShapeParams, TextCache};
+use crate::glyph_storage::{GlyphStorage, GlyphMetrics, RenderType};
 use crate::{
-    font::{Font, RenderType},
+    font::Font,
     glchk,
     util::Util,
 };
@@ -41,6 +42,7 @@ pub struct RenderStats {
 }
 
 pub struct RenderConstants {
+    pub font_size_px: f32,
     pub char_size_x_px: f32,
     pub char_size_y_px: f32,
     pub char_size_x_screen: f32,
@@ -650,35 +652,35 @@ impl Renderer {
     ) {
         let rc = self.compute_render_constants_from_height(char_height_px);
 
-        let mut x = 0.0;
-        let mut y = 0.0;
         let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
         let mut raster_quads: Vec<FgQuadData> = vec![];
 
-        for c in text.chars() {
-            if c == '\n' {
-                x = 0.0;
-                y += 1.0;
-                continue;
-            }
+        let shape_params = ShapeParams {
+            font_size_px: rc.font_size_px,
+            line_height_px: rc.char_size_y_px,
+            content_width_px: None,
+            content_height_px: None,
+        };
 
-            if c.is_whitespace() || c == '\0' {
-                x += 1.0;
-                continue;
-            }
-
-            self.push_char_quad(
-                c,
+        let mut max_x: f32 = 0.0;
+        let mut text_cache = TextCache::new();
+        text_cache.set_text(text);
+        for glyph in self.font.as_ref().borrow_mut().shape_text(&shape_params, &mut text_cache) {
+            let pos = [
+                glyph.x_pos / rc.char_size_x_px,
+                glyph.line_idx as f32
+            ];
+            max_x = max_x.max(pos[0]);
+            Self::push_glyph_quad(
+                &glyph.metrics,
                 &rc,
                 fg_color,
-                &[x, y],
+                &pos,
                 1.0,
                 StyleFlags::default(),
                 &mut msdf_quads,
                 &mut raster_quads,
             );
-
-            x += 1.0;
         }
 
         self.enable_blending();
@@ -687,7 +689,7 @@ impl Renderer {
 
         // Draw text, centered on background
         let centered_offset = [
-            screen_offset[0] + (bg_size_screen[0] - x * rc.char_size_x_screen) * 0.5,
+            screen_offset[0] + (bg_size_screen[0] - max_x * rc.char_size_x_screen) * 0.5,
             screen_offset[1] + (bg_size_screen[1] - rc.char_size_y_screen) * 0.5,
         ];
         self.draw_text_quads(
@@ -709,16 +711,21 @@ impl Renderer {
         width_screen: f32,
         chars_per_line: u32
     ) -> RenderConstants {
+        let font = &mut self.font.as_ref().borrow_mut();
         let width_px = width_screen * self.width as f32;
-        let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
         let char_size_x_px = (width_px / chars_per_line as f32).round();
-        let char_size_y_px = (char_size_x_px * face_metrics.height).round();
+        let char_size_y_px = (char_size_x_px * font.get_aspect_ratio()).round();
         let char_size_x_screen = char_size_x_px / self.width as f32;
         let char_size_y_screen = char_size_y_px / self.height as f32;
-        let atlas_size = self.font.as_ref().borrow().get_atlas_size();
+        let atlas_size = font.get_glyph_storage().get_atlas_size();
         let atlas_pixel_size = 1.0 / atlas_size as f32;
 
+        // Font size is based on 1em rather than the actual size of the BB.
+        // Scale the size to be 1em worth
+        let font_size_px = char_size_x_px / font.get_width_em();
+
         RenderConstants {
+            font_size_px,
             char_size_x_px,
             char_size_y_px,
             char_size_x_screen,
@@ -731,15 +738,17 @@ impl Renderer {
         &self,
         height_px: f32,
     ) -> RenderConstants {
-        let face_metrics = *self.font.as_ref().borrow().get_primary_metrics();
+        let font = &mut self.font.as_ref().borrow_mut();
         let char_size_y_px = height_px;
-        let char_size_x_px = (char_size_y_px / face_metrics.height).round();
+        let char_size_x_px = (char_size_y_px / font.get_aspect_ratio()).round();
         let char_size_x_screen = char_size_x_px / self.width as f32;
         let char_size_y_screen = char_size_y_px / self.height as f32;
-        let atlas_size = self.font.as_ref().borrow().get_atlas_size();
+        let atlas_size = font.get_glyph_storage().get_atlas_size();
         let atlas_pixel_size = 1.0 / atlas_size as f32;
+        let font_size_px = char_size_x_px / font.get_width_em();
 
         RenderConstants {
+            font_size_px,
             char_size_x_px,
             char_size_y_px,
             char_size_x_screen,
@@ -858,17 +867,19 @@ impl Renderer {
         raster_arr: &mut Vec<FgQuadData>,
     ) {
         let mut mut_font = self.font.as_ref().borrow_mut();
-        let glyph_metrics = &mut_font.get_glyph_data(c);
-        Self::push_glyph_quad(
-            &glyph_metrics,
-            rc,
-            fg_color,
-            pos,
-            width,
-            flags,
-            msdf_arr,
-            raster_arr
-        );
+        let glyph = &mut_font.shape_char(c);
+        if let Some(glyph) = glyph {
+            Self::push_glyph_quad(
+                &glyph.metrics,
+                rc,
+                fg_color,
+                pos,
+                width,
+                flags,
+                msdf_arr,
+                raster_arr
+            );
+        }
     }
 
     fn push_unicode_quad(
@@ -884,10 +895,10 @@ impl Renderer {
     ) -> u32 {
         let mut count = 0;
         let mut mut_font = self.font.as_ref().borrow_mut();
-        for metrics in mut_font.get_grapheme_data(str).iter() {
+        for glyph in mut_font.shape_grapheme(str) {
             count += 1;
             Self::push_glyph_quad(
-                metrics,
+                &glyph.metrics,
                 rc,
                 fg_color,
                 pos,
@@ -903,8 +914,9 @@ impl Renderer {
 
     fn compute_pixel_range(&self, size_px: f32) -> f32 {
         let font = self.font.as_ref().borrow();
+        let storage = &font.get_glyph_storage();
         let max_scale = self.scale[0].max(self.scale[1]);
-        size_px * max_scale / font.get_glyph_size() as f32 * font.get_pixel_range()
+        size_px * max_scale / storage.get_glyph_size() as f32 * storage.get_pixel_range()
     }
 
     fn draw_text_quads(
@@ -950,7 +962,7 @@ impl Renderer {
         // Bind atlas tex
         self.bind_texture(
             self.msdf_program,
-            font.get_atlas_tex().get_id(),
+            font.get_glyph_storage().get_atlas_texture().get_id(),
             0,
             "atlasTex",
         );
@@ -985,7 +997,7 @@ impl Renderer {
         // Bind atlas tex
         self.bind_texture(
             self.raster_program,
-            font.get_atlas_tex().get_id(),
+            font.get_glyph_storage().get_atlas_texture().get_id(),
             0,
             "atlasTex",
         );
