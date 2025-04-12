@@ -319,14 +319,22 @@ impl GlyphStorage {
             (scale_y * (-bbox.translate.y + (bbox.rect.y - 0.5) / bbox.scale)) as f32,
         );
 
+        // Ensure glyph aspect ratio is maintained
+        let aspect = (scale_x / scale_y) as f32;
+        let aspect_scale = self.target_aspect / aspect;
+        if aspect_scale > 1.0 {
+            // Grow width
+            glyph_bound.right = glyph_bound.width() * aspect_scale + glyph_bound.left;
+        } else {
+            // Grow height
+            // TODO: revisit
+            //glyph_bound.top = glyph_bound.height() * aspect_scale + glyph_bound.bottom;
+        }
+
         // Bump t/b glyph bound to ensure baseline is normalized to 0
         let descender = face.descender().abs() as f32 * scale_y as f32;
         glyph_bound.bottom += descender;
         glyph_bound.top += descender;
-
-        // Ensure glyph aspect ratio is maintained
-        let aspect = (scale_x / scale_y) as f32;
-        glyph_bound.right *= self.target_aspect / aspect;
 
         let mut pixel_bound = Bound::new(
             0.5,
