@@ -23,6 +23,8 @@ impl ConsoleLogger {
 impl log::Log for ConsoleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
         if cfg!(debug_assertions) {
+            // Disable cosmic logs
+            !metadata.target().starts_with("cosmic") &&
             metadata.level() <= Level::Trace
         } else {
             metadata.level() <= Level::Info

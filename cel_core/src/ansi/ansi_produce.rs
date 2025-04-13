@@ -23,7 +23,7 @@ impl AnsiBuilder {
         self.add_raw(&[b'\r'])
     }
 
-    pub fn add_newline_and_cr(self) -> Self {
+    pub fn add_cr_and_newline(self) -> Self {
         self.add_carriage_return().add_newline()
     }
 

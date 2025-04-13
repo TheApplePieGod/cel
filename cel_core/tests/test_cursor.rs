@@ -13,7 +13,7 @@ mod tests {
     fn basic() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("Hello")
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("World")
         );
 
@@ -31,7 +31,7 @@ mod tests {
             .add_text("12345")
             .add_text("67890")
             .add_text("12345")
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("ABCDE")
             .set_cursor_pos(2, 3)
             .add_text("X")
@@ -143,13 +143,34 @@ mod tests {
     }
 
     #[test]
+    fn newline_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("12345")
+            .add_text("12345")
+            .add_text("6")
+            .set_cursor_pos(5, 2)
+            .add_text("5") // Wrap should be set
+            .add_cr_and_newline()
+            .add_text("H")
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5",
+                 "1", "2", "3", "4", "5",
+                 "H"]
+        ];
+        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
+        assert!(!state.wants_wrap);
+    }
+
+    #[test]
     fn carriage_return_1() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("12345")
             .add_text("67")
             .move_cursor_up(1)
             .move_cursor_right(100)
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("H")
         );
 
@@ -165,7 +186,7 @@ mod tests {
     fn carriage_return_2() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("12345")
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("H")
         );
 
@@ -208,7 +229,7 @@ mod tests {
     fn scroll_region_1() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
         );
 
@@ -230,7 +251,7 @@ mod tests {
         let state = get_final_state(AnsiBuilder::new()
             .set_scroll_margin_y(2, 4)
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
         );
 
@@ -255,7 +276,7 @@ mod tests {
     fn scroll_region_3() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890SAFE") // 3 lines
             .set_scroll_margin_y(2, 4)
             .set_cursor_pos(1, 4)
@@ -283,7 +304,7 @@ mod tests {
     fn reverse_index_1() {
         let state = get_final_state(AnsiBuilder::new()
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
             .reverse_index()
             .set_cursor_pos(1, 1)
