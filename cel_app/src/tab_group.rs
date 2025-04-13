@@ -32,6 +32,7 @@ pub struct TabGroup {
     layouts: Vec<Layout>,
     active_layout_idx: usize,
 
+    char_size_px: f32,
     tab_underline_px: f32,
     tab_active_underline_px: f32,
     tab_text_px: f32,
@@ -55,6 +56,7 @@ impl TabGroup {
             active_layout_idx: 0,
             layouts: vec![Layout::new(1.0, 1.0)],
 
+            char_size_px: 8.0,
             tab_underline_px: 2.0,
             tab_active_underline_px: 2.0,
             tab_text_px: 10.0,
@@ -140,6 +142,16 @@ impl TabGroup {
             self.active_layout_idx = (self.active_layout_idx + 1) % self.layouts.len();
             any_event = true;
         }
+        if input.event_zoom_in {
+            input.event_zoom_in = false;
+            self.char_size_px = (self.char_size_px + 2.0).min(32.0);
+            any_event = true;
+        }
+        if input.event_zoom_out {
+            input.event_zoom_out = false;
+            self.char_size_px = (self.char_size_px - 2.0).max(4.0);
+            any_event = true;
+        }
 
         if any_event {
             let _ = self.write_session();
@@ -168,6 +180,7 @@ impl TabGroup {
             divider_color,
             err_bg_color,
             err_divider_color,
+            self.char_size_px,
             renderer,
             input
         );

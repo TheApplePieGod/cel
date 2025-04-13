@@ -76,6 +76,7 @@ impl Layout {
         divider_color: Option<[f32; 4]>,
         err_bg_color: Option<[f32; 4]>,
         err_divider_color: Option<[f32; 4]>,
+        char_size_px: f32,
         renderer: &mut Renderer,
         input: &Input
     ) -> bool {
@@ -126,6 +127,7 @@ impl Layout {
                     offset: [offset_x_screen, local_offset],
                     max_size: [1.0, max_size],
                 },
+                char_size_px,
                 widget_height,
                 bg_color,
                 divider_color

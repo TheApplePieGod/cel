@@ -21,6 +21,8 @@ pub struct Input {
     poll_count: u64,
 
     // Event flags
+    pub event_zoom_in: bool,
+    pub event_zoom_out: bool,
     pub event_new_tab: bool,
     pub event_next_tab: bool,
     pub event_prev_tab: bool,
@@ -40,6 +42,8 @@ impl Input {
             scroll_delta: [0.0, 0.0],
             poll_count: 0,
 
+            event_zoom_in: false,
+            event_zoom_out: false,
             event_new_tab: false,
             event_next_tab: false,
             event_prev_tab: false,
@@ -89,6 +93,8 @@ impl Input {
                     if mods.contains(Modifiers::Control | Modifiers::Shift) {
                         let mut handled = true;
                         match *key {
+                            Key::Equal => self.event_zoom_in = true,
+                            Key::Minus => self.event_zoom_out = true,
                             Key::T => self.event_new_tab = true,
                             Key::W => self.event_del_tab = true,
                             Key::Right => self.event_next_tab = true,

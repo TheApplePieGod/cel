@@ -32,7 +32,6 @@ pub struct TerminalWidget {
 
     padding_px: [f32; 2],
     overlay_padding_px: [f32; 2],
-    char_size_px: f32,
     icon_size_px: f32,
     icon_gap_px: f32,
 
@@ -68,7 +67,6 @@ impl TerminalWidget {
 
             padding_px: [12.0, 12.0],
             overlay_padding_px: [6.0, 6.0],
-            char_size_px: 8.0,
             icon_size_px: 16.0,
             icon_gap_px: 4.0,
 
@@ -112,6 +110,7 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         input: &Input,
         position: &LayoutPosition,
+        char_size_px: f32,
         default_height: f32,
         bg_color: Option<[f32; 4]>,
         divider_color: Option<[f32; 4]>,
@@ -123,13 +122,13 @@ impl TerminalWidget {
         let mut real_position = *position;
         real_position.offset[1] -= excess_space;
 
-        self.update_mouse_input(renderer, input, &real_position);
+        self.update_mouse_input(renderer, input, &real_position, char_size_px);
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
         let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1, 1.0]);
         self.render_background(renderer, &real_position, default_height, &bg_color);
         self.render_divider(renderer, &real_position, &divider_color);
-        self.render_terminal(renderer, &real_position, default_height, &bg_color);
+        self.render_terminal(renderer, &real_position, char_size_px, default_height, &bg_color);
 
         self.render_overlay(input, renderer, &real_position)
     }
@@ -201,7 +200,8 @@ impl TerminalWidget {
         &mut self,
         renderer: &Renderer,
         input: &Input,
-        position: &LayoutPosition
+        position: &LayoutPosition,
+        char_size_px: f32
     ) {
         // Compute the target cell based on the mouse position and widget position
 
@@ -260,7 +260,7 @@ impl TerminalWidget {
                     );
                 }
 
-                let scroll_scale = 4.0 / self.char_size_px; // Empirical
+                let scroll_scale = 4.0 / char_size_px; // Empirical
                 let scroll_delta = input.get_scroll_delta();
                 self.ansi_handler.handle_scroll(
                     scroll_delta[0] * scroll_scale,
@@ -314,6 +314,7 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
+        char_size_px: f32,
         default_height: f32,
         bg_color: &[f32; 4]
     ) {
@@ -328,7 +329,7 @@ impl TerminalWidget {
         }
 
         let width_px = renderer.get_width() as f32 * position.max_size[0];
-        let max_chars = ((width_px - padding_px[0] * 2.0) / self.char_size_px) as u32;
+        let max_chars = ((width_px - padding_px[0] * 2.0) / char_size_px) as u32;
         let rc = renderer.compute_render_constants(position.max_size[0], max_chars);
         let num_screen_lines = renderer.compute_max_lines(&rc, position.max_size[1]);
         let line_size_screen = rc.char_size_y_screen;
