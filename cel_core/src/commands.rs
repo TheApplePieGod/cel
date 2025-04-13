@@ -21,7 +21,7 @@ pub struct Commands {
 }
 
 impl Commands {
-    pub fn new() -> Self {
+    pub fn new(cwd: Option<&str>) -> Self {
         let pty_system = native_pty_system();
 
         // Create a new pty
@@ -97,10 +97,12 @@ impl Commands {
         }
 
         cmd.get_argv_mut()[0] = shell.clone().into();
-        //cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
         cmd.env_remove("TERMINFO");
         cmd.env("TERM", "tmux-256color");
         cmd.env("CEL_PROMPT_ID", "0");
+        if let Some(cwd) = cwd {
+            cmd.cwd(cwd);
+        }
 
         let child = pair.slave.spawn_command(cmd).unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();

@@ -26,7 +26,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn new(width_screen: f32, height_screen: f32) -> Self {
+    pub fn new(width_screen: f32, height_screen: f32, cwd: Option<&str>) -> Self {
         Self {
             width_screen,
             height_screen,
@@ -35,7 +35,7 @@ impl Layout {
 
             can_scroll_up: false,
             scroll_offset: 0.0,
-            context: TerminalContext::new(),
+            context: TerminalContext::new(cwd),
 
             last_num_onscreen_widgets: 0,
 
@@ -152,10 +152,6 @@ impl Layout {
         self.height_screen = new_size_screen[1];
         self.offset_x_screen = new_offset_screen[0];
         self.offset_y_screen = new_offset_screen[1];
-    }
-
-    pub fn set_current_directory(&mut self, dir: String) {
-        self.context.set_current_directory(dir);
     }
 
     pub fn get_current_directory(&self) -> &str {

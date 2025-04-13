@@ -19,9 +19,9 @@ pub struct TerminalContext {
 }
 
 impl TerminalContext {
-    pub fn new() -> Self {
+    pub fn new(cwd: Option<&str>) -> Self {
         Self {
-            commands: Commands::new(),
+            commands: Commands::new(cwd),
             widgets: vec![TerminalWidget::new()],
 
             input_buffer: vec![],
@@ -68,10 +68,6 @@ impl TerminalContext {
         any_event |= self.handle_process_io();
 
         any_event
-    }
-
-    pub fn set_current_directory(&mut self, dir: String) {
-        self.commands.send_input(&format!(";cd \"{}\"\n", dir).into_bytes());
     }
 
     pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }

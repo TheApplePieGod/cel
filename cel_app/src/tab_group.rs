@@ -55,7 +55,7 @@ impl TabGroup {
             session_file_path: sessions_file_path,
             
             active_layout_idx: 0,
-            layouts: vec![Layout::new(1.0, 1.0)],
+            layouts: vec![Layout::new(1.0, 1.0, None)],
 
             char_size_px: 8.0,
             tab_underline_px: 2.0,
@@ -75,8 +75,7 @@ impl TabGroup {
         if let Some(tabs) = session.tabs {
             self.layouts.clear();
             for tab in tabs {
-                let mut layout = Layout::new(1.0, 1.0);
-                layout.set_current_directory(tab.cwd);
+                let layout = Layout::new(1.0, 1.0, Some(&tab.cwd));
                 self.layouts.push(layout);
             }
         }
@@ -292,7 +291,7 @@ impl TabGroup {
     }
 
     fn push_layout(&mut self, renderer: &Renderer) {
-        self.layouts.push(Layout::new(1.0, 1.0));
+        self.layouts.push(Layout::new(1.0, 1.0, None));
         self.active_layout_idx = self.layouts.len() - 1;
 
         // Force resize to account for tab offset shift
