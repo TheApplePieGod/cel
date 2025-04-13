@@ -138,6 +138,7 @@ impl TerminalWidget {
         let active_size = self.get_terminal_size();
         let cur_elem = self.ansi_handler.get_element(self.last_mouse_pos_cell);
         
+        let mouse_global = self.ansi_handler.get_global_cursor(&self.last_mouse_pos_cell);
         let mut text_lines = vec![
             format!("Active size: {}x{}", active_size[0], active_size[1]),
             format!("Total lines: {}", state.screen_buffer.len()),
@@ -147,7 +148,8 @@ impl TerminalWidget {
             format!("Char width: {}", self.last_char_width_screen),
             format!("Chars per line: {}", self.chars_per_line),
             format!("Hovered cell:"),
-            format!("  Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
+            format!("  Screen Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
+            format!("  Global Pos: ({}, {})", mouse_global[0], mouse_global[1]),
         ];
 
         text_lines.extend(
@@ -185,6 +187,7 @@ impl TerminalWidget {
     pub fn get_exit_code(&self) -> Option<u32> { self.ansi_handler.get_exit_code() }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_last_computed_height_screen(&self) -> f32 { self.last_computed_height_screen }
+    pub fn get_last_line_height_screen(&self) -> f32 { self.last_line_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
     pub fn get_just_closed(&self) -> bool { self.just_closed }
     pub fn get_expanded(&self) -> bool { self.expanded }

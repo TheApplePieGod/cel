@@ -19,7 +19,8 @@ struct SessionTab {
 
 #[derive(Serialize, Deserialize, Default)]
 struct Session {
-    tabs: Vec<SessionTab>
+    tabs: Option<Vec<SessionTab>>,
+    char_size_px: Option<f32>
 }
 
 pub struct TabGroup {
@@ -71,11 +72,17 @@ impl TabGroup {
         let reader = BufReader::new(file);
         let session: Session = serde_json::from_reader(reader)?;
 
-        self.layouts.clear();
-        for tab in session.tabs {
-            let mut layout = Layout::new(1.0, 1.0);
-            layout.set_current_directory(tab.cwd);
-            self.layouts.push(layout);
+        if let Some(tabs) = session.tabs {
+            self.layouts.clear();
+            for tab in tabs {
+                let mut layout = Layout::new(1.0, 1.0);
+                layout.set_current_directory(tab.cwd);
+                self.layouts.push(layout);
+            }
+        }
+
+        if let Some(char_size_px) = session.char_size_px {
+            self.char_size_px = char_size_px;
         }
 
         log::info!("Session loaded from {}", self.session_file_path.to_str().unwrap());
@@ -87,6 +94,8 @@ impl TabGroup {
 
     pub fn write_session(&self) -> Result<()> {
         let mut session: Session = Default::default();
+
+        let mut tabs = vec![];
         for layout in &self.layouts {
             let cwd = layout.get_current_directory().to_string();
             if cwd.is_empty() {
@@ -94,8 +103,11 @@ impl TabGroup {
                 // initializing (empty dir)
                 bail!("Not ready");
             }
-            session.tabs.push(SessionTab { cwd });
+            tabs.push(SessionTab { cwd });
         }
+        session.tabs = Some(tabs);
+
+        session.char_size_px = Some(self.char_size_px);
 
         let file = File::create(&self.session_file_path)?;
         let writer = BufWriter::new(file);

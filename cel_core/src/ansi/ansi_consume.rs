@@ -218,6 +218,10 @@ impl AnsiHandler {
         self.performer.exit_code
     }
 
+    pub fn get_global_cursor(&self, pos: &Cursor) -> Cursor {
+        self.performer.get_cursor_pos_absolute(pos)
+    }
+
     pub fn get_element(&self, pos: Cursor) -> Option<ScreenBufferElement> {
         let global_cursor = self.performer.get_cursor_pos_absolute(&pos);
         let buf = &self.performer.terminal_state.screen_buffer; 

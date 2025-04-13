@@ -22,7 +22,7 @@ pub struct Layout {
 
     last_num_onscreen_widgets: u32,
 
-    widget_height_px: f32,
+    widget_height_lines: f32,
 }
 
 impl Layout {
@@ -39,7 +39,7 @@ impl Layout {
 
             last_num_onscreen_widgets: 0,
 
-            widget_height_px: 54.0
+            widget_height_lines: 5.0
         }
     }
 
@@ -82,7 +82,7 @@ impl Layout {
     ) -> bool {
         let height_screen = self.height_screen;
         let offset_x_screen = self.offset_x_screen;
-        let widget_height = self.widget_height_px / renderer.get_height() as f32;
+        let widget_height = self.widget_height_lines;
 
         // Reset all render states
         for ctx in self.context.get_widgets_mut().iter_mut() {
@@ -105,10 +105,11 @@ impl Layout {
         let mut should_rerender = false;
         let mut count = 0;
         let mut min_local_offset: f32 = 1.0;
-        self.map_onscreen_widgets(renderer.get_height() as f32, |ctx, local_offset, _global_offset| {
+        self.map_onscreen_widgets(|ctx, local_offset, _global_offset| {
+            let min_widget_height = widget_height * ctx.get_last_line_height_screen();
             let max_size = match ctx.get_expanded() {
                 true => height_screen,
-                false => widget_height
+                false => min_widget_height,
             };
 
             min_local_offset = min_local_offset.min(local_offset);
@@ -128,7 +129,7 @@ impl Layout {
                     max_size: [1.0, max_size],
                 },
                 char_size_px,
-                widget_height,
+                min_widget_height,
                 bg_color,
                 divider_color
             );
@@ -198,7 +199,6 @@ impl Layout {
 
     fn map_onscreen_widgets(
         &mut self,
-        renderer_height: f32,
         mut func: impl FnMut(&mut TerminalWidget, f32, f32)
     ) {
         let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
@@ -208,7 +208,6 @@ impl Layout {
         };
 
         // Draw visible widgets except the primary
-        let widget_height = self.widget_height_px / renderer_height;
         let top = self.offset_y_screen;
         let bottom = self.height_screen + self.offset_y_screen;
         let mut cur_offset = bottom;
@@ -242,8 +241,9 @@ impl Layout {
         // such that it grows when scrolling down and shrinks when scrolling up,
         // up to a minimum size
         let last_widget = self.context.get_widgets_mut().last_mut().unwrap();
+        let min_widget_height = self.widget_height_lines * last_widget.get_last_line_height_screen();
         let start = bottom - last_widget.get_last_computed_height_screen();
-        let start = (start - scroll_offset).min(bottom - widget_height);
+        let start = (start - scroll_offset).min(bottom - min_widget_height);
         func(last_widget, start, bottom);
     }
 }
