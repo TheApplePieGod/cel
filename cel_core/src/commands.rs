@@ -113,13 +113,13 @@ impl Commands {
         if shell.contains("zsh") {
             // Handled above
         } else if shell.contains("powershell") {
-            writer.write_all("$global:CEL_PROMPT_ID = 0\r\n".as_bytes());
-            writer.write_all("function prompt {\r\n".as_bytes());
-            writer.write_all("    $global:CEL_PROMPT_ID++\r\n".as_bytes());
-            writer.write_all("    $oscSeq = \"{0}]1337;{1}{2}\" -f [char]0x1b, $global:CEL_PROMPT_ID, [char]0x07\r\n".as_bytes());
-            writer.write_all("    Write-Host -NoNewline $oscSeq\r\n".as_bytes());
-            writer.write_all("    \"PS \" + (Get-Location) + \"> \"\r\n".as_bytes());
-            writer.write_all("}\r\n".as_bytes());
+            let _ = writer.write_all("$global:CEL_PROMPT_ID = 0\r\n".as_bytes());
+            let _ = writer.write_all("function prompt {\r\n".as_bytes());
+            let _ = writer.write_all("    $global:CEL_PROMPT_ID++\r\n".as_bytes());
+            let _ = writer.write_all("    $oscSeq = \"{0}]1337;{1}{2}\" -f [char]0x1b, $global:CEL_PROMPT_ID, [char]0x07\r\n".as_bytes());
+            let _ = writer.write_all("    Write-Host -NoNewline $oscSeq\r\n".as_bytes());
+            let _ = writer.write_all("    \"PS \" + (Get-Location) + \"> \"\r\n".as_bytes());
+            let _ = writer.write_all("}\r\n".as_bytes());
         } else {
             // TODO: fallback mode
             log::warn!("Shell not supported!");
@@ -158,10 +158,14 @@ impl Commands {
         }
     }
 
-    pub fn poll_io(&mut self) {
+    // Returns true if the commands have terminated
+    pub fn poll_io(&mut self) -> bool {
         while let Ok(v) = self.io_rx.try_recv() {
             self.output.extend(v);
         }
+
+        let wait_result = self.child.try_wait();
+        wait_result.is_err() || wait_result.unwrap().is_some()
     }
 
     pub fn resize(&mut self, rows: u32, cols: u32) {

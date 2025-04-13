@@ -43,11 +43,13 @@ impl Layout {
         }
     }
 
-    pub fn update(&mut self, input: Option<&mut Input>) -> bool {
+    // Returns (any_event, terminated)
+    pub fn update(&mut self, input: Option<&mut Input>) -> (bool, bool) {
         let mut any_event = false;
 
         let mut input = input;
-        any_event |= self.context.update(input.as_deref_mut());
+        let (ctx_event, ctx_terminated) = self.context.update(input.as_deref_mut());
+        any_event |= ctx_event;
 
         if self.context.just_split() {
             self.scroll_offset = 0.0;
@@ -66,7 +68,7 @@ impl Layout {
             }
         }
 
-        any_event
+        (any_event, ctx_terminated)
     }
 
     // Returns true if a rerender should occur after this one

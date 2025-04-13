@@ -35,7 +35,8 @@ impl TerminalContext {
         }
     }
 
-    pub fn update(&mut self, input: Option<&mut Input>) -> bool {
+    // Returns (any_event, terminated)
+    pub fn update(&mut self, input: Option<&mut Input>) -> (bool, bool) {
         let mut any_event = false;
 
         self.max_sequences_to_process = std::u32::MAX;
@@ -65,9 +66,10 @@ impl TerminalContext {
             any_event |= self.handle_user_io(input);
         }
 
-        any_event |= self.handle_process_io();
+        let (pio_event, terminated) = self.handle_process_io();
+        any_event |= pio_event;
 
-        any_event
+        (any_event, terminated)
     }
 
     pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }
@@ -134,8 +136,9 @@ impl TerminalContext {
         any_event
     }
 
-    fn handle_process_io(&mut self) -> bool {
-        self.commands.poll_io();
+    // Returns (any_event, terminated)
+    fn handle_process_io(&mut self) -> (bool, bool) {
+        let terminated = self.commands.poll_io();
 
         let output = self.commands.get_output();
         let any_event = self.commands.get_output().len() > 0;
@@ -178,6 +181,6 @@ impl TerminalContext {
 
         self.input_buffer.clear();
 
-        any_event
+        (any_event, terminated)
     }
 }

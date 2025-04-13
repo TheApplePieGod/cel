@@ -120,9 +120,21 @@ impl TabGroup {
 
         // Update all layouts
         let mut input = input;
-        for (i, layout) in self.layouts.iter_mut().enumerate() {
-            let input = if i == self.active_layout_idx { Some(input.deref_mut()) } else { None };
-            any_event |= layout.update(input);
+        let mut layout_idx = 0;
+        loop {
+            if layout_idx >= self.layouts.len() {
+                break;
+            }
+
+            let input = if layout_idx == self.active_layout_idx { Some(input.deref_mut()) } else { None };
+            let (layout_event, layout_terminated) = self.layouts[layout_idx].update(input);
+            any_event |= layout_event;
+
+            if layout_terminated {
+                self.pop_layout(renderer, layout_idx);
+            } else {
+                layout_idx += 1;
+            }
         }
 
         // Update active layout only
@@ -302,12 +314,12 @@ impl TabGroup {
         );
     }
 
-    fn pop_active_layout(&mut self, renderer: &Renderer) {
+    fn pop_layout(&mut self, renderer: &Renderer, idx: usize) {
         if self.layouts.len() <= 1 {
             return;
         }
 
-        self.layouts.remove(self.active_layout_idx);
+        self.layouts.remove(idx);
         self.active_layout_idx = self.active_layout_idx.min(self.layouts.len() - 1);
 
         // Force resize to account for tab offset shift
@@ -316,5 +328,9 @@ impl TabGroup {
             [self.width_screen, self.height_screen],
             [self.offset_x_screen, self.offset_y_screen],
         );
+    }
+
+    fn pop_active_layout(&mut self, renderer: &Renderer) {
+        self.pop_layout(renderer, self.active_layout_idx);
     }
 }
