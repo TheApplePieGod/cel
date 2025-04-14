@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::{Result, bail};
 
 use crate::button::Button;
-use crate::input::Input;
+use crate::input::{Input, InputEvent};
 use crate::layout::Layout;
 
 #[derive(Serialize, Deserialize, Default)]
@@ -133,44 +133,32 @@ impl TabGroup {
         //any_event |= active_layout.update(input);
 
         // Handle input events
-        if input.event_new_tab {
-            input.event_new_tab = false;
+        any_event |= input.consume_event(InputEvent::TabNew, || {
             // Push layout copying settings from active layout
             self.push_layout(
                 renderer,
                 Some(self.serialize_layout_to_session_tab(self.active_layout_idx))
             );
-            any_event = true;
-        }
-        if input.event_del_tab {
-            input.event_del_tab = false;
+        });
+        any_event |= input.consume_event(InputEvent::TabDelete, || {
             self.pop_active_layout(renderer);
-            any_event = true;
-        }
-        if input.event_prev_tab {
-            input.event_prev_tab = false;
+        });
+        any_event |= input.consume_event(InputEvent::TabPrev, || {
             self.active_layout_idx = self.active_layout_idx.wrapping_sub(1).min(self.layouts.len() - 1);
-            any_event = true;
-        }
-        if input.event_next_tab {
-            input.event_next_tab = false;
+        });
+        any_event |= input.consume_event(InputEvent::TabNext, || {
             self.active_layout_idx = (self.active_layout_idx + 1) % self.layouts.len();
-            any_event = true;
-        }
-        if input.event_move_tab_left {
-            input.event_move_tab_left = false;
+        });
+        any_event |= input.consume_event(InputEvent::TabMoveLeft, || {
             let new_idx = self.active_layout_idx.wrapping_sub(1).min(self.layouts.len() - 1);
             self.layouts.swap(new_idx, self.active_layout_idx);
             self.active_layout_idx = new_idx;
-            any_event = true;
-        }
-        if input.event_move_tab_right {
-            input.event_move_tab_right = false;
+        });
+        any_event |= input.consume_event(InputEvent::TabMoveRight, || {
             let new_idx = (self.active_layout_idx + 1) % self.layouts.len();
             self.layouts.swap(new_idx, self.active_layout_idx);
             self.active_layout_idx = new_idx;
-            any_event = true;
-        }
+        });
 
         if any_event {
             let _ = self.write_session();

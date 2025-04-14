@@ -1,7 +1,7 @@
 use cel_renderer::renderer::{RenderStats, Renderer};
 
 use crate::terminal_context::TerminalContext;
-use crate::input::Input;
+use crate::input::{Input, InputEvent};
 use crate::terminal_widget::TerminalWidget;
 
 // All fields are in screen position
@@ -70,16 +70,12 @@ impl Layout {
                 self.scroll_offset = (self.scroll_offset - scroll * speed_factor).min(0.0);
             }
 
-            if input.event_zoom_in {
-                input.event_zoom_in = false;
+            any_event |= input.consume_event(InputEvent::ZoomIn, || {
                 self.char_size_px = (self.char_size_px + 2.0).min(32.0);
-                any_event = true;
-            }
-            if input.event_zoom_out {
-                input.event_zoom_out = false;
+            });
+            any_event |= input.consume_event(InputEvent::ZoomOut, || {
                 self.char_size_px = (self.char_size_px - 2.0).max(4.0);
-                any_event = true;
-            }
+            });
         }
 
         (any_event, ctx_terminated)

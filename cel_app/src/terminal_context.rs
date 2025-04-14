@@ -1,7 +1,7 @@
 use cel_core::commands::Commands;
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
-use crate::input::Input;
+use crate::input::{Input, InputEvent};
 use crate::terminal_widget::TerminalWidget;
 
 pub struct TerminalContext {
@@ -42,10 +42,7 @@ impl TerminalContext {
         self.max_sequences_to_process = std::u32::MAX;
 
         if let Some(input) = input {
-            if input.event_paste {
-                any_event = true;
-                input.event_paste = false;
-
+            any_event |= input.consume_event(InputEvent::Paste, || {
                 match ClipboardContext::new() {
                     Ok(mut ctx) => {
                         let text = ctx.get_contents().unwrap_or(String::new());
@@ -61,7 +58,7 @@ impl TerminalContext {
                         log::error!("Failed to initialize clipboard context: {}", err);
                     }
                 };
-            }
+            });
 
             any_event |= self.handle_user_io(input);
         }

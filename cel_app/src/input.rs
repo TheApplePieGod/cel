@@ -1,3 +1,4 @@
+use enum_map::EnumMap;
 use glfw::{Action, Key, Modifiers, MouseButton, WindowEvent};
 
 #[derive(Default, Copy, Clone, PartialEq, Eq)]
@@ -10,6 +11,19 @@ pub enum PressState {
     Repeat,
 }
 
+#[derive(Clone, Copy, enum_map::Enum)]
+pub enum InputEvent {
+    ZoomIn,
+    ZoomOut,
+    TabNew,
+    TabDelete,
+    TabNext,
+    TabPrev,
+    TabMoveLeft,
+    TabMoveRight,
+    Paste,
+}
+
 pub struct Input {
     input_buffer: Vec<u8>,
     utf8_buffer: [u8; 8],
@@ -19,17 +33,7 @@ pub struct Input {
     mouse_delta: [f32; 2],
     scroll_delta: [f32; 2],
     poll_count: u64,
-
-    // Event flags
-    pub event_zoom_in: bool,
-    pub event_zoom_out: bool,
-    pub event_new_tab: bool,
-    pub event_next_tab: bool,
-    pub event_prev_tab: bool,
-    pub event_del_tab: bool,
-    pub event_paste: bool,
-    pub event_move_tab_left: bool,
-    pub event_move_tab_right: bool,
+    event_flags: EnumMap<InputEvent, bool>,
 }
 
 impl Input {
@@ -43,16 +47,7 @@ impl Input {
             mouse_delta: [0.0, 0.0],
             scroll_delta: [0.0, 0.0],
             poll_count: 0,
-
-            event_zoom_in: false,
-            event_zoom_out: false,
-            event_new_tab: false,
-            event_next_tab: false,
-            event_prev_tab: false,
-            event_del_tab: false,
-            event_paste: false,
-            event_move_tab_left: false,
-            event_move_tab_right: false,
+            event_flags: EnumMap::default(),
         }
     }
 
@@ -84,7 +79,7 @@ impl Input {
                     if mods.contains(modifier_key) {
                         let mut handled = true;
                         match *key {
-                            Key::V  => self.event_paste = true,
+                            Key::V  => self.set_event(InputEvent::Paste),
                             _ => handled = false
                         }
 
@@ -97,14 +92,14 @@ impl Input {
                     if mods.contains(Modifiers::Control | Modifiers::Shift) {
                         let mut handled = true;
                         match *key {
-                            Key::Equal => self.event_zoom_in = true,
-                            Key::Minus => self.event_zoom_out = true,
-                            Key::T => self.event_new_tab = true,
-                            Key::W => self.event_del_tab = true,
-                            Key::Right => self.event_next_tab = true,
-                            Key::Left => self.event_prev_tab = true,
-                            Key::Comma => self.event_move_tab_left = true,
-                            Key::Period => self.event_move_tab_right = true,
+                            Key::Equal => self.set_event(InputEvent::ZoomIn),
+                            Key::Minus => self.set_event(InputEvent::ZoomOut),
+                            Key::T => self.set_event(InputEvent::TabNew),
+                            Key::W => self.set_event(InputEvent::TabDelete),
+                            Key::Left => self.set_event(InputEvent::TabPrev),
+                            Key::Right => self.set_event(InputEvent::TabNext),
+                            Key::Comma => self.set_event(InputEvent::TabMoveLeft),
+                            Key::Period => self.set_event(InputEvent::TabMoveRight),
                             _ => handled = false
                         }
 
@@ -163,6 +158,17 @@ impl Input {
         self.input_buffer.clear();
     }
 
+    // Returns true if the event was consumed
+    pub fn consume_event(&mut self, event: InputEvent, mut fun: impl FnMut()) -> bool {
+        if self.event_flags[event] {
+            self.event_flags[event] = false;
+            fun();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn get_key_pressed(&self, key: Key) -> bool {
         match self.key_states[key as usize].0 {
             PressState::JustPressed | PressState::Repeat => true,
@@ -213,6 +219,10 @@ impl Input {
     pub fn get_mouse_pos(&self) -> [f32; 2] { self.mouse_pos }
     pub fn get_mouse_delta(&self) -> [f32; 2] { self.mouse_delta }
     pub fn get_scroll_delta(&self) -> [f32; 2] { self.scroll_delta }
+
+    fn set_event(&mut self, event: InputEvent) {
+        self.event_flags[event] = true;
+    }
 
     // Returns true if the input was a press and the input buffer should be extended
     fn handle_input_press(
