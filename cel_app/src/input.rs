@@ -89,7 +89,7 @@ impl Input {
                     }
 
                     // Cel commands
-                    if mods.contains(Modifiers::Control | Modifiers::Shift) {
+                    if mods.contains(modifier_key | Modifiers::Shift) {
                         let mut handled = true;
                         match *key {
                             Key::Equal => self.set_event(InputEvent::ZoomIn),
