@@ -149,15 +149,26 @@ impl TabGroup {
         }
         if input.event_prev_tab {
             input.event_prev_tab = false;
-            self.active_layout_idx = match self.active_layout_idx {
-                0 => self.layouts.len() - 1,
-                _ => self.active_layout_idx - 1
-            };
+            self.active_layout_idx = self.active_layout_idx.wrapping_sub(1).min(self.layouts.len() - 1);
             any_event = true;
         }
         if input.event_next_tab {
             input.event_next_tab = false;
             self.active_layout_idx = (self.active_layout_idx + 1) % self.layouts.len();
+            any_event = true;
+        }
+        if input.event_move_tab_left {
+            input.event_move_tab_left = false;
+            let new_idx = self.active_layout_idx.wrapping_sub(1).min(self.layouts.len() - 1);
+            self.layouts.swap(new_idx, self.active_layout_idx);
+            self.active_layout_idx = new_idx;
+            any_event = true;
+        }
+        if input.event_move_tab_right {
+            input.event_move_tab_right = false;
+            let new_idx = (self.active_layout_idx + 1) % self.layouts.len();
+            self.layouts.swap(new_idx, self.active_layout_idx);
+            self.active_layout_idx = new_idx;
             any_event = true;
         }
 

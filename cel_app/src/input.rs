@@ -28,6 +28,8 @@ pub struct Input {
     pub event_prev_tab: bool,
     pub event_del_tab: bool,
     pub event_paste: bool,
+    pub event_move_tab_left: bool,
+    pub event_move_tab_right: bool,
 }
 
 impl Input {
@@ -49,6 +51,8 @@ impl Input {
             event_prev_tab: false,
             event_del_tab: false,
             event_paste: false,
+            event_move_tab_left: false,
+            event_move_tab_right: false,
         }
     }
 
@@ -99,6 +103,8 @@ impl Input {
                             Key::W => self.event_del_tab = true,
                             Key::Right => self.event_next_tab = true,
                             Key::Left => self.event_prev_tab = true,
+                            Key::Comma => self.event_move_tab_left = true,
+                            Key::Period => self.event_move_tab_right = true,
                             _ => handled = false
                         }
 
