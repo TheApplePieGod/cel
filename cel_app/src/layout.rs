@@ -22,6 +22,7 @@ pub struct Layout {
 
     last_num_onscreen_widgets: u32,
 
+    char_size_px: f32,
     widget_height_lines: f32,
 }
 
@@ -39,6 +40,7 @@ impl Layout {
 
             last_num_onscreen_widgets: 0,
 
+            char_size_px: 8.0,
             widget_height_lines: 5.0
         }
     }
@@ -55,8 +57,9 @@ impl Layout {
             self.scroll_offset = 0.0;
         }
 
-        // Update scroll
+        // Handle input events
         if let Some(input) = input {
+            // Update scroll
             //let speed_factor = 1.0;
             let speed_factor = 0.01;
             let scroll = input.get_scroll_delta()[1];
@@ -65,6 +68,17 @@ impl Layout {
                     any_event |= true;
                 }
                 self.scroll_offset = (self.scroll_offset - scroll * speed_factor).min(0.0);
+            }
+
+            if input.event_zoom_in {
+                input.event_zoom_in = false;
+                self.char_size_px = (self.char_size_px + 2.0).min(32.0);
+                any_event = true;
+            }
+            if input.event_zoom_out {
+                input.event_zoom_out = false;
+                self.char_size_px = (self.char_size_px - 2.0).max(4.0);
+                any_event = true;
             }
         }
 
@@ -78,13 +92,13 @@ impl Layout {
         divider_color: Option<[f32; 4]>,
         err_bg_color: Option<[f32; 4]>,
         err_divider_color: Option<[f32; 4]>,
-        char_size_px: f32,
         renderer: &mut Renderer,
         input: &Input
     ) -> bool {
         let height_screen = self.height_screen;
         let offset_x_screen = self.offset_x_screen;
         let widget_height = self.widget_height_lines;
+        let char_size_px = self.char_size_px;
 
         // Reset all render states
         for ctx in self.context.get_widgets_mut().iter_mut() {
@@ -154,6 +168,14 @@ impl Layout {
         self.height_screen = new_size_screen[1];
         self.offset_x_screen = new_offset_screen[0];
         self.offset_y_screen = new_offset_screen[1];
+    }
+
+    pub fn set_char_size_px(&mut self, char_size_px: f32) {
+        self.char_size_px = char_size_px;
+    }
+
+    pub fn get_char_size_px(&self) -> f32 {
+        self.char_size_px
     }
 
     pub fn get_current_directory(&self) -> &str {

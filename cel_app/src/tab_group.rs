@@ -14,13 +14,13 @@ use crate::layout::Layout;
 
 #[derive(Serialize, Deserialize, Default)]
 struct SessionTab {
-    cwd: String
+    cwd: Option<String>,
+    char_size_px: Option<f32>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 struct Session {
     tabs: Option<Vec<SessionTab>>,
-    char_size_px: Option<f32>
 }
 
 pub struct TabGroup {
@@ -33,7 +33,6 @@ pub struct TabGroup {
     layouts: Vec<Layout>,
     active_layout_idx: usize,
 
-    char_size_px: f32,
     tab_underline_px: f32,
     tab_active_underline_px: f32,
     tab_text_px: f32,
@@ -57,7 +56,6 @@ impl TabGroup {
             active_layout_idx: 0,
             layouts: vec![Layout::new(1.0, 1.0, None)],
 
-            char_size_px: 8.0,
             tab_underline_px: 2.0,
             tab_active_underline_px: 2.0,
             tab_text_px: 10.0,
@@ -75,13 +73,12 @@ impl TabGroup {
         if let Some(tabs) = session.tabs {
             self.layouts.clear();
             for tab in tabs {
-                let layout = Layout::new(1.0, 1.0, Some(&tab.cwd));
+                let mut layout = Layout::new(1.0, 1.0, tab.cwd.as_ref().map(|s| s.as_str()));
+                if let Some(char_size_px) = tab.char_size_px {
+                    layout.set_char_size_px(char_size_px);
+                }
                 self.layouts.push(layout);
             }
-        }
-
-        if let Some(char_size_px) = session.char_size_px {
-            self.char_size_px = char_size_px;
         }
 
         log::info!("Session loaded from {}", self.session_file_path.to_str().unwrap());
@@ -102,11 +99,12 @@ impl TabGroup {
                 // initializing (empty dir)
                 bail!("Not ready");
             }
-            tabs.push(SessionTab { cwd });
+            tabs.push(SessionTab {
+                cwd: Some(cwd),
+                char_size_px: Some(layout.get_char_size_px()),
+            });
         }
         session.tabs = Some(tabs);
-
-        session.char_size_px = Some(self.char_size_px);
 
         let file = File::create(&self.session_file_path)?;
         let writer = BufWriter::new(file);
@@ -165,16 +163,6 @@ impl TabGroup {
             self.active_layout_idx = (self.active_layout_idx + 1) % self.layouts.len();
             any_event = true;
         }
-        if input.event_zoom_in {
-            input.event_zoom_in = false;
-            self.char_size_px = (self.char_size_px + 2.0).min(32.0);
-            any_event = true;
-        }
-        if input.event_zoom_out {
-            input.event_zoom_out = false;
-            self.char_size_px = (self.char_size_px - 2.0).max(4.0);
-            any_event = true;
-        }
 
         if any_event {
             let _ = self.write_session();
@@ -203,7 +191,6 @@ impl TabGroup {
             divider_color,
             err_bg_color,
             err_divider_color,
-            self.char_size_px,
             renderer,
             input
         );
