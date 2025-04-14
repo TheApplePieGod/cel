@@ -39,12 +39,26 @@ pub struct TabGroup {
     tab_width_px: f32,
     tab_height_px: f32,
     tab_gap_px: f32,
+    default_char_size_px: f32,
 }
 
 impl TabGroup {
-    pub fn new(width_screen: f32, height_screen: f32) -> Self {
+    pub fn new(
+        renderer: &Renderer,
+        width_screen: f32,
+        height_screen: f32
+    ) -> Self {
+        let default_char_size_px = 8.0;
         let mut sessions_file_path = get_config_dir();
         sessions_file_path.push("session.json");
+
+        let default_layout = Layout::new(
+            renderer,
+            width_screen,
+            height_screen,
+            default_char_size_px,
+            None
+        );
 
         Self {
             width_screen,
@@ -54,7 +68,7 @@ impl TabGroup {
             session_file_path: sessions_file_path,
             
             active_layout_idx: 0,
-            layouts: vec![Layout::new(1.0, 1.0, None)],
+            layouts: vec![ default_layout ],
 
             tab_underline_px: 2.0,
             tab_active_underline_px: 2.0,
@@ -62,10 +76,11 @@ impl TabGroup {
             tab_width_px: 200.0,
             tab_height_px: 25.0,
             tab_gap_px: 2.0,
+            default_char_size_px,
         }
     }
 
-    pub fn load_session(&mut self) -> Result<()> {
+    pub fn load_session(&mut self, renderer: &Renderer) -> Result<()> {
         let file = File::open(&self.session_file_path)?;
         let reader = BufReader::new(file);
         let session: Session = serde_json::from_reader(reader)?;
@@ -73,13 +88,18 @@ impl TabGroup {
         if let Some(tabs) = session.tabs {
             self.layouts.clear();
             for tab in tabs {
-                self.layouts.push(self.load_layout_from_session_tab(&tab));
+                self.layouts.push(self.load_layout_from_session_tab(renderer, &tab));
             }
         }
 
         log::info!("Session loaded from {}", self.session_file_path.to_str().unwrap());
 
-        // TODO: should resize here, but we don't have renderer
+        // Force resize to account for tab offset shift
+        self.resize(
+            renderer,
+            [self.width_screen, self.height_screen],
+            [self.offset_x_screen, self.offset_y_screen],
+        );
         
         Ok(())
     }
@@ -285,12 +305,19 @@ impl TabGroup {
         text_lines
     }
 
-    fn load_layout_from_session_tab(&self, tab: &SessionTab) -> Layout {
-        let mut layout = Layout::new(1.0, 1.0, tab.cwd.as_ref().map(|s| s.as_str()));
-        if let Some(char_size_px) = tab.char_size_px {
-            layout.set_char_size_px(char_size_px);
-        }
-        layout
+    fn load_layout_from_session_tab(&self, renderer: &Renderer, tab: &SessionTab) -> Layout {
+        let char_size_px = match tab.char_size_px {
+            Some(size) => size,
+            None => self.default_char_size_px
+        };
+
+        Layout::new(
+            renderer,
+            self.width_screen,
+            self.height_screen,
+            char_size_px,
+            tab.cwd.as_ref().map(|s| s.as_str())
+        )
     }
 
     fn serialize_layout_to_session_tab(&self, layout_idx: usize) -> SessionTab {
@@ -304,9 +331,15 @@ impl TabGroup {
 
     fn push_layout(&mut self, renderer: &Renderer, tab_data: Option<SessionTab>) {
         if let Some(tab_data) = tab_data {
-            self.layouts.push(self.load_layout_from_session_tab(&tab_data));
+            self.layouts.push(self.load_layout_from_session_tab(renderer, &tab_data));
         } else {
-            self.layouts.push(Layout::new(1.0, 1.0, None));
+            self.layouts.push(Layout::new(
+                renderer,
+                self.width_screen,
+                self.height_screen,
+                self.default_char_size_px,
+                None
+            ));
         }
 
         self.active_layout_idx = self.layouts.len() - 1;

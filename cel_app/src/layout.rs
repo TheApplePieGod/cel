@@ -27,7 +27,16 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn new(width_screen: f32, height_screen: f32, cwd: Option<&str>) -> Self {
+    pub fn new(
+        renderer: &Renderer,
+        width_screen: f32,
+        height_screen: f32,
+        char_size_px: f32,
+        cwd: Option<&str>
+    ) -> Self {
+        let num_cols = renderer.get_chars_per_line(width_screen, char_size_px);
+        let num_rows = 5;
+
         Self {
             width_screen,
             height_screen,
@@ -36,12 +45,12 @@ impl Layout {
 
             can_scroll_up: false,
             scroll_offset: 0.0,
-            context: TerminalContext::new(cwd),
+            context: TerminalContext::new(num_rows, num_cols, cwd),
 
             last_num_onscreen_widgets: 0,
 
-            char_size_px: 8.0,
-            widget_height_lines: 5.0
+            char_size_px,
+            widget_height_lines: num_rows as f32
         }
     }
 
@@ -164,10 +173,6 @@ impl Layout {
         self.height_screen = new_size_screen[1];
         self.offset_x_screen = new_offset_screen[0];
         self.offset_y_screen = new_offset_screen[1];
-    }
-
-    pub fn set_char_size_px(&mut self, char_size_px: f32) {
-        self.char_size_px = char_size_px;
     }
 
     pub fn get_char_size_px(&self) -> f32 {

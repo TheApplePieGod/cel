@@ -706,6 +706,11 @@ impl Renderer {
         self.disable_blending();
     }
 
+    pub fn get_chars_per_line(&self, width_screen: f32, char_width_px: f32) -> u32 {
+        let width_px = width_screen * self.width as f32;
+        ((width_px / char_width_px) as u32).max(1)
+    }
+
     pub fn compute_render_constants(
         &self,
         width_screen: f32,

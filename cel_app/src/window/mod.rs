@@ -84,20 +84,22 @@ impl Window {
         glfw_instance.set_swap_interval(glfw::SwapInterval::None);
         //glfw_instance.set_swap_interval(glfw::SwapInterval::Sync(1));
 
-        let mut tab_group = TabGroup::new(1.0, 1.0);
-        let _ = tab_group.load_session();
-
         let scale = window.get_content_scale();
         let initial_size_px = window.get_size();
+        let renderer = Renderer::new(
+            initial_size_px.0,
+            initial_size_px.1,
+            scale.into(),
+            AppState::current().as_ref().borrow().font.clone()
+        );
+
+        let mut tab_group = TabGroup::new(&renderer, 1.0, 1.0);
+        let _ = tab_group.load_session(&renderer);
+
         Self {
             glfw_instance,
             window: Rc::new(RefCell::new(window)),
-            renderer: Rc::new(RefCell::new(Renderer::new(
-                initial_size_px.0,
-                initial_size_px.1,
-                scale.into(),
-                AppState::current().as_ref().borrow().font.clone()
-            ))),
+            renderer: Rc::new(RefCell::new(renderer)),
             tab_group: Rc::new(RefCell::new(tab_group)),
             input: Rc::new(RefCell::new(Input::new())),
             event_receiver,

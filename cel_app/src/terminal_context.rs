@@ -19,9 +19,9 @@ pub struct TerminalContext {
 }
 
 impl TerminalContext {
-    pub fn new(cwd: Option<&str>) -> Self {
+    pub fn new(num_rows: u32, num_cols: u32, cwd: Option<&str>) -> Self {
         Self {
-            commands: Commands::new(cwd),
+            commands: Commands::new(num_rows, num_cols, cwd),
             widgets: vec![TerminalWidget::new()],
 
             input_buffer: vec![],

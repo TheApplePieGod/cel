@@ -21,15 +21,13 @@ pub struct Commands {
 }
 
 impl Commands {
-    pub fn new(cwd: Option<&str>) -> Self {
+    pub fn new(num_rows: u32, num_cols: u32, cwd: Option<&str>) -> Self {
         let pty_system = native_pty_system();
 
         // Create a new pty
-        let default_rows = 24;
-        let default_cols = 80;
         let pair = pty_system.openpty(PtySize {
-            rows: default_rows,
-            cols: default_cols,
+            rows: num_rows as u16,
+            cols: num_cols as u16,
             // Not all systems support pixel_width, pixel_height,
             // but it is good practice to set it to something
             // that matches the size of the selected font.  That
@@ -76,7 +74,8 @@ impl Commands {
 
                 # Enable UTF8
                 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-
+                # Indicate integration
+                export CEL_SHELL_INTEGRATION=1
                 # Reset ZDOTDIR
                 export ZDOTDIR="$OG_DIR"
 
@@ -106,6 +105,7 @@ impl Commands {
                     CEL_PROMPT_ID=$(( ${CEL_PROMPT_ID:-0} + 1 ))
                     printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
                     printf '\033]1338;%s\007' "$(pwd)"
+                    CEL_LAST_PWD=$(pwd)
                     # Scuffed, but guarantees that things don't get messed up
                     TERM=tmux-256color
                 }
@@ -175,8 +175,8 @@ impl Commands {
             child,
             active,
             output: vec![],
-            rows: default_rows as u32,
-            cols: default_cols as u32,
+            rows: num_rows,
+            cols: num_cols,
         }
     }
 
