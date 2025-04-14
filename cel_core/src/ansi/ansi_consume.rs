@@ -640,7 +640,8 @@ impl Performer {
         match cursor[1] >= buffer.len() {
             true => 1,
             false => {
-                let buffer_lines = (buffer[cursor[1]].len() + self.screen_width - 1) / self.screen_width;
+                // Always 1 line even if empty
+                let buffer_lines = ((buffer[cursor[1]].len() + self.screen_width - 1) / self.screen_width).max(1);
                 buffer_lines as u32
             }
         }
@@ -651,7 +652,8 @@ impl Performer {
         match cursor[1] >= buffer.len() || cursor[0] >= buffer[cursor[1]].len() {
             true => 0,
             false => {
-                let buffer_lines = (buffer[cursor[1]].len() + self.screen_width - 1) / self.screen_width;
+                // Always 1 line even if empty
+                let buffer_lines = ((buffer[cursor[1]].len() + self.screen_width - 1) / self.screen_width).max(1);
                 let cursor_line_idx = (cursor[0] / self.screen_width) + 1;
 
                 (buffer_lines - cursor_line_idx.min(buffer_lines)) as u32

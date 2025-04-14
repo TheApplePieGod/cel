@@ -143,10 +143,6 @@ impl Commands {
             let _ = writer.write_all("    Write-Host -NoNewline $oscSeq\r\n".as_bytes());
             let _ = writer.write_all("    \"PS \" + (Get-Location) + \"> \"\r\n".as_bytes());
             let _ = writer.write_all("}\r\n".as_bytes());
-        } else {
-            // TODO: fallback mode
-            log::warn!("Shell not supported!");
-            //panic!("Shell not supported");
         }
 
         let (tx, rx) = mpsc::channel();
