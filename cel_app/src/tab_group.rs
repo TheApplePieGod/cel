@@ -73,11 +73,7 @@ impl TabGroup {
         if let Some(tabs) = session.tabs {
             self.layouts.clear();
             for tab in tabs {
-                let mut layout = Layout::new(1.0, 1.0, tab.cwd.as_ref().map(|s| s.as_str()));
-                if let Some(char_size_px) = tab.char_size_px {
-                    layout.set_char_size_px(char_size_px);
-                }
-                self.layouts.push(layout);
+                self.layouts.push(self.load_layout_from_session_tab(&tab));
             }
         }
 
@@ -92,17 +88,14 @@ impl TabGroup {
         let mut session: Session = Default::default();
 
         let mut tabs = vec![];
-        for layout in &self.layouts {
-            let cwd = layout.get_current_directory().to_string();
-            if cwd.is_empty() {
+        for i in 0..self.layouts.len() {
+            let tab = self.serialize_layout_to_session_tab(i);
+            if tab.cwd.is_none() || tab.cwd.as_ref().unwrap().is_empty() {
                 // Do not overwrite the session if any of the tabs are currently still
                 // initializing (empty dir)
                 bail!("Not ready");
             }
-            tabs.push(SessionTab {
-                cwd: Some(cwd),
-                char_size_px: Some(layout.get_char_size_px()),
-            });
+            tabs.push(tab);
         }
         session.tabs = Some(tabs);
 
@@ -142,7 +135,11 @@ impl TabGroup {
         // Handle input events
         if input.event_new_tab {
             input.event_new_tab = false;
-            self.push_layout(renderer);
+            // Push layout copying settings from active layout
+            self.push_layout(
+                renderer,
+                Some(self.serialize_layout_to_session_tab(self.active_layout_idx))
+            );
             any_event = true;
         }
         if input.event_del_tab {
@@ -289,8 +286,30 @@ impl TabGroup {
         text_lines
     }
 
-    fn push_layout(&mut self, renderer: &Renderer) {
-        self.layouts.push(Layout::new(1.0, 1.0, None));
+    fn load_layout_from_session_tab(&self, tab: &SessionTab) -> Layout {
+        let mut layout = Layout::new(1.0, 1.0, tab.cwd.as_ref().map(|s| s.as_str()));
+        if let Some(char_size_px) = tab.char_size_px {
+            layout.set_char_size_px(char_size_px);
+        }
+        layout
+    }
+
+    fn serialize_layout_to_session_tab(&self, layout_idx: usize) -> SessionTab {
+        let layout = &self.layouts[layout_idx];
+        let cwd = layout.get_current_directory().to_string();
+        SessionTab {
+            cwd: Some(cwd),
+            char_size_px: Some(layout.get_char_size_px()),
+        }
+    }
+
+    fn push_layout(&mut self, renderer: &Renderer, tab_data: Option<SessionTab>) {
+        if let Some(tab_data) = tab_data {
+            self.layouts.push(self.load_layout_from_session_tab(&tab_data));
+        } else {
+            self.layouts.push(Layout::new(1.0, 1.0, None));
+        }
+
         self.active_layout_idx = self.layouts.len() - 1;
 
         // Force resize to account for tab offset shift
