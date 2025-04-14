@@ -97,6 +97,7 @@ impl TabGroup {
         // Force resize to account for tab offset shift
         self.resize(
             renderer,
+            false,
             [self.width_screen, self.height_screen],
             [self.offset_x_screen, self.offset_y_screen],
         );
@@ -138,7 +139,7 @@ impl TabGroup {
             }
 
             let input = if layout_idx == self.active_layout_idx { Some(input.deref_mut()) } else { None };
-            let (layout_event, layout_terminated) = self.layouts[layout_idx].update(input);
+            let (layout_event, layout_terminated) = self.layouts[layout_idx].update(renderer, input);
             any_event |= layout_event;
 
             if layout_terminated {
@@ -278,7 +279,13 @@ impl TabGroup {
         should_rerender
     }
 
-    pub fn resize(&mut self, renderer: &Renderer, new_size_screen: [f32; 2], new_offset_screen: [f32; 2]) {
+    pub fn resize(
+        &mut self,
+        renderer: &Renderer,
+        soft: bool,
+        new_size_screen: [f32; 2],
+        new_offset_screen: [f32; 2]
+    ) {
         let tab_height_screen = self.tab_height_px / renderer.get_height() as f32;
         let mut real_size = new_size_screen;
         let mut real_offset = new_offset_screen;
@@ -288,7 +295,7 @@ impl TabGroup {
             real_offset[1] += tab_height_screen;
         }
         for layout in &mut self.layouts {
-            layout.resize(real_size, real_offset);
+            layout.resize(renderer, soft, real_size, real_offset);
         }
     }
 
@@ -347,6 +354,7 @@ impl TabGroup {
         // Force resize to account for tab offset shift
         self.resize(
             renderer,
+            false,
             [self.width_screen, self.height_screen],
             [self.offset_x_screen, self.offset_y_screen],
         );
@@ -363,6 +371,7 @@ impl TabGroup {
         // Force resize to account for tab offset shift
         self.resize(
             renderer,
+            false,
             [self.width_screen, self.height_screen],
             [self.offset_x_screen, self.offset_y_screen],
         );

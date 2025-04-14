@@ -34,8 +34,8 @@ impl Layout {
         char_size_px: f32,
         cwd: Option<&str>
     ) -> Self {
-        let num_cols = renderer.get_chars_per_line(width_screen, char_size_px);
-        let num_rows = 5;
+        let max_rows = renderer.get_max_lines(height_screen, char_size_px);
+        let max_cols = renderer.get_chars_per_line(width_screen, char_size_px);
 
         Self {
             width_screen,
@@ -45,17 +45,17 @@ impl Layout {
 
             can_scroll_up: false,
             scroll_offset: 0.0,
-            context: TerminalContext::new(num_rows, num_cols, cwd),
+            context: TerminalContext::new(max_rows, max_cols, cwd),
 
             last_num_onscreen_widgets: 0,
 
             char_size_px,
-            widget_height_lines: num_rows as f32
+            widget_height_lines: 5.0,
         }
     }
 
     // Returns (any_event, terminated)
-    pub fn update(&mut self, input: Option<&mut Input>) -> (bool, bool) {
+    pub fn update(&mut self, renderer: &Renderer, input: Option<&mut Input>) -> (bool, bool) {
         let mut any_event = false;
 
         let mut input = input;
@@ -81,9 +81,11 @@ impl Layout {
 
             any_event |= input.consume_event(InputEvent::ZoomIn, || {
                 self.char_size_px = (self.char_size_px + 2.0).min(32.0);
+                self.resize(renderer, false, [self.width_screen, self.height_screen], [self.offset_x_screen, self.offset_y_screen]);
             });
             any_event |= input.consume_event(InputEvent::ZoomOut, || {
                 self.char_size_px = (self.char_size_px - 2.0).max(4.0);
+                self.resize(renderer, false, [self.width_screen, self.height_screen], [self.offset_x_screen, self.offset_y_screen]);
             });
         }
 
@@ -106,6 +108,7 @@ impl Layout {
         let char_size_px = self.char_size_px;
 
         // Reset all render states
+        // TODO: this is mid
         for ctx in self.context.get_widgets_mut().iter_mut() {
             // Check if the widget was just closed. If so, update scroll offset
             // for visual consistency
@@ -168,11 +171,25 @@ impl Layout {
         should_rerender
     }
 
-    pub fn resize(&mut self, new_size_screen: [f32; 2], new_offset_screen: [f32; 2]) {
+    pub fn resize(
+        &mut self,
+        renderer: &Renderer,
+        soft: bool,
+        new_size_screen: [f32; 2],
+        new_offset_screen: [f32; 2]
+    ) {
         self.width_screen = new_size_screen[0];
         self.height_screen = new_size_screen[1];
         self.offset_x_screen = new_offset_screen[0];
         self.offset_y_screen = new_offset_screen[1];
+
+        let max_rows = renderer.get_max_lines(self.height_screen, self.char_size_px);
+        let max_cols = renderer.get_chars_per_line(self.width_screen, self.char_size_px);
+
+        // Resize context after a hard resize
+        if !soft {
+            self.context.resize(max_rows, max_cols);
+        }
     }
 
     pub fn get_char_size_px(&self) -> f32 {

@@ -366,12 +366,6 @@ impl Renderer {
         unsafe { gl::Scissor(scaled_x, scaled_y, scaled_width, scaled_height) }
     }
 
-    pub fn compute_max_lines(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
-        let lines_per_screen = (1.0 / rc.char_size_y_screen).floor();
-
-        (lines_per_screen * screen_height) as u32
-    }
-
     /// Returns rendered line count
     pub fn render_terminal(
         &mut self,
@@ -709,6 +703,19 @@ impl Renderer {
     pub fn get_chars_per_line(&self, width_screen: f32, char_width_px: f32) -> u32 {
         let width_px = width_screen * self.width as f32;
         ((width_px / char_width_px) as u32).max(1)
+    }
+
+    pub fn get_max_lines(&self, height_screen: f32, char_width_px: f32) -> u32 {
+        let font = &mut self.font.as_ref().borrow_mut();
+        let char_size_y_px = (char_width_px * font.get_aspect_ratio()).round();
+        let char_size_y_screen = char_size_y_px / self.height as f32;
+        let lines_per_screen = (1.0 / char_size_y_screen).floor();
+        (lines_per_screen * height_screen) as u32
+    }
+
+    pub fn get_max_lines_from_rc(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
+        let lines_per_screen = (1.0 / rc.char_size_y_screen).floor();
+        (lines_per_screen * screen_height) as u32
     }
 
     pub fn compute_render_constants(

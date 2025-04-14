@@ -212,6 +212,10 @@ impl Commands {
         let _ = self.writer.write_all(input);
     }
 
+    pub fn get_size(&self) -> [u32; 2] {
+        [self.rows, self.cols]
+    }
+
     pub fn get_output(&self) -> &[u8] {
         &self.output
     }

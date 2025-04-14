@@ -12,8 +12,6 @@ const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
 
 pub struct TerminalWidget {
     ansi_handler: AnsiHandler,
-    chars_per_line: u32,
-    lines_per_screen: u32,
     
     last_render_stats: RenderStats,
     last_computed_height_screen: f32,
@@ -41,14 +39,9 @@ pub struct TerminalWidget {
 }
 
 impl TerminalWidget {
-    pub fn new() -> Self {
-        let chars_per_line = 180; // Sane default size
-        let lines_per_screen = 40;
-
+    pub fn new(max_rows: u32, max_cols: u32) -> Self {
         Self {
-            ansi_handler: AnsiHandler::new(chars_per_line, lines_per_screen),
-            chars_per_line,
-            lines_per_screen,
+            ansi_handler: AnsiHandler::new(max_rows, max_cols),
 
             last_render_stats: Default::default(),
             last_computed_height_screen: 0.0,
@@ -99,6 +92,10 @@ impl TerminalWidget {
         self.ansi_handler.reset();
     }
 
+    pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
+        self.ansi_handler.resize(max_cols, max_rows);
+    }
+
     pub fn reset_render_state(&mut self) {
         self.last_render_stats = Default::default();
         self.just_closed = false
@@ -118,7 +115,7 @@ impl TerminalWidget {
         // Align the widget such that the first line is at the top of the screen, rather
         // than the bottom always being at the bottom if the lines do not fully fill up
         // the screen space
-        let excess_space = position.max_size[1] - (self.last_line_height_screen * self.lines_per_screen as f32);
+        let excess_space = position.max_size[1] - (self.last_line_height_screen * self.ansi_handler.get_height() as f32);
         let mut real_position = *position;
         real_position.offset[1] -= excess_space;
 
@@ -135,18 +132,16 @@ impl TerminalWidget {
 
     pub fn get_debug_lines(&self) -> Vec<String> {
         let state = self.ansi_handler.get_terminal_state();
-        let active_size = self.get_terminal_size();
         let cur_elem = self.ansi_handler.get_element(self.last_mouse_pos_cell);
         
         let mouse_global = self.ansi_handler.get_global_cursor(&self.last_mouse_pos_cell);
         let mut text_lines = vec![
-            format!("Active size: {}x{}", active_size[0], active_size[1]),
             format!("Total lines: {}", state.screen_buffer.len()),
             format!("Rendered lines: {}", self.last_rendered_lines),
             format!("Height (screen): {}", self.last_computed_height_screen),
             format!("Line height: {}", self.last_line_height_screen),
             format!("Char width: {}", self.last_char_width_screen),
-            format!("Chars per line: {}", self.chars_per_line),
+            format!("Max size (cells): {}x{}", self.ansi_handler.get_width(), self.ansi_handler.get_height()),
             format!("Hovered cell:"),
             format!("  Screen Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
             format!("  Global Pos: ({}, {})", mouse_global[0], mouse_global[1]),
@@ -194,7 +189,6 @@ impl TerminalWidget {
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
     pub fn get_primary(&self) -> bool { self.primary }
     pub fn set_primary(&mut self, primary: bool) { self.primary = primary }
-    pub fn get_terminal_size(&self) -> [u32; 2] { [self.chars_per_line, self.lines_per_screen] }
     pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
     pub fn toggle_debug_char_numbers(&mut self) { self.debug_char_number = !self.debug_char_number }
     pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
@@ -215,8 +209,10 @@ impl TerminalWidget {
                 self.padding_px[1] / renderer.get_height() as f32
             ]
         };
+        let max_rows = self.ansi_handler.get_height();
+        let max_cols = self.ansi_handler.get_width();
         let last_height = self.last_line_height_screen * self.last_rendered_lines as f32;
-        let last_width = self.last_char_width_screen * self.chars_per_line as f32;
+        let last_width = self.last_char_width_screen * max_cols as f32;
         let mouse_pos_px = input.get_mouse_pos();
         let mouse_pos_screen = [
             mouse_pos_px[0] / renderer.get_width() as f32,
@@ -231,11 +227,11 @@ impl TerminalWidget {
         let widget_row = line_count as f32 * mouse_pos_widget[1];
         let screen_row =
             widget_row +
-            self.lines_per_screen.min(self.last_rendered_lines) as f32 -
+            max_rows.min(self.last_rendered_lines) as f32 -
             self.last_rendered_lines as f32;
-        let screen_col = self.chars_per_line as f32 * mouse_pos_widget[0];
+        let screen_col = max_cols as f32 * mouse_pos_widget[0];
 
-        if screen_col >= 0.0 && screen_col < self.chars_per_line as f32 && screen_row >= 0.0 && screen_row < self.last_rendered_lines as f32 {
+        if screen_col >= 0.0 && screen_col < max_cols as f32 && screen_row >= 0.0 && screen_row < self.last_rendered_lines as f32 {
             let cursor = [screen_col as usize, screen_row as usize];
 
             // Only send inputs to active widget
@@ -334,25 +330,16 @@ impl TerminalWidget {
         let width_px = renderer.get_width() as f32 * position.max_size[0];
         let max_chars = ((width_px - padding_px[0] * 2.0) / char_size_px) as u32;
         let rc = renderer.compute_render_constants(position.max_size[0], max_chars);
-        let num_screen_lines = renderer.compute_max_lines(&rc, position.max_size[1]);
         let line_size_screen = rc.char_size_y_screen;
+        let max_rows = self.ansi_handler.get_height();
 
         // Cap max render lines based on the alt screen buffer. Here, the state can
         // never be larger than the screen, so never render more than we are supposed
         // to, otherwise dead cells may become visible after resizing
         let max_render_lines = match self.ansi_handler.get_terminal_state().alt_screen_buffer_state {
-            BufferState::Active => num_screen_lines,
+            BufferState::Active => max_rows,
             _ => 99999999
         };
-
-        if max_chars != self.chars_per_line || num_screen_lines != self.lines_per_screen {
-            self.chars_per_line = max_chars;
-            self.lines_per_screen = num_screen_lines;
-
-            //log::info!("CPL: {}, LPS: {}", self.chars_per_line, self.lines_per_screen);
-
-            self.ansi_handler.resize(self.chars_per_line, self.lines_per_screen);
-        }
 
         let term_color = [bg_color[0], bg_color[1], bg_color[2]];
         self.ansi_handler.set_terminal_color(&term_color);

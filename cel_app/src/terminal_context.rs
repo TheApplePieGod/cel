@@ -19,10 +19,10 @@ pub struct TerminalContext {
 }
 
 impl TerminalContext {
-    pub fn new(num_rows: u32, num_cols: u32, cwd: Option<&str>) -> Self {
+    pub fn new(max_rows: u32, max_cols: u32, cwd: Option<&str>) -> Self {
         Self {
-            commands: Commands::new(num_rows, num_cols, cwd),
-            widgets: vec![TerminalWidget::new()],
+            commands: Commands::new(max_rows, max_cols, cwd),
+            widgets: vec![TerminalWidget::new(max_rows, max_cols)],
 
             input_buffer: vec![],
             output_buffer: vec![],
@@ -67,6 +67,11 @@ impl TerminalContext {
         any_event |= pio_event;
 
         (any_event, terminated)
+    }
+
+    pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
+        self.get_primary_widget_mut().resize(max_rows, max_cols);
+        self.commands.resize(max_rows, max_cols);
     }
 
     pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }
@@ -151,8 +156,9 @@ impl TerminalContext {
                     self.output_buffer.drain(0..=(i as usize));
                     if split && !self.debug_disable_splits {
                         // Primary widget is always the last one
+                        let size = self.commands.get_size();
                         self.widgets.last_mut().unwrap().set_primary(false);
-                        self.widgets.push(TerminalWidget::new());
+                        self.widgets.push(TerminalWidget::new(size[0], size[1]));
                         self.just_split = true;
                     }
                     self.just_split = split;
@@ -164,13 +170,8 @@ impl TerminalContext {
             }
         }
 
-        let last_widget = self.widgets.last_mut().unwrap();
-        let last_widget_size = last_widget.get_terminal_size();
-
-        // Next commands should obey the size of the current active widget
-        self.commands.resize(last_widget_size[1], last_widget_size[0]);
-
         // Only need to send input to the active widget
+        let last_widget = self.widgets.last_mut().unwrap();
         self.commands.send_input(&last_widget.consume_output_stream());
 
         self.commands.send_input(&self.input_buffer);

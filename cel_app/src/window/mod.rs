@@ -127,6 +127,7 @@ impl Window {
 
             // Update
             Self::on_resized_wrapper(
+                true,
                 w.get_size().into(),
                 renderer,
                 tab_group
@@ -283,6 +284,7 @@ impl Window {
         if resize {
             let mut tab_group = self.tab_group.as_ref().borrow_mut();
             Self::on_resized_wrapper(
+                false,
                 self.get_size(),
                 self.renderer.as_ref().borrow_mut().deref_mut(),
                 &mut tab_group
@@ -356,6 +358,7 @@ impl Window {
     }
 
     fn on_resized_wrapper(
+        soft: bool,
         new_size: [i32; 2],
         renderer: &mut Renderer,
         tab_group: &mut TabGroup
@@ -363,6 +366,7 @@ impl Window {
         renderer.update_viewport_size(new_size[0], new_size[1]);
         tab_group.resize(
             renderer,
+            soft,
             renderer.to_screen_i32(new_size),
             renderer.to_screen_i32([0, 0])
         );

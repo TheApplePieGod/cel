@@ -28,16 +28,16 @@ impl TerminalState {
 }
 
 impl AnsiHandler {
-    pub fn new(width: u32, height: u32) -> Self {
+    pub fn new(max_rows: u32, max_cols: u32) -> Self {
         let mut obj = Self {
-            performer: Performer::new(width, height),
+            performer: Performer::new(max_cols, max_rows),
             state_machine: Parser::new(),
 
             mouse_states: [(Default::default(), false); 256],
             scroll_states: [0.0; 2]
         };
 
-        obj.resize(width, height);
+        obj.resize(max_cols, max_rows);
 
         obj
     }
@@ -208,6 +208,14 @@ impl AnsiHandler {
 
     pub fn is_alt_screen_buf_active(&self) -> bool {
         self.performer.terminal_state.alt_screen_buffer_state == BufferState::Active
+    }
+
+    pub fn get_width(&self) -> u32 {
+        self.performer.screen_width as u32
+    }
+
+    pub fn get_height(&self) -> u32 {
+        self.performer.screen_height as u32
     }
 
     pub fn get_current_dir(&self) -> &str {
