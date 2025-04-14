@@ -77,20 +77,23 @@ impl Commands {
                 # Enable UTF8
                 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
+                # Reset ZDOTDIR
+                export ZDOTDIR="$OG_DIR"
+
                 # Source the user's original .zshxx files if they exist
-                if [ -f "$ZDOTDIR/.zshenv" ]; then
-                    source "$ZDOTDIR/.zshenv"
+                if [ -f "$OG_DIR/.zshenv" ]; then
+                    source "$OG_DIR/.zshenv"
                 fi
-                if [ -f "$ZDOTDIR/.zprofile" ]; then
-                    source "$ZDOTDIR/.zprofile"
+                if [ -f "$OG_DIR/.zprofile" ]; then
+                    source "$OG_DIR/.zprofile"
                 fi
-                if [ -f "$ZDOTDIR/.zshrc" ]; then
-                    source "$ZDOTDIR/.zshrc"
+                if [ -f "$OG_DIR/.zshrc" ]; then
+                    source "$OG_DIR/.zshrc"
                 fi
-                if [ -f "$ZDOTDIR/.zlogin" ]; then
-                    source "$ZDOTDIR/.zlogin"
+                if [ -f "$OG_DIR/.zlogin" ]; then
+                    source "$OG_DIR/.zlogin"
                 fi
-            "#.replace("$ZDOTDIR", &og_dir);
+            "#.replace("$OG_DIR", &og_dir);
 
             // Copy zsh init to config dir
             let _ = std::fs::write(config_dir.join(".zshrc"), init);
