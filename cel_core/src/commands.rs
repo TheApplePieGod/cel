@@ -62,7 +62,7 @@ impl Commands {
                 autoload -Uz add-zsh-hook
                 precmd() {
                     printf '\033]1339;%s\007' "$?"
-                    CEL_PROMPT_ID=$((CEL_PROMPT_ID + 1))
+                    CEL_PROMPT_ID=$((${CEL_PROMPT_ID:-0} + 1))
                     printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
                     printf '\033]1338;%s\007' "$(pwd)"
                     # Scuffed, but guarantees that things don't get messed up
@@ -94,6 +94,28 @@ impl Commands {
 
             // Copy zsh init to config dir
             let _ = std::fs::write(config_dir.join(".zshrc"), init);
+        } else if shell.contains("bash") {
+            cmd.args(["--login", "-i"]);
+
+            let init = r#"
+                precmd() {
+                    printf '\033]1339;%s\007' "$?"
+                    CEL_PROMPT_ID=$(( ${CEL_PROMPT_ID:-0} + 1 ))
+                    printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
+                    printf '\033]1338;%s\007' "$(pwd)"
+                    # Scuffed, but guarantees that things don't get messed up
+                    TERM=tmux-256color
+                }
+                PROMPT_COMMAND="precmd"
+
+                bind '"\e[1;3C": forward-word'
+                bind '"\e[1;3D": backward-word'
+
+                export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+            "#;
+
+            // Write the bash init file to the custom config directory (e.g., as ".bashrc").
+            let _ = std::fs::write(config_dir.join(".bashrc"), init);
         }
 
         cmd.get_argv_mut()[0] = shell.clone().into();
@@ -110,8 +132,9 @@ impl Commands {
 
         //writer.write_all(b"ls -la\r\n\0");
 
-        if shell.contains("zsh") {
-            // Handled above
+        // Extra init commands
+        if shell.contains("bash") {
+            let _ = writer.write_all(format!(" source '{}'\n", config_dir.join(".bashrc").to_str().unwrap()).as_bytes());
         } else if shell.contains("powershell") {
             let _ = writer.write_all("$global:CEL_PROMPT_ID = 0\r\n".as_bytes());
             let _ = writer.write_all("function prompt {\r\n".as_bytes());
