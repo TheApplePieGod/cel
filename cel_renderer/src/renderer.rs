@@ -380,6 +380,7 @@ impl Renderer {
         debug_col_number: bool,
         debug_show_cursor: bool,
     ) -> RenderStats {
+        let grid = &terminal_state.grid;
         let mut stats = RenderStats::default();
 
         // Setup render state
@@ -406,8 +407,9 @@ impl Renderer {
 
         // Starting line: either the last line in the buffer OR the cursor position
         // if the cursor happens to be below the last line in the buffer
-        let start_line = terminal_state.screen_buffer.len().saturating_sub(1);
-        let start_line = start_line.max(terminal_state.global_cursor[1]);
+        let buf_cursor = grid.get_buffer_cursor(&grid.cursor);
+        let start_line = grid.screen_buffer.len().saturating_sub(1);
+        let start_line = start_line.max(buf_cursor.0[1]);
 
         // Ending line: we can render at most lines_per_screen lines, so either that offset
         // from the bottom bounded by the line offset within the buffer
@@ -418,7 +420,7 @@ impl Renderer {
             x = base_x;
             y -= 1.0;
 
-            let line_exists = line_idx < terminal_state.screen_buffer.len();
+            let line_exists = line_idx < grid.screen_buffer.len();
             let y_pos_screen = y * rc.char_size_y_screen;
 
             // Break once we pass the top of the screen
@@ -428,17 +430,15 @@ impl Renderer {
 
             // Render cursor
             if should_render_cursor {
-                let cursor = &terminal_state.global_cursor;
-                if cursor[1] == line_idx {
+                if buf_cursor.0[1] == line_idx {
                     // Compute absolute position to account for wraps
                     should_render_cursor = false;
                     let width = match terminal_state.cursor_state.style {
                         // Adjust width of cursor based on char width
                         CursorStyle::Bar => 0.15,
                         _ => {
-                            if cursor[1] < terminal_state.screen_buffer.len() &&
-                               cursor[0] < terminal_state.screen_buffer[cursor[1]].len() {
-                                match terminal_state.screen_buffer[cursor[1]][cursor[0]].elem {
+                            if grid.cell_exists(&buf_cursor) {
+                                match grid.get_cell_opt(grid.cursor).unwrap().elem {
                                     CellContent::Char(_, w) => w as f32,
                                     CellContent::Grapheme(_, w) => w as f32,
                                     _ => 1.0
@@ -453,8 +453,8 @@ impl Renderer {
                         _ => 1.0,
                     };
                     let pos_min = [
-                        base_x + (cursor[0] % chars_per_line as usize) as f32,
-                        y + (cursor[0] / chars_per_line as usize) as f32,
+                        base_x + (buf_cursor.0[0] % chars_per_line as usize) as f32,
+                        y + (buf_cursor.0[0] / chars_per_line as usize) as f32,
                     ];
                     Self::push_fg_quad(
                         &[1.0, 0.0, 0.0],
@@ -483,9 +483,9 @@ impl Renderer {
             // Store bg color per line for optimization
             let mut prev_bg_color = terminal_state.background_color;
 
-            let line = &terminal_state.screen_buffer[line_idx];
+            let line = &grid.screen_buffer[line_idx];
             let num_lines_with_wrapping = ((line.len() + chars_per_line as usize - 1) / chars_per_line as usize).max(1);
-            let remaining_lines = end_line - line_idx;
+            let remaining_lines = end_line.saturating_sub(line_idx);
             let wrapped_start_line = (num_lines_with_wrapping - 1).saturating_sub(remaining_lines);
             let wrapped_start_char = wrapped_start_line * chars_per_line as usize;
             y += (num_lines_with_wrapping - 1).saturating_sub(wrapped_start_line) as f32;

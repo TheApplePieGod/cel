@@ -141,9 +141,9 @@ impl TerminalWidget {
             ],
             max_size: real_position.max_size
         };
-        self.render_terminal(renderer, &terminal_position, &rc, default_height, &bg_color);
+        self.render_terminal(renderer, &terminal_position, &rc, default_height, max_chars, &bg_color);
 
-        self.update_mouse_input(renderer, input, &real_position, &rc, &padding_px);
+        self.update_mouse_input(renderer, input, &real_position, &rc, max_chars, &padding_px);
 
         self.render_overlay(input, renderer, &real_position)
     }
@@ -152,15 +152,13 @@ impl TerminalWidget {
         let state = self.ansi_handler.get_terminal_state();
         let cur_elem = self.ansi_handler.get_element(self.last_mouse_pos_cell);
         
-        let mouse_global = self.ansi_handler.get_global_cursor(&self.last_mouse_pos_cell);
         let mut text_lines = vec![
-            format!("Total lines: {}", state.screen_buffer.len()),
+            format!("Total lines: {}", state.grid.screen_buffer.len()),
             format!("Rendered lines: {}", self.last_rendered_lines),
             format!("Height (screen): {}", self.last_computed_height_screen),
             format!("Max size (cells): {}x{}", self.ansi_handler.get_width(), self.ansi_handler.get_height()),
             format!("Hovered cell:"),
             format!("  Screen Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
-            format!("  Global Pos: ({}, {})", mouse_global[0], mouse_global[1]),
         ];
 
         text_lines.extend(
@@ -214,12 +212,12 @@ impl TerminalWidget {
         input: &Input,
         position: &LayoutPosition,
         rc: &RenderConstants,
+        max_cols: u32,
         padding_px: &[f32; 2]
     ) {
         // Compute the target cell based on the mouse position and widget position
 
         let max_rows = self.ansi_handler.get_height();
-        let max_cols = self.ansi_handler.get_width();
         let last_lines = self.last_rendered_lines;
         let height = rc.char_size_y_screen * last_lines as f32;
         let width = rc.char_size_x_screen * max_cols as f32;
@@ -325,6 +323,7 @@ impl TerminalWidget {
         position: &LayoutPosition,
         rc: &RenderConstants,
         default_height: f32,
+        max_cols: u32,
         bg_color: &[f32; 4]
     ) {
         let mut line_offset = 0;
@@ -333,13 +332,12 @@ impl TerminalWidget {
         // If the alt screen buf is active, we can ignore special rendering styles
         // Also, ensure the most recent screen is visible (home cursor)
         if self.ansi_handler.is_alt_screen_buf_active() {
-            line_offset = self.ansi_handler.get_terminal_state().global_cursor_home[1] as u32;
+            line_offset = self.ansi_handler.get_terminal_state().grid.top_index as u32;
             padding_px = [0.0, 0.0];
         }
 
         let line_size_screen = rc.char_size_y_screen;
         let max_rows = self.ansi_handler.get_height();
-        let max_cols = self.ansi_handler.get_width();
 
         // Cap max render lines based on the alt screen buffer. Here, the state can
         // never be larger than the screen, so never render more than we are supposed
