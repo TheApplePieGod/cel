@@ -60,7 +60,7 @@ impl Commands {
                 autoload -Uz add-zsh-hook
                 precmd() {
                     printf '\033]1339;%s\007' "$?"
-                    CEL_PROMPT_ID=$((${CEL_PROMPT_ID:-0} + 1))
+                    CEL_PROMPT_ID=$((CEL_PROMPT_ID + 1))
                     printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
                     printf '\033]1338;%s\007' "$(pwd)"
                     # Scuffed, but guarantees that things don't get messed up

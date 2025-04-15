@@ -118,6 +118,10 @@ impl Layout {
             ctx.reset_render_state();
         }
 
+        let rc = renderer.compute_render_constants(self.width_screen, self.context.get_size()[1]);
+        let line_size_screen = rc.char_size_y_screen;
+        let min_widget_height = widget_height * line_size_screen;
+
         renderer.enable_scissor();
         renderer.update_scissor_screen(
             self.offset_x_screen,
@@ -129,8 +133,7 @@ impl Layout {
         let mut should_rerender = false;
         let mut count = 0;
         let mut min_local_offset: f32 = 1.0;
-        self.map_onscreen_widgets(|ctx, local_offset, _global_offset| {
-            let min_widget_height = widget_height * ctx.get_last_line_height_screen();
+        self.map_onscreen_widgets(line_size_screen, |ctx, local_offset, _global_offset| {
             let max_size = match ctx.get_expanded() {
                 true => height_screen,
                 false => min_widget_height,
@@ -237,6 +240,7 @@ impl Layout {
 
     fn map_onscreen_widgets(
         &mut self,
+        line_size_screen: f32,
         mut func: impl FnMut(&mut TerminalWidget, f32, f32)
     ) {
         let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
@@ -248,6 +252,7 @@ impl Layout {
         // Draw visible widgets except the primary
         let top = self.offset_y_screen;
         let bottom = self.height_screen + self.offset_y_screen;
+        let min_widget_height = self.widget_height_lines * line_size_screen;
         let mut cur_offset = bottom;
         for ctx in self.context.get_widgets_mut().iter_mut().rev() {
             // Skip processing of non-primary if fullscreen
@@ -259,29 +264,29 @@ impl Layout {
                 continue;
             }
 
-            let last_height = ctx.get_last_computed_height_screen();
+            let last_height = ctx.get_last_computed_height_screen().max(min_widget_height);
             let start_offset = cur_offset - scroll_offset - last_height;
 
             if !ctx.get_primary() && start_offset < bottom {
                 func(ctx, start_offset, cur_offset);
             }
 
-            let end_offset = start_offset + last_height;
+            let cur_height = ctx.get_last_computed_height_screen();
+            let end_offset = start_offset + cur_height;
             if end_offset <= top {
                 break;
             }
 
-            cur_offset -= last_height;
+            cur_offset -= cur_height;
         }
 
         // Last (primary) widget is always rendered at the bottom
         // It should snap to the bottom of the last widget when scrolling
         // such that it grows when scrolling down and shrinks when scrolling up,
         // up to a minimum size
-        let last_widget = self.context.get_widgets_mut().last_mut().unwrap();
-        let min_widget_height = self.widget_height_lines * last_widget.get_last_line_height_screen();
-        let start = bottom - last_widget.get_last_computed_height_screen();
+        let ctx = self.context.get_primary_widget_mut();
+        let start = bottom - ctx.get_last_computed_height_screen();
         let start = (start - scroll_offset).min(bottom - min_widget_height);
-        func(last_widget, start, bottom);
+        func(ctx, start, bottom);
     }
 }

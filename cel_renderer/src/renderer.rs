@@ -393,45 +393,37 @@ impl Renderer {
         let base_x = ((screen_offset[0] / rc.char_size_x_screen) * rc.char_size_x_px).floor() / rc.char_size_x_px;
         let base_y = ((screen_offset[1] / rc.char_size_y_screen) * rc.char_size_y_px).floor() / rc.char_size_y_px;
         let mut x = base_x;
-        let mut y = base_y - 1.0;
+        let mut y = base_y;
         let mut should_render_cursor = debug_show_cursor
             || (terminal_state.cursor_state.visible
                 && (!terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5));
         let mut rendered_line_count = 0;
-        let mut max_line_count = 0;
         let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
         let mut raster_quads: Vec<FgQuadData> = vec![];
         let mut bg_quads: Vec<BgQuadData> = vec![];
 
-        //
-        // Populate vertex buffers
-        //
+        // Rendering strategy: render from the last line upward
 
-        let line_offset = line_offset as usize;
-        'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
+        // Starting line: either the last line in the buffer OR the cursor position
+        // if the cursor happens to be below the last line in the buffer
+        let start_line = terminal_state.screen_buffer.len().saturating_sub(1);
+        let start_line = start_line.max(terminal_state.global_cursor[1]);
+
+        // Ending line: we can render at most lines_per_screen lines, so either that offset
+        // from the bottom bounded by the line offset within the buffer
+        let end_line = start_line.saturating_sub(lines_per_screen as usize).max(line_offset as usize);
+
+        'outer: for line_idx in (end_line..=start_line).rev() {
             rendered_line_count += 1;
             x = base_x;
-            y += 1.0;
+            y -= 1.0;
 
             let line_exists = line_idx < terminal_state.screen_buffer.len();
             let y_pos_screen = y * rc.char_size_y_screen;
 
-            // Handle offscreen lines
-            if y_pos_screen < 0.0 || y_pos_screen > 1.0 {
-                if !line_exists {
-                    break;
-                }
-
-                let line = &terminal_state.screen_buffer[line_idx];
-                let line_occupancy = (line.len().max(1) - 1) as u32 / chars_per_line + 1;
-                if y_pos_screen + rc.char_size_y_screen * line_occupancy as f32 <= 0.0 {
-                    // Skip rendering iff this line is completely offscreen
-                    rendered_line_count += line_occupancy - 1;
-                    y += (line_occupancy  - 1) as f32;
-                    max_line_count = rendered_line_count;
-
-                    continue;
-                }
+            // Break once we pass the top of the screen
+            if y_pos_screen < 0.0{
+                break;
             }
 
             // Render cursor
@@ -484,25 +476,24 @@ impl Renderer {
 
             if !line_exists {
                 // Continue instead of breaking here so we can render the cursor
+                // TODO: render abs position of the cursor rather than rely on loop
                 continue;
             }
-
-            max_line_count = rendered_line_count;
 
             // Store bg color per line for optimization
             let mut prev_bg_color = terminal_state.background_color;
 
             let line = &terminal_state.screen_buffer[line_idx];
-            for char_idx in 0..line.len() {
-                if rendered_line_count > lines_per_screen {
-                    max_line_count = lines_per_screen;
-                    break 'outer;
-                }
+            let num_lines_with_wrapping = ((line.len() + chars_per_line as usize - 1) / chars_per_line as usize).max(1);
+            let remaining_lines = end_line - line_idx;
+            let wrapped_start_line = (num_lines_with_wrapping - 1).saturating_sub(remaining_lines);
+            let wrapped_start_char = wrapped_start_line * chars_per_line as usize;
+            y += (num_lines_with_wrapping - 1).saturating_sub(wrapped_start_line) as f32;
 
+            for char_idx in wrapped_start_char..line.len() {
                 let max_x = base_x + chars_per_line as f32 - 0.001;
                 let should_wrap = wrap && x >= max_x;
                 if should_wrap {
-                    max_line_count += 1;
                     rendered_line_count += 1;
                     stats.wrapped_line_count += 1;
                     x = base_x;
@@ -603,7 +594,8 @@ impl Renderer {
 
         self.draw_text_quads(&rc, &[0.0, 0.0], &bg_quads, &msdf_quads, &raster_quads);
 
-        stats.rendered_line_count = max_line_count;
+        stats.rendered_line_count = rendered_line_count;
+
         stats
     }
 
