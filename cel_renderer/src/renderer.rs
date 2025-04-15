@@ -484,23 +484,7 @@ impl Renderer {
             let mut prev_bg_color = terminal_state.background_color;
 
             let line = &grid.screen_buffer[line_idx];
-            let num_lines_with_wrapping = ((line.len() + chars_per_line as usize - 1) / chars_per_line as usize).max(1);
-            let remaining_lines = end_line.saturating_sub(line_idx);
-            let wrapped_start_line = (num_lines_with_wrapping - 1).saturating_sub(remaining_lines);
-            let wrapped_start_char = wrapped_start_line * chars_per_line as usize;
-            y += (num_lines_with_wrapping - 1).saturating_sub(wrapped_start_line) as f32;
-
-            for char_idx in wrapped_start_char..line.len() {
-                let max_x = base_x + chars_per_line as f32 - 0.001;
-                let should_wrap = wrap && x >= max_x;
-                if should_wrap {
-                    rendered_line_count += 1;
-                    stats.wrapped_line_count += 1;
-                    x = base_x;
-                    y += 1.0;
-                    prev_bg_color = terminal_state.background_color;
-                }
-
+            for char_idx in 0..line.len() {
                 let elem = &line[char_idx];
 
                 let fg_color = elem.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);

@@ -7,7 +7,7 @@ impl AnsiBuilder {
         }
     }
 
-    // Raw
+    // Print
 
     pub fn add_text(self, text: &str) -> Self {
         self.add_raw(text.as_bytes())

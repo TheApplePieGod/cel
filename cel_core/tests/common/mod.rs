@@ -1,5 +1,6 @@
 use cel_core::ansi::{AnsiBuilder, AnsiHandler, CellContent, ScreenBuffer, TerminalState};
 use log::{Record, Level, Metadata};
+use either::Either;
 
 static LOGGER: ConsoleLogger = ConsoleLogger;
 
@@ -46,6 +47,25 @@ pub fn get_final_state(builder: AnsiBuilder) -> TerminalState {
     handler.get_terminal_state().clone()
 }
 
+// width, height
+pub fn get_final_state_with_resizes(actions: Vec<Either<AnsiBuilder, (u32, u32)>>) -> TerminalState {
+    let (mut handler, _) = setup();
+
+    for action in actions.into_iter() {
+        match action {
+            Either::Left(builder) => {
+                let stream = builder.build_stream();
+                handler.handle_sequence_bytes(&stream, false);
+            },
+            Either::Right(resize) => {
+                handler.resize(resize.0, resize.1);
+            }
+        }
+    }
+
+    handler.get_terminal_state().clone()
+}
+
 fn print_buffer_contents(buf: &Vec<Vec<String>>) -> String {
     let mut res = format!("<len={}>\n", buf.len());
     for (i, line) in buf.iter().enumerate() {
@@ -63,8 +83,8 @@ fn print_buffer_contents(buf: &Vec<Vec<String>>) -> String {
 
 pub fn assert_buffer_chars_eq(test: &ScreenBuffer, expect: &Vec<Vec<&str>>)  {
     let test_str = print_buffer_contents(&test.iter().map(|l|
-        l.iter().map(|e|
-            match &e.elem {
+        l.iter().map(|e| {
+            let content = match &e.elem {
                 CellContent::Char(c, _) => match c {
                     '\0' => ".".to_string(),
                     _ => c.to_string()
@@ -72,8 +92,13 @@ pub fn assert_buffer_chars_eq(test: &ScreenBuffer, expect: &Vec<Vec<&str>>)  {
                 CellContent::Grapheme(str, _) => str.clone(),
                 CellContent::Continuation(width) => format!("+{}", width),
                 CellContent::Empty => ".".to_string(),
+            };
+            if e.is_wrap {
+                format!("|{}", content)
+            } else {
+                content
             }
-        ).collect()
+        }).collect()
     ).collect());
     let expect_str = print_buffer_contents(&expect.iter().map(|l|
         l.iter().map(|e| e.to_string()).collect()
