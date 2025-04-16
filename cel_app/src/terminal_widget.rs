@@ -332,7 +332,7 @@ impl TerminalWidget {
         // If the alt screen buf is active, we can ignore special rendering styles
         // Also, ensure the most recent screen is visible (home cursor)
         if self.ansi_handler.is_alt_screen_buf_active() {
-            line_offset = self.ansi_handler.get_terminal_state().grid.top_index as u32;
+            line_offset = self.ansi_handler.get_terminal_state().grid.get_top_index() as u32;
             padding_px = [0.0, 0.0];
         }
 

@@ -245,7 +245,6 @@ mod tests {
             vec!["|1", "2", "3"],
         ];
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
-        assert_eq!(state.grid.top_index, 2);
         assert_eq!(state.grid.cursor, [3, 4]);
         assert!(!state.grid.wants_wrap);
     }
@@ -267,7 +266,6 @@ mod tests {
             vec!["|1", "2", "3"]
         ];
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
-        assert_eq!(state.grid.top_index, 1);
         assert!(!state.grid.wants_wrap);
     }
 
@@ -293,7 +291,6 @@ mod tests {
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
         assert_eq!(state.grid.margin.top, 1);
         assert_eq!(state.grid.margin.bottom, 3);
-        assert_eq!(state.grid.top_index, 0);
         assert!(!state.grid.wants_wrap);
     }
 
@@ -321,7 +318,6 @@ mod tests {
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
         assert_eq!(state.grid.margin.top, 1);
         assert_eq!(state.grid.margin.bottom, 3);
-        assert_eq!(state.grid.top_index, 1);
         assert!(!state.grid.wants_wrap);
     }
 
@@ -345,7 +341,6 @@ mod tests {
             vec!["|1", "2", "3"],
         ];
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
-        assert_eq!(state.grid.top_index, 1);
         assert_eq!(state.grid.cursor, [1, 0]);
         assert!(!state.grid.wants_wrap);
     }
@@ -481,8 +476,7 @@ mod tests {
             vec!["|8", "9", "0", "1", "2", "3"],
         ];
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
-        assert_eq!(state.grid.top_index, 2);
-        assert_eq!(state.grid.cursor, [6, 2]);
+        assert_eq!(state.grid.cursor, [6, 4]);
         assert!(!state.grid.wants_wrap);
     }
 
@@ -510,7 +504,6 @@ mod tests {
             vec!["|3"],
         ];
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
-        assert_eq!(state.grid.top_index, 5);
         assert_eq!(state.grid.cursor, [1, 3]);
         assert!(!state.grid.wants_wrap);
     }

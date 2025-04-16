@@ -11,7 +11,6 @@ pub struct BufferCursor(pub [usize; 2]);
 pub struct TerminalGrid {
     pub screen_buffer: ScreenBuffer,
     pub cursor: Cursor,
-    pub top_index: usize,
     pub width: usize,
     pub height: usize,
     pub margin: Margin,
@@ -25,7 +24,6 @@ impl TerminalGrid {
         Self {
             screen_buffer: Default::default(),
             cursor: [0, 0],
-            top_index: 0,
             width,
             height,
             margin: Margin::from_dimensions(width, height),
@@ -48,7 +46,7 @@ impl TerminalGrid {
         }
 
         if fill_height {
-            self.ensure_cursor(&self.get_buffer_cursor(&[0, self.height - 1]));
+            self.ensure_cursor_line(&self.get_buffer_cursor(&[0, self.height - 1]));
         }
     }
 
@@ -116,7 +114,7 @@ impl TerminalGrid {
     /// Gets the buffer line at the provided cursor, appending empty lines if necessary
     pub fn get_line(&mut self, cursor: Cursor) -> &mut ScreenBufferLine {
         let cursor = self.get_buffer_cursor(&cursor);
-        self.ensure_cursor(&cursor);
+        self.ensure_cursor_line(&cursor);
         &mut self.screen_buffer[cursor.0[1]]
     }
 
@@ -132,8 +130,8 @@ impl TerminalGrid {
 
     /// Gets the cell at the provided cursor, appending empty lines and cells if necessary
     pub fn get_cell(&mut self, cursor: Cursor) -> &mut ScreenBufferElement {
-        // Cursor ensured within get_line
         let buf_cursor = self.get_buffer_cursor(&cursor);
+        self.ensure_cursor_cell(&buf_cursor);
         let line = self.get_line(cursor);
         &mut line[buf_cursor.0[0]]
     }
@@ -160,10 +158,15 @@ impl TerminalGrid {
         [self.width - 1, self.height - 1]
     }
 
+    /// Gets the first buffer line index of the current screen
+    pub fn get_top_index(&self) -> usize {
+        self.screen_buffer.len().saturating_sub(self.height)
+    }
+
     /// Get the buffer-indexed cursor for the provided cursor 
     pub fn get_buffer_cursor(&self, cursor: &Cursor) -> BufferCursor {
         let cursor = self.clamp_cursor(*cursor);
-        BufferCursor([cursor[0], cursor[1] + self.top_index])
+        BufferCursor([cursor[0], cursor[1] + self.get_top_index()])
     }
 
     /// Set the current cursor position
@@ -174,15 +177,9 @@ impl TerminalGrid {
 
     /// Set the current cursor position given a buffer cursor, potentially extending the top index
     pub fn set_buf_cursor(&mut self, cursor: BufferCursor) {
+        self.ensure_cursor_line(&cursor);
         self.cursor[0] = cursor.0[0];
-        self.cursor[1] = cursor.0[1].saturating_sub(self.top_index);
-        if self.cursor[1] >= self.height {
-            // Update top index to support new cursor
-            let diff = self.cursor[1] - self.height + 1;
-            self.top_index += diff;
-            self.cursor[1] -= diff;
-        }
-        self.wants_wrap = false;
+        self.cursor[1] = cursor.0[1] - self.get_top_index();
     }
 
     /// Set the current margins
@@ -250,11 +247,16 @@ impl TerminalGrid {
         self.line_exists(buf_cursor) && buf_cursor.0[0] < self.screen_buffer[buf_cursor.0[1]].len()
     }
 
-    /// Ensures there are enough lines and chars in the buffer to support the provided cursor position
-    pub fn ensure_cursor(&mut self, buf_cursor: &BufferCursor) {
+    /// Ensures there are enough lines in the buffer to support the provided cursor position
+    pub fn ensure_cursor_line(&mut self, buf_cursor: &BufferCursor) {
         if buf_cursor.0[1] >= self.screen_buffer.len() {
             self.screen_buffer.resize(buf_cursor.0[1] + 1, vec![]);
         }
+    }
+
+    /// Ensures there are enough lines and chars in the buffer to support the provided cursor position
+    pub fn ensure_cursor_cell(&mut self, buf_cursor: &BufferCursor) {
+        self.ensure_cursor_line(buf_cursor);
         let line = &mut self.screen_buffer[buf_cursor.0[1]];
         if buf_cursor.0[0] >= line.len() {
             line.resize(buf_cursor.0[0] + 1, Default::default());
@@ -374,11 +376,11 @@ impl TerminalGrid {
                                  && margin.right == self.width - 1;
 
         if support_scrollback {
-            // Scroll the region with scrollback by updating the top_index
+            // Scroll the region with scrollback by pushing an empty line
 
             match up {
-                true => { self.top_index += 1; },
-                false => { self.top_index = self.top_index.saturating_sub(1); },
+                true => { self.screen_buffer.push(vec![]); },
+                false => { self.screen_buffer.pop(); },
             }
         } else {
             // Start by isolating the lines in the region to scroll. That is, split
@@ -761,7 +763,6 @@ impl TerminalGrid {
         // Finally update the screen buffer and cursor.
         self.screen_buffer = new_buffer;
         if let Some(cursor) = new_cursor {
-            //log::warn!("{:?}", cursor);
             self.set_buf_cursor(cursor);
         } else {
             // Cursor was out of bounds, so special case handling
