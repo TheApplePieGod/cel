@@ -387,11 +387,11 @@ impl TerminalGrid {
         // physically scroll the buffer in memory when adding new characters
         let support_scrollback = margin.top == 0
                                  && margin.left == 0
-                                 && margin.bottom == self.width - 1
+                                 && margin.bottom == self.height - 1
                                  && margin.right == self.width - 1;
 
         if support_scrollback {
-            // Scroll the region with scrollback by pushing an empty line
+            // Scroll the region with scrollback by pushing/popping
 
             match up {
                 true => { self.screen_buffer.push(vec![]); },

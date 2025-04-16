@@ -1,4 +1,5 @@
 use cel_core::ansi::{CellContent, CursorStyle, StyleFlags, TerminalState};
+use std::ops::RangeInclusive;
 use std::time::{Duration, SystemTime};
 use std::{
     cell::RefCell,
@@ -366,6 +367,44 @@ impl Renderer {
         unsafe { gl::Scissor(scaled_x, scaled_y, scaled_width, scaled_height) }
     }
 
+    pub fn compute_visible_lines(
+        &self,
+        terminal_state: &TerminalState,
+        line_size_screen: f32,
+        line_offset: u32,
+        min_lines: u32,
+        screen_offset_y: f32,
+    ) -> (usize, usize, RangeInclusive<usize>) {
+        // Starting line: either the last visible line in the buffer OR the cursor position
+        // if the cursor happens to be below the last line in the buffer and visible
+        let grid = &terminal_state.grid;
+        let buf_cursor = grid.get_buffer_cursor(&grid.cursor);
+        let mut start_line = grid.screen_buffer.len().saturating_sub(1);
+        if terminal_state.cursor_state.visible {
+            start_line = start_line.max(buf_cursor.0[1]);
+        }
+        let bottom_line = start_line;
+
+        // If the starting position is below the bottom of the screen, update the start
+        // position to only render the first visible line
+        if screen_offset_y > 1.0 {
+            let start_offset = ((screen_offset_y - 1.0) / line_size_screen).floor();
+            start_line = start_line.saturating_sub(start_offset as usize);
+        }
+
+        // Ending line: we can render at most lines_per_screen lines, so either that offset
+        // from the bottom bounded by the line offset within the buffer
+        let lines_per_screen = (1.0 / line_size_screen).ceil();
+        let end_line = start_line.saturating_sub(lines_per_screen as usize).max(line_offset as usize);
+
+        // Ensure the total lines are >= min_lines
+        let total_lines = start_line - end_line + 1;
+        start_line += (min_lines as usize).saturating_sub(total_lines);
+
+        // Total lines, offset from bottom, range
+        (start_line - end_line + 1, bottom_line.saturating_sub(start_line), end_line..=start_line)
+    }
+
     /// Returns rendered line count
     pub fn render_terminal(
         &mut self,
@@ -373,9 +412,8 @@ impl Renderer {
         screen_size: &[f32; 2],
         screen_offset: &[f32; 2],
         chars_per_line: u32,
-        lines_per_screen: u32,
         line_offset: u32,
-        wrap: bool,
+        min_lines: u32,
         debug_line_number: bool,
         debug_col_number: bool,
         debug_show_cursor: bool,
@@ -405,26 +443,25 @@ impl Renderer {
 
         // Rendering strategy: render from the last line upward
 
-        // Starting line: either the last line in the buffer OR the cursor position
-        // if the cursor happens to be below the last line in the buffer
+        let (_, start_offset, visible_lines) = self.compute_visible_lines(
+            terminal_state,
+            rc.char_size_y_screen,
+            line_offset,
+            min_lines,
+            screen_offset[1]
+        );
+
+        // Offset the initial rendering position based on offset from the bottom
+        y -= start_offset as f32;
+
         let buf_cursor = grid.get_buffer_cursor(&grid.cursor);
-        let start_line = grid.screen_buffer.len().saturating_sub(1);
-        let start_line = start_line.max(buf_cursor.0[1]);
-
-        // Ending line: we can render at most lines_per_screen lines, so either that offset
-        // from the bottom bounded by the line offset within the buffer
-        let end_line = start_line.saturating_sub(lines_per_screen as usize).max(line_offset as usize);
-
-        'outer: for line_idx in (end_line..=start_line).rev() {
+        'outer: for line_idx in visible_lines.rev() {
             rendered_line_count += 1;
             x = base_x;
             y -= 1.0;
 
-            let line_exists = line_idx < grid.screen_buffer.len();
-            let y_pos_screen = y * rc.char_size_y_screen;
-
             // Break once we pass the top of the screen
-            if y_pos_screen < 0.0{
+            if y <= -1.0 {
                 break;
             }
 
@@ -474,6 +511,7 @@ impl Renderer {
                 }
             }
 
+            let line_exists = line_idx < grid.screen_buffer.len();
             if !line_exists {
                 // Continue instead of breaking here so we can render the cursor
                 // TODO: render abs position of the cursor rather than rely on loop
