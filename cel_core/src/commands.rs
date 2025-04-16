@@ -197,6 +197,7 @@ impl Commands {
 
         self.rows = rows;
         self.cols = cols;
+
         let _ = self.pty_pair.master.resize(PtySize {
             rows: rows as u16,
             cols: cols as u16,

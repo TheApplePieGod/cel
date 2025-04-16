@@ -14,6 +14,7 @@ pub struct TerminalGrid {
     pub width: usize,
     pub height: usize,
     pub margin: Margin,
+    pub autowrap: bool,
     pub wants_wrap: bool,
 }
 
@@ -27,6 +28,7 @@ impl TerminalGrid {
             width,
             height,
             margin: Margin::from_dimensions(width, height),
+            autowrap: true,
             wants_wrap: false,
         }
     }
@@ -53,8 +55,11 @@ impl TerminalGrid {
     /// Prints a character at the current cursor position. Performs complex logic
     /// and may mutate cursor.
     pub fn print_char(&mut self, c: char, style: &StyleState) {
+        // Ensure wrap is not set if autowrap is disabled
+        self.wants_wrap &= self.autowrap;
+
         // Handle wrapping only when we place a character
-        if self.wants_wrap {
+        if self.wants_wrap && self.autowrap {
             self.wants_wrap = false;
             self.cursor[0] = 0;
             self.push_cursor_vertically(true);
@@ -65,7 +70,7 @@ impl TerminalGrid {
         let num_advances = self.put_char_at_cursor(c, style);
         for adv in 0..num_advances {
             // Handle wrapping only when we place a character
-            if self.wants_wrap {
+            if self.wants_wrap && self.autowrap {
                 self.wants_wrap = false;
                 self.cursor[0] = 0;
                 self.push_cursor_vertically(true);
@@ -76,7 +81,8 @@ impl TerminalGrid {
             // update the cursor directly
             let wrap = self.cursor[0] + 1 >= self.width;
             if wrap {
-                self.wants_wrap = true;
+                // Even if autowrap is disabled, don't advance the cursor past the screen
+                self.wants_wrap = self.autowrap;
             } else {
                 // Advance the cursor
                 self.cursor[0] += 1;
@@ -85,7 +91,7 @@ impl TerminalGrid {
             log::trace!(
                 "Print {:?} (adv {}) {}", c,
                 adv,
-                match wrap {
+                match wrap && self.autowrap {
                     true => "<NEXT WRAP>",
                     false => ""
                 },
@@ -140,7 +146,11 @@ impl TerminalGrid {
     pub fn get_cell_opt(&self, cursor: Cursor) -> Option<&ScreenBufferElement> {
         let buf_cursor = self.get_buffer_cursor(&cursor);
         let line = self.get_line_opt(cursor)?;
-        Some(&line[buf_cursor.0[0]])
+        if self.cell_exists(&buf_cursor) {
+            Some(&line[buf_cursor.0[0]])
+        } else {
+            None
+        }
     }
 
     /// Get the cursor from a position relative to the current cursor, clamped

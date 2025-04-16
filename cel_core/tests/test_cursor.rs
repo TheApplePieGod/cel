@@ -13,6 +13,7 @@ mod tests {
     #[test]
     fn basic() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("Hello")
             .add_cr_and_newline()
             .add_text("World")
@@ -29,6 +30,7 @@ mod tests {
     #[test]
     fn absolute_position_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67890")
             .add_text("12345")
@@ -51,6 +53,7 @@ mod tests {
     #[test]
     fn absolute_position_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .set_cursor_pos(1, 2)
             .add_text("67890")
@@ -69,6 +72,7 @@ mod tests {
     #[test]
     fn absolute_position_3() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .set_cursor_pos(1, 1)
         );
@@ -83,6 +87,7 @@ mod tests {
     #[test]
     fn relative_position_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .move_cursor_down(1)
             .move_cursor_right(1)
             .add_text("1")
@@ -106,6 +111,7 @@ mod tests {
     #[test]
     fn relative_position_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67890")
             .move_cursor_up(1)
@@ -127,6 +133,7 @@ mod tests {
     #[test]
     fn newline_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67")
             .move_cursor_up(1)
@@ -146,6 +153,7 @@ mod tests {
     #[test]
     fn newline_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("12345")
             .add_text("6")
@@ -167,6 +175,7 @@ mod tests {
     #[test]
     fn carriage_return_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67")
             .move_cursor_up(1)
@@ -186,6 +195,7 @@ mod tests {
     #[test]
     fn carriage_return_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_cr_and_newline()
             .add_text("H")
@@ -202,6 +212,7 @@ mod tests {
     #[test]
     fn home_cursor_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .set_cursor_pos(1, 2)
             .add_text("12345")
@@ -229,6 +240,7 @@ mod tests {
     #[test]
     fn wrap_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
             .add_cr_and_newline()
             .add_cr_and_newline()
@@ -250,8 +262,24 @@ mod tests {
     }
 
     #[test]
+    fn wrap_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .disable_wrap()
+            .add_text("1234567890123")
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [4, 0]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
     fn scroll_region_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
             .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
@@ -272,6 +300,7 @@ mod tests {
     #[test]
     fn scroll_region_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .set_scroll_margin_y(2, 4)
             .add_text("1234567890123") // 3 lines
             .add_cr_and_newline()
@@ -297,6 +326,7 @@ mod tests {
     #[test]
     fn scroll_region_3() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
             .add_cr_and_newline()
             .add_text("1234567890SAFE") // 3 lines
@@ -324,6 +354,7 @@ mod tests {
     #[test]
     fn reverse_index_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
             .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
@@ -348,6 +379,7 @@ mod tests {
     #[test]
     fn backspace_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_backspace()
         );
@@ -363,6 +395,7 @@ mod tests {
     #[test]
     fn backspace_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("123456")
             .add_backspace()
             .add_backspace()
@@ -380,6 +413,7 @@ mod tests {
     #[test]
     fn basic_unicode_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("😀😀")
         );
 
@@ -394,6 +428,7 @@ mod tests {
     #[test]
     fn basic_unicode_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("😀😀")
             .set_cursor_pos(2, 1)
             .add_text("😀")
@@ -460,6 +495,7 @@ mod tests {
     fn reflow_1() {
         let state = get_final_state_with_resizes(vec![
             Either::Left(AnsiBuilder::new()
+                .enable_wrap()
                 .add_text("1234567890123") // 3 lines
                 .add_cr_and_newline()
                 .add_cr_and_newline()
@@ -484,6 +520,7 @@ mod tests {
     fn reflow_2() {
         let state = get_final_state_with_resizes(vec![
             Either::Left(AnsiBuilder::new()
+                .enable_wrap()
                 .add_text("1234567890123") // 3 lines
                 .add_cr_and_newline()
                 .add_cr_and_newline()

@@ -828,6 +828,7 @@ impl Perform for Performer {
                     true => {},
                     false => {
                         match params[0] {
+                            7 => self.terminal_state.grid.autowrap = enabled,
                             25 => self.terminal_state.cursor_state.visible = enabled,
                             1000 => self.terminal_state.mouse_tracking_mode = match enabled {
                                 true => MouseTrackingMode::Default,
