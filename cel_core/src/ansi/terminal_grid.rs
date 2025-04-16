@@ -33,7 +33,12 @@ impl TerminalGrid {
         }
     }
 
-    pub fn resize(&mut self, width: usize, height: usize, fill_height: bool) {
+    pub fn clear(&mut self) {
+        self.screen_buffer.clear();
+        self.cursor = [0, 0];
+    }
+
+    pub fn resize(&mut self, width: usize, height: usize, reflow: bool, fill_height: bool) {
         let buf_cursor = self.get_buffer_cursor(&self.cursor);
 
         let old_width = self.width;
@@ -43,7 +48,7 @@ impl TerminalGrid {
         // TODO: relative margins. For now, reset
         self.margin = Margin::from_dimensions(width, height);
 
-        if width != old_width {
+        if reflow && width != old_width {
             self.reflow(buf_cursor);
         }
 
@@ -189,7 +194,7 @@ impl TerminalGrid {
     pub fn set_buf_cursor(&mut self, cursor: BufferCursor) {
         self.ensure_cursor_line(&cursor);
         self.cursor[0] = cursor.0[0];
-        self.cursor[1] = cursor.0[1] - self.get_top_index();
+        self.cursor[1] = cursor.0[1].saturating_sub(self.get_top_index());
     }
 
     /// Set the current margins
@@ -606,62 +611,6 @@ impl TerminalGrid {
         }
     }
 
-    /// Reflow the current grid to fill in the current width
-    fn reflow_grow(&mut self) {
-        /*
-        return;
-        let old_buffer = std::mem::take(&mut self.screen_buffer);
-        let buf_cursor = self.get_buffer_cursor(&self.cursor);
-        let mut new_buffer: ScreenBuffer = Vec::with_capacity(self.screen_buffer.len());
-        for (i, mut line) in old_buffer.into_iter().enumerate() {
-            let cursor_on_line = buf_cursor.0[1] == i;
-            let is_wrapped = !line.is_empty() && line[0].is_wrap;
-            if is_wrapped && !new_buffer.is_empty() {
-                // Append remaining cells to prev line and clear the wrap flag
-                let last_line = new_buffer.last_mut().unwrap();
-                let last_line_len = last_line.len();
-                let available = self.width.saturating_sub(last_line.len());
-                let to_append = available.min(line.len());
-                line[0].is_wrap = false;
-                last_line.extend(line.drain(..to_append));
-
-                if cursor_on_line && buf_cursor.0[0] < to_append {
-                    // The cursor is within the portion that will be merged.
-                    // Its new x coordinate is offset from the end of the previous line.
-                    self.set_buf_cursor(BufferCursor([last_line_len + buf_cursor.0[0], new_buffer.len() - 1]));
-                }
-
-                // If there are remaining cells, set wrap and push remaining
-                if !line.is_empty() {
-                    line[0].is_wrap = true;
-                    new_buffer.push(line);
-
-                    // If the cursor was on this wrapped line and its x offset is not in the appended portion,
-                    // then subtract the number of appended cells so that it points into the leftover.
-                    if cursor_on_line && buf_cursor.0[0] >= to_append {
-                        let new_x = buf_cursor.0[0] - to_append;
-                        self.set_buf_cursor(BufferCursor([new_x, new_buffer.len() - 1]));
-                    }
-                } else if cursor_on_line && buf_cursor.0[0] >= to_append {
-                    // Entire wrapped line was merged.
-                    // In case the cursor's x was out of range, we simply place
-                    // it at the end of the merged line.
-                    self.set_buf_cursor(BufferCursor([last_line_len + buf_cursor.0[0], new_buffer.len() - 1]));
-                }
-            } else {
-                new_buffer.push(line);
-
-                // Update cursor to reflect the new line index
-                if cursor_on_line {
-                    self.set_buf_cursor(BufferCursor([buf_cursor.0[0], new_buffer.len() - 1]));
-                }
-            }
-        }
-
-        self.screen_buffer = new_buffer;
-*/
-    }
-
     /// Reflow the current grid to fit within the current width, wrapping where possible
     /// Takes in the current buffer cursor BEFORE the resize was performed
     fn reflow(&mut self, buf_cursor: BufferCursor) {
@@ -669,7 +618,6 @@ impl TerminalGrid {
         // We assume that a new logical row starts when either we are at the very first line
         // or when the first cell is not marked as wrapped.
         let old_buffer = std::mem::take(&mut self.screen_buffer);
-        let old_len = old_buffer.len();
         let mut logical_rows: Vec<ScreenBufferLine> = Vec::new();
         let mut current_logical: Option<ScreenBufferLine> = None;
         let mut cursor_abs_index = None;
@@ -700,14 +648,6 @@ impl TerminalGrid {
             if cursor_on_line {
                 let offset = current_logical.as_ref().unwrap().len() - line_len;
                 cursor_abs_index = Some((logical_rows.len(), buf_cursor.0[0] + offset));
-                //log::warn!("Logical: {:?}", current_logical.as_ref().unwrap());
-                //log::warn!("Line: {:?}", line_copy);
-                //log::warn!("Len: {:?}", line_len);
-                //log::warn!("Offset: {:?}", offset);
-                //log::warn!("Og: {:?}", buf_cursor.0[0]);
-                //log::warn!("i: {:?}", i);
-                //log::warn!("Cursor: {:?}", self.cursor);
-                //log::warn!("Buf Cursor: {:?}", buf_cursor);
             }
         }
 
@@ -715,9 +655,6 @@ impl TerminalGrid {
         if let Some(row) = current_logical.take() {
             logical_rows.push(row);
         }
-
-        //log::warn!("Logical rows: {:?}", logical_rows);
-        //log::warn!("Abs cursor: {:?}", cursor_abs_index);
 
         // Next: reflow each logical row into new lines not exceeding self.width.
         // Also update the cursor position if it fell into a logical row.

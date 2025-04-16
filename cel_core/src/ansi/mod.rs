@@ -136,6 +136,7 @@ struct Performer {
     pub exit_code: Option<u32>,
     pub prompt_id: u32,
     pub current_dir: String,
+    pub clear_on_resize: bool,
     action_performed: bool,
 
     // State associated with one specific 'terminal' / 'buffer'

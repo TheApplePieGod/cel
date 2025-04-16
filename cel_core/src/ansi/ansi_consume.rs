@@ -170,7 +170,16 @@ impl AnsiHandler {
         // TODO: realtive margin update?
         self.performer.screen_width = width as usize;
         self.performer.screen_height = height as usize;
-        self.performer.terminal_state.grid.resize(width as usize, height as usize, false);
+        self.performer.terminal_state.grid.resize(
+            width as usize,
+            height as usize,
+            !self.performer.clear_on_resize,
+            false
+        );
+
+        if self.performer.clear_on_resize {
+            self.performer.terminal_state.grid.clear();
+        }
     }
 
     pub fn get_terminal_state(&self) -> &TerminalState {
@@ -259,6 +268,7 @@ impl Performer {
             exit_code: None,
             prompt_id: 0,
             current_dir: String::new(),
+            clear_on_resize: false,
             action_performed: false,
 
             terminal_state: Default::default(),
@@ -434,7 +444,7 @@ impl Performer {
         self.saved_terminal_state = self.terminal_state.clone();
         self.terminal_state = Default::default();
 
-        self.terminal_state.grid.resize(self.screen_width, self.screen_height, true);
+        self.terminal_state.grid.resize(self.screen_width, self.screen_height, false, true);
 
         self.terminal_state.alt_screen_buffer_state = BufferState::Active;
 
@@ -577,6 +587,14 @@ impl Perform for Performer {
                 }
 
                 self.exit_code = Some(self.parse_ascii_integer(&params) as u32);
+            },
+            1340 => { // Set clear-on-resize status
+                if params.len() == 0 {
+                    return;
+                }
+
+                let state = self.parse_ascii_integer(&params) as u32;
+                self.clear_on_resize = state == 1;
             },
             _ => {
                 log::debug!("<Unhandled> [osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);

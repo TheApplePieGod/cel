@@ -58,15 +58,25 @@ impl Commands {
 
             let init = r#"
                 autoload -Uz add-zsh-hook
-                precmd() {
+                _cel_precmd() {
                     printf '\033]1339;%s\007' "$?"
                     CEL_PROMPT_ID=$((CEL_PROMPT_ID + 1))
+                    # Send prompt id
                     printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
+                    # Send current dir
                     printf '\033]1338;%s\007' "$(pwd)"
+                    # Enable prompt clearing on resize
+                    printf '\033]1340;1\007'
                     # Scuffed, but guarantees that things don't get messed up
                     TERM=tmux-256color
                 }
-                add-zsh-hook precmd precmd
+                add-zsh-hook precmd _cel_precmd
+
+                _cel_preexec() {
+                    # Disable prompt clearing on resize
+                    printf '\033]1340;0\007'
+                }
+                add-zsh-hook preexec _cel_preexec
 
                 # Map alt+left/right to move by word if not already mapped
                 [[ $(builtin bindkey "^[[1;3C") == *" undefined-key" ]] && builtin bindkey "^[[1;3C" "forward-word"
@@ -100,7 +110,7 @@ impl Commands {
             cmd.args(["--login", "-i"]);
 
             let init = r#"
-                precmd() {
+                _cel_precmd() {
                     printf '\033]1339;%s\007' "$?"
                     CEL_PROMPT_ID=$(( ${CEL_PROMPT_ID:-0} + 1 ))
                     printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
@@ -109,7 +119,7 @@ impl Commands {
                     # Scuffed, but guarantees that things don't get messed up
                     TERM=tmux-256color
                 }
-                PROMPT_COMMAND="precmd"
+                PROMPT_COMMAND="_cel_precmd"
 
                 bind '"\e[1;3C": forward-word'
                 bind '"\e[1;3D": backward-word'
