@@ -301,8 +301,11 @@ impl Layout {
         // It should snap to the bottom of the last widget when scrolling
         // such that it grows when scrolling down and shrinks when scrolling up,
         // up to a minimum size
-        let ctx = self.context.get_primary_widget_mut();
-        let ctx_height = ctx.get_height_screen(renderer, bottom, line_size_screen, self.min_widget_lines);
-        func(renderer, ctx, bottom, ctx_height);
+        let primary_ctx = self.context.get_primary_widget_mut();
+        let primary_height = primary_ctx.get_height_screen(renderer, bottom, line_size_screen, self.min_widget_lines);
+        let padding = primary_ctx.get_padding(renderer);
+        let min_height = (self.min_widget_lines as f32 * line_size_screen) + padding[1] * 2.0;
+        let start_offset = (bottom - scroll_offset).min(bottom + primary_height - min_height);
+        func(renderer, primary_ctx, start_offset, primary_height);
     }
 }

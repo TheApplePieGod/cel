@@ -188,7 +188,7 @@ impl TerminalWidget {
     }
 
     pub fn get_num_physical_lines(&self) -> usize {
-        self.ansi_handler.get_terminal_state().grid.screen_buffer.len()
+        self.ansi_handler.get_terminal_state().get_num_lines(true)
     }
 
     pub fn get_num_virtual_lines(

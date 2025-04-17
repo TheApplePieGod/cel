@@ -377,12 +377,7 @@ impl Renderer {
     ) -> (usize, usize, RangeInclusive<usize>) {
         // Starting line: either the last visible line in the buffer OR the cursor position
         // if the cursor happens to be below the last line in the buffer and visible
-        let grid = &terminal_state.grid;
-        let buf_cursor = grid.get_buffer_cursor(&grid.cursor);
-        let mut start_line = grid.screen_buffer.len().saturating_sub(1);
-        if terminal_state.cursor_state.visible {
-            start_line = start_line.max(buf_cursor.0[1]);
-        }
+        let mut start_line = terminal_state.get_num_lines(true).saturating_sub(1);
         let bottom_line = start_line;
 
         // If the starting position is below the bottom of the screen, update the start

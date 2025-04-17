@@ -184,6 +184,18 @@ impl TerminalGrid {
         BufferCursor([cursor[0], cursor[1] + self.get_top_index()])
     }
 
+    /// Gets the length of the entire screen buffer
+    pub fn get_buffer_len(&self) -> usize {
+        self.screen_buffer.len()
+    }
+
+    /// Gets the length of the entire screen buffer, including the cursor if it falls
+    /// below the buffer
+    pub fn get_buffer_len_with_cursor(&self) -> usize {
+        let buf_cursor = self.get_buffer_cursor(&self.cursor);
+        self.get_buffer_len().max(buf_cursor.0[1] + 1)
+    }
+
     /// Set the current cursor position
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.cursor = cursor;

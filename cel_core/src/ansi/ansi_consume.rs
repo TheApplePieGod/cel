@@ -4,6 +4,12 @@ use std::fmt;
 use super::*;
 
 impl TerminalState {
+    pub fn get_num_lines(&self, include_cursor: bool) -> usize {
+        match include_cursor && self.cursor_state.visible {
+            true => self.grid.get_buffer_len_with_cursor(),
+            false => self.grid.get_buffer_len()
+        }
+    }
 }
 
 impl AnsiHandler {
