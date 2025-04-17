@@ -116,7 +116,7 @@ impl TerminalWidget {
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
         let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1, 1.0]);
-        let bg_height = self.get_height_screen(renderer, real_position.offset[1], line_height_screen, min_lines);
+        let bg_height = self.get_height_screen(renderer, real_position.offset[1], real_position.max_size[0], char_size_px, min_lines);
         self.render_background(renderer, &real_position, bg_height, &bg_color);
         self.render_divider(renderer, &real_position, bg_height, &divider_color);
 
@@ -187,37 +187,18 @@ impl TerminalWidget {
         }
     }
 
-    pub fn get_num_physical_lines(&self) -> usize {
-        self.ansi_handler.get_terminal_state().get_num_lines(true)
-    }
-
-    pub fn get_num_virtual_lines(
-        &self,
-        renderer: &Renderer,
-        screen_offset_y: f32,
-        line_size_screen: f32,
-        min_lines: u32
-    ) -> usize {
-        let padding = self.get_padding(renderer);
-        let line_offset = self.get_line_offset();
-        let (num_visible, _, _) = renderer.compute_visible_lines(
-            self.ansi_handler.get_terminal_state(),
-            line_size_screen,
-            line_offset,
-            min_lines,
-            screen_offset_y - padding[1]
-        );
-        num_visible
-    }
-
     pub fn get_height_screen(
         &self,
         renderer: &Renderer,
+        screen_width: f32,
         screen_offset_y: f32,
-        line_size_screen: f32,
+        char_size_px: f32,
         min_lines: u32
     ) -> f32 {
         let padding = self.get_padding(renderer);
+        let max_cols = renderer.get_chars_per_line(screen_width, char_size_px);
+        let rc = renderer.compute_render_constants(screen_width, max_cols);
+        let line_size_screen = rc.char_size_y_screen;
         let virtual_lines = self.get_num_virtual_lines(renderer, screen_offset_y, line_size_screen, min_lines);
         self.get_num_physical_lines().max(virtual_lines) as f32 * line_size_screen + padding[1] * 2.0
     }
@@ -243,6 +224,29 @@ impl TerminalWidget {
     pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
     pub fn toggle_debug_char_numbers(&mut self) { self.debug_char_number = !self.debug_char_number }
     pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
+
+    fn get_num_physical_lines(&self) -> usize {
+        self.ansi_handler.get_terminal_state().get_num_lines(true)
+    }
+
+    fn get_num_virtual_lines(
+        &self,
+        renderer: &Renderer,
+        screen_offset_y: f32,
+        line_size_screen: f32,
+        min_lines: u32
+    ) -> usize {
+        let padding = self.get_padding(renderer);
+        let line_offset = self.get_line_offset();
+        let (num_visible, _, _) = renderer.compute_visible_lines(
+            self.ansi_handler.get_terminal_state(),
+            line_size_screen,
+            line_offset,
+            min_lines,
+            screen_offset_y - padding[1]
+        );
+        num_visible
+    }
 
     fn update_mouse_input(
         &mut self,
