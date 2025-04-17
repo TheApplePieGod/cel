@@ -30,8 +30,10 @@ pub struct TerminalWidget {
 
 impl TerminalWidget {
     pub fn new(max_rows: u32, max_cols: u32) -> Self {
+        let max_scrollback = 10000;
+
         Self {
-            ansi_handler: AnsiHandler::new(max_rows, max_cols),
+            ansi_handler: AnsiHandler::new(max_rows, max_cols, max_scrollback),
 
             last_render_stats: Default::default(),
             last_mouse_pos_cell: [0, 0],

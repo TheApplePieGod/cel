@@ -1,10 +1,15 @@
 use cel_core::ansi::{AnsiBuilder, AnsiHandler, CellContent, ScreenBuffer, TerminalState};
 use log::{Record, Level, Metadata};
-use either::Either;
 
 static LOGGER: ConsoleLogger = ConsoleLogger;
 
 pub struct ConsoleLogger;
+
+pub enum HandlerAction {
+    AnsiSequence(AnsiBuilder),
+    Resize(u32, u32),
+    SetScrollbackLimit(u32)
+}
 
 impl log::Log for ConsoleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -33,7 +38,7 @@ fn setup() -> (AnsiHandler, AnsiBuilder) {
         Err(_) => {}
     }
 
-    let handler = AnsiHandler::new(5, 5);
+    let handler = AnsiHandler::new(5, 5, u32::MAX);
     let builder = AnsiBuilder::new();
 
     (handler, builder)
@@ -48,17 +53,20 @@ pub fn get_final_state(builder: AnsiBuilder) -> TerminalState {
 }
 
 // width, height
-pub fn get_final_state_with_resizes(actions: Vec<Either<AnsiBuilder, (u32, u32)>>) -> TerminalState {
+pub fn get_final_state_with_actions(actions: Vec<HandlerAction>) -> TerminalState {
     let (mut handler, _) = setup();
 
     for action in actions.into_iter() {
         match action {
-            Either::Left(builder) => {
+            HandlerAction::AnsiSequence(builder) => {
                 let stream = builder.build_stream();
                 handler.handle_sequence_bytes(&stream, false);
             },
-            Either::Right(resize) => {
-                handler.resize(resize.0, resize.1);
+            HandlerAction::Resize(width, height) => {
+                handler.resize(width, height, false);
+            },
+            HandlerAction::SetScrollbackLimit(limit) => {
+                handler.get_terminal_state_mut().grid.set_max_scrollback(limit as usize);
             }
         }
     }

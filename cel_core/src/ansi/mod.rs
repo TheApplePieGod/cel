@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use terminal_grid::TerminalGrid;
 use vte::Parser;
 use bitflags::bitflags;
@@ -99,7 +101,7 @@ pub struct ScreenBufferElement {
 }
 
 pub type ScreenBufferLine = Vec<ScreenBufferElement>;
-pub type ScreenBuffer = Vec<ScreenBufferLine>;
+pub type ScreenBuffer = VecDeque<ScreenBufferLine>;
 
 #[derive(Default, Clone, Copy)]
 pub struct Margin {

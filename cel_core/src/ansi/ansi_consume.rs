@@ -13,9 +13,9 @@ impl TerminalState {
 }
 
 impl AnsiHandler {
-    pub fn new(max_rows: u32, max_cols: u32) -> Self {
+    pub fn new(max_rows: u32, max_cols: u32, max_scrollback: u32) -> Self {
         let mut obj = Self {
-            performer: Performer::new(max_cols, max_rows),
+            performer: Performer::new(max_cols, max_rows, max_scrollback),
             state_machine: Parser::new(),
 
             mouse_states: [(Default::default(), false); 256],
@@ -274,7 +274,7 @@ impl AnsiHandler {
 }
 
 impl Performer {
-    fn new(width: u32, height: u32) -> Self {
+    fn new(width: u32, height: u32, max_scrollback: u32) -> Self {
         let mut obj = Self {
             screen_width: width as usize,
             screen_height: height as usize,
@@ -292,6 +292,7 @@ impl Performer {
         };
 
         obj.terminal_state.grid.resize(width as usize, height as usize, false, false);
+        obj.terminal_state.grid.set_max_scrollback(max_scrollback as usize);
         
         obj
     }

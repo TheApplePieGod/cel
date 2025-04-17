@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use either::Either;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -16,6 +18,7 @@ pub struct TerminalGrid {
     pub margin: Margin,
     pub autowrap: bool,
     pub wants_wrap: bool,
+    pub max_scrollback: usize,
 }
 
 impl TerminalGrid {
@@ -30,6 +33,7 @@ impl TerminalGrid {
             margin: Margin::from_dimensions(width, height),
             autowrap: true,
             wants_wrap: false,
+            max_scrollback: usize::MAX
         }
     }
 
@@ -226,6 +230,10 @@ impl TerminalGrid {
         self.margin.bottom = bottom;
     }
 
+    pub fn set_max_scrollback(&mut self, max_scrollback: usize) {
+        self.max_scrollback = max_scrollback;
+    }
+
     /// Test whether the supplied cursor is within currently set margins
     pub fn is_in_margins(&self, cursor: Cursor) -> bool {
         return cursor[0] >= self.margin.left
@@ -395,8 +403,8 @@ impl TerminalGrid {
     /// Scroll the specified screenspace buffer region up or down by one line. Up 
     /// refers to the direction the text is moving
     fn scroll_region(&mut self, up: bool, margin: Margin) {
-        // Only support default scrollback behavior if we don't have any margin. Otherwise,
-        // physically scroll the buffer in memory when adding new characters
+        // Only support default scrollback behavior if we don't have any margin.
+        // Otherwise, physically scroll the buffer in memory when adding new characters
         let support_scrollback = margin.top == 0
                                  && margin.left == 0
                                  && margin.bottom == self.height - 1
@@ -405,16 +413,17 @@ impl TerminalGrid {
         if support_scrollback {
             // Scroll the region with scrollback by pushing/popping
 
-            match up {
-                true => { self.screen_buffer.push(vec![]); },
-                false => { self.screen_buffer.pop(); },
+            if up {
+                let full = self.screen_buffer.len() >= self.max_scrollback;
+                if full {
+                    // Ensure we do not exceed capacity
+                    self.screen_buffer.pop_front();
+                }
+                self.screen_buffer.push_back(vec![]);
+            } else {
+                self.screen_buffer.pop_back();
             }
         } else {
-            // Start by isolating the lines in the region to scroll. That is, split
-            // them such that the lines at the top and bottom of the region are their
-            // own lines and are no longer wrapped. This way, we can simply remove /
-            // insert around them without any issues. This simplifies logic greatly.
-            
             let region_cursor_top = self.get_buffer_cursor(&[margin.left, margin.top]);
             let region_cursor_bot = self.get_buffer_cursor(&[margin.left, margin.bottom]);
 
@@ -630,7 +639,8 @@ impl TerminalGrid {
         // We assume that a new logical row starts when either we are at the very first line
         // or when the first cell is not marked as wrapped.
         let old_buffer = std::mem::take(&mut self.screen_buffer);
-        let mut logical_rows: Vec<ScreenBufferLine> = Vec::new();
+        let old_len = old_buffer.len();
+        let mut logical_rows: Vec<ScreenBufferLine> = Vec::with_capacity(old_len);
         let mut current_logical: Option<ScreenBufferLine> = None;
         let mut cursor_abs_index = None;
 
@@ -670,7 +680,7 @@ impl TerminalGrid {
 
         // Next: reflow each logical row into new lines not exceeding self.width.
         // Also update the cursor position if it fell into a logical row.
-        let mut new_buffer: ScreenBuffer = Vec::new();
+        let mut new_buffer: ScreenBuffer = VecDeque::with_capacity(old_len);
         let mut new_cursor: Option<BufferCursor> = None;
 
         for (logical_idx, logical) in logical_rows.into_iter().enumerate() {
@@ -705,7 +715,7 @@ impl TerminalGrid {
                     }
                 }
 
-                new_buffer.push(subline);
+                new_buffer.push_back(subline);
                 col += take;
                 first_subline = false;
             }
@@ -714,7 +724,7 @@ impl TerminalGrid {
             // handle that here
             if cursor_in_line && new_cursor.is_none() {
                 let (_, offset) = cursor_abs_index.unwrap();
-                let offset = offset - logical.len() + new_buffer.last().unwrap_or(&vec![]).len();
+                let offset = offset - logical.len() + new_buffer.back().unwrap_or(&vec![]).len();
                 new_cursor = Some(BufferCursor([offset.min(self.width - 1), new_buffer.len().saturating_sub(1)]));
             }
         }

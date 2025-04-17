@@ -3,9 +3,8 @@ mod common;
 #[cfg(test)]
 mod tests {
     use cel_core::ansi::AnsiBuilder;
-    use either::Either;
 
-    use crate::common::{assert_buffer_chars_eq, get_final_state, get_final_state_with_resizes};
+    use crate::common::{assert_buffer_chars_eq, get_final_state, get_final_state_with_actions, HandlerAction};
 
     // TODO: tests for insert, delete lines & chars
     // TODO: tests for scroll region
@@ -493,15 +492,15 @@ mod tests {
 
     #[test]
     fn reflow_1() {
-        let state = get_final_state_with_resizes(vec![
-            Either::Left(AnsiBuilder::new()
+        let state = get_final_state_with_actions(vec![
+            HandlerAction::AnsiSequence(AnsiBuilder::new()
                 .enable_wrap()
                 .add_text("1234567890123") // 3 lines
                 .add_cr_and_newline()
                 .add_cr_and_newline()
                 .add_text("1234567890123") // 3 lines
             ),
-            Either::Right((7, 7))
+            HandlerAction::Resize(7, 7)
         ]);
 
         let final_buffer = vec![
@@ -518,15 +517,15 @@ mod tests {
 
     #[test]
     fn reflow_2() {
-        let state = get_final_state_with_resizes(vec![
-            Either::Left(AnsiBuilder::new()
+        let state = get_final_state_with_actions(vec![
+            HandlerAction::AnsiSequence(AnsiBuilder::new()
                 .enable_wrap()
                 .add_text("1234567890123") // 3 lines
                 .add_cr_and_newline()
                 .add_cr_and_newline()
                 .add_text("1234567890123") // 3 lines
             ),
-            Either::Right((4, 4))
+            HandlerAction::Resize(4, 4)
         ]);
 
         let final_buffer = vec![
@@ -542,6 +541,32 @@ mod tests {
         ];
         assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
         assert_eq!(state.grid.cursor, [1, 3]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn scrollback_1() {
+        let state = get_final_state_with_actions(vec![
+            HandlerAction::SetScrollbackLimit(6),
+            HandlerAction::AnsiSequence(AnsiBuilder::new()
+                .enable_wrap()
+                .add_text("1234567890123") // 3 lines
+                .add_cr_and_newline()
+                .add_cr_and_newline()
+                .add_text("1234567890123") // 3 lines
+            )
+        ]);
+
+        let final_buffer = vec![
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec![],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [3, 4]);
         assert!(!state.grid.wants_wrap);
     }
 }
