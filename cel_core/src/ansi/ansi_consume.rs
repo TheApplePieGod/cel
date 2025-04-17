@@ -125,7 +125,10 @@ impl AnsiHandler {
             let up = self.scroll_states[1] > 0.0;
 
             let state = &self.performer.terminal_state;
-            if self.is_alt_screen_buf_active() && state.alternate_scroll_enabled {
+            let use_alt_scroll = self.is_alt_screen_buf_active()
+                                 && state.alternate_scroll_enabled
+                                 && state.mouse_tracking_mode == MouseTrackingMode::Disabled;
+            if  use_alt_scroll {
                 // Alternate scroll is active within the ASB, send cursor commands rather than
                 // encoded mouse input
                 match up {
