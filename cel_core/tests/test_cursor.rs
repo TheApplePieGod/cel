@@ -351,6 +351,32 @@ mod tests {
     }
 
     #[test]
+    fn scroll_region_4() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("1234567890123") // 3 lines
+            .add_cr_and_newline()
+            .add_cr_and_newline()
+            .add_text("1234567890123") // 3 lines
+            .set_scroll_margin_y(4, 5)
+            .set_cursor_pos(1, 4)
+            .remove_lines(1)
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec![],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|1", "2", "3"],
+            vec![]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
     fn reverse_index_1() {
         let state = get_final_state(AnsiBuilder::new()
             .enable_wrap()

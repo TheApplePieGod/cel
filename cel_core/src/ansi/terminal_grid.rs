@@ -446,7 +446,8 @@ impl TerminalGrid {
 
                 self.screen_buffer.remove(evict_pos.0[1]);
 
-                if replace_pos.0[1] < self.screen_buffer.len() {
+                // Eq bounds checking since we just removed something
+                if replace_pos.0[1] <= self.screen_buffer.len() {
                     self.screen_buffer.insert(replace_pos.0[1], vec![]);
                 }
             } else {
