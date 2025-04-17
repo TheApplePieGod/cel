@@ -119,6 +119,7 @@ pub struct TerminalState {
     pub mouse_mode: MouseMode,
     pub mouse_tracking_mode: MouseTrackingMode,
     pub bracketed_paste_enabled: bool,
+    pub clear_on_resize: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -136,7 +137,6 @@ struct Performer {
     pub exit_code: Option<u32>,
     pub prompt_id: u32,
     pub current_dir: String,
-    pub clear_on_resize: bool,
     action_performed: bool,
 
     // State associated with one specific 'terminal' / 'buffer'
@@ -190,7 +190,8 @@ impl Default for TerminalState {
             background_color: [0.0, 0.0, 0.0],
             mouse_mode: MouseMode::Default,
             mouse_tracking_mode: MouseTrackingMode::Disabled,
-            bracketed_paste_enabled: false
+            bracketed_paste_enabled: false,
+            clear_on_resize: false
         }
     }
 }

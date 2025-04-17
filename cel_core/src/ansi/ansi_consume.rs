@@ -16,7 +16,7 @@ impl AnsiHandler {
             scroll_states: [0.0; 2]
         };
 
-        obj.resize(max_cols, max_rows);
+        obj.resize(max_cols, max_rows, false);
 
         obj
     }
@@ -166,24 +166,33 @@ impl AnsiHandler {
         self.performer.output_stream.extend(sequence);
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        // TODO: realtive margin update?
-        self.performer.screen_width = width as usize;
-        self.performer.screen_height = height as usize;
-        self.performer.terminal_state.grid.resize(
-            width as usize,
-            height as usize,
-            !self.performer.clear_on_resize,
-            false
-        );
+    pub fn resize(&mut self, width: u32, height: u32, should_clear: bool) {
+        let width = width as usize;
+        let height = height as usize;
 
-        if self.performer.clear_on_resize {
-            self.performer.terminal_state.grid.clear();
+        if width != self.performer.screen_width || height != self.performer.screen_height {
+            // TODO: relative margin update?
+            self.performer.screen_width = width;
+            self.performer.screen_height = height;
+            self.performer.terminal_state.grid.resize(
+                width as usize,
+                height as usize,
+                !self.performer.terminal_state.clear_on_resize,
+                false
+            );
+
+            if self.performer.terminal_state.clear_on_resize && should_clear {
+                self.performer.terminal_state.grid.clear();
+            }
         }
     }
 
     pub fn get_terminal_state(&self) -> &TerminalState {
         &self.performer.terminal_state
+    }
+
+    pub fn get_terminal_state_mut(&mut self) -> &mut TerminalState {
+        &mut self.performer.terminal_state
     }
 
     pub fn consume_output_stream(&mut self) -> Vec<u8> {
@@ -225,7 +234,7 @@ impl AnsiHandler {
 
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
-        self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32);
+        self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32, false);
     }
 
     // TODO: utilize producer ?
@@ -260,7 +269,7 @@ impl AnsiHandler {
 
 impl Performer {
     fn new(width: u32, height: u32) -> Self {
-        Self {
+        let mut obj = Self {
             screen_width: width as usize,
             screen_height: height as usize,
             output_stream: vec![],
@@ -268,14 +277,17 @@ impl Performer {
             exit_code: None,
             prompt_id: 0,
             current_dir: String::new(),
-            clear_on_resize: false,
             action_performed: false,
 
             terminal_state: Default::default(),
             saved_terminal_state: Default::default(),
 
             ignore_print: false
-        }
+        };
+
+        obj.terminal_state.grid.resize(width as usize, height as usize, false, false);
+        
+        obj
     }
 
     fn parse_params(&self, params: &Params) -> Vec<u16> {
@@ -594,7 +606,7 @@ impl Perform for Performer {
                 }
 
                 let state = self.parse_ascii_integer(&params) as u32;
-                self.clear_on_resize = state == 1;
+                self.terminal_state.clear_on_resize = state == 1;
             },
             _ => {
                 log::debug!("<Unhandled> [osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);

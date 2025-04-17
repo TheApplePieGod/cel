@@ -2,7 +2,7 @@ use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent};
 use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
-use crate::{button::Button, input::Input, layout::LayoutPosition};
+use crate::{button::Button, input::Input, layout::LayoutPosition, terminal_context::TerminalContext};
 
 const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
     (ansi::MouseButton::Mouse1, glfw::MouseButton::Button1),
@@ -16,8 +16,6 @@ pub struct TerminalWidget {
     last_render_stats: RenderStats,
     last_mouse_pos_cell: [usize; 2],
     last_mouse_pos_widget: [f32; 2],
-
-    just_closed: bool,
 
     primary: bool,
     closed: bool,
@@ -41,8 +39,6 @@ impl TerminalWidget {
             last_render_stats: Default::default(),
             last_mouse_pos_cell: [0, 0],
             last_mouse_pos_widget: [0.0, 0.0],
-
-            just_closed: false,
 
             primary: true,
             closed: false,
@@ -74,7 +70,6 @@ impl TerminalWidget {
         }
 
         self.closed = true;
-        self.just_closed = true;
         self.reset();
     }
 
@@ -82,13 +77,12 @@ impl TerminalWidget {
         self.ansi_handler.reset();
     }
 
-    pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
-        self.ansi_handler.resize(max_cols, max_rows);
+    pub fn resize(&mut self, max_rows: u32, max_cols: u32, should_clear: bool) {
+        self.ansi_handler.resize(max_cols, max_rows, should_clear);
     }
 
     pub fn reset_render_state(&mut self) {
         self.last_render_stats = Default::default();
-        self.just_closed = false
     }
 
     // Returns true if a rerender should occur after this one
@@ -102,12 +96,14 @@ impl TerminalWidget {
         bg_color: Option<[f32; 4]>,
         divider_color: Option<[f32; 4]>,
     ) -> bool {
-
         let padding = self.get_padding(renderer);
-        let char_size_screen = char_size_px / renderer.get_width() as f32;
-        let max_chars = ((position.max_size[0] - padding[0] * 2.0) / char_size_screen) as u32;
-        let rc = renderer.compute_render_constants(position.max_size[0], max_chars);
+        let max_rows = renderer.get_max_lines(position.max_size[1] - padding[1] * 2.0, char_size_px);
+        let max_cols = renderer.get_chars_per_line(position.max_size[0] - padding[0] * 2.0, char_size_px);
+        let rc = renderer.compute_render_constants(position.max_size[0], max_cols);
         let line_height_screen = rc.char_size_y_screen;
+
+        // Always resize when rendered to ensure reflow has properly occurred
+        self.resize(max_rows, max_cols, false);
 
         let mut real_position = *position;
         if self.ansi_handler.is_alt_screen_buf_active() {
@@ -124,11 +120,11 @@ impl TerminalWidget {
         self.render_background(renderer, &real_position, bg_height, &bg_color);
         self.render_divider(renderer, &real_position, bg_height, &divider_color);
 
-        self.render_terminal(renderer, &real_position, min_lines, max_chars, &bg_color);
+        self.render_terminal(renderer, &real_position, min_lines, max_cols, &bg_color);
 
-        self.update_mouse_input(renderer, input, &real_position, &rc, bg_height, max_chars);
+        self.update_mouse_input(renderer, input, &real_position, &rc, bg_height, max_cols);
 
-        self.render_overlay(input, renderer, &real_position)
+        self.render_overlay(input, renderer, &real_position, bg_height)
     }
 
     pub fn get_debug_lines(&self) -> Vec<String> {
@@ -226,6 +222,14 @@ impl TerminalWidget {
         self.get_num_physical_lines().max(virtual_lines) as f32 * line_size_screen + padding[1] * 2.0
     }
 
+    pub fn set_primary(&mut self, primary: bool) {
+        self.primary = primary;
+        if !primary {
+            // Make sure to reset this, so that empty prompt blocks do not get cleared
+            self.ansi_handler.get_terminal_state_mut().clear_on_resize = false;
+        }
+    }
+
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
@@ -233,11 +237,9 @@ impl TerminalWidget {
     pub fn get_exit_code(&self) -> Option<u32> { self.ansi_handler.get_exit_code() }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
     pub fn get_closed(&self) -> bool { self.closed }
-    pub fn get_just_closed(&self) -> bool { self.just_closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
     pub fn get_primary(&self) -> bool { self.primary }
-    pub fn set_primary(&mut self, primary: bool) { self.primary = primary }
     pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
     pub fn toggle_debug_char_numbers(&mut self) { self.debug_char_number = !self.debug_char_number }
     pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
@@ -255,7 +257,7 @@ impl TerminalWidget {
 
         let padding = self.get_padding(renderer);
 
-        let virtual_lines = ((bg_height - padding[0] * 2.0) / rc.char_size_y_screen) as u32;
+        let virtual_lines = ((bg_height - padding[1] * 2.0) / rc.char_size_y_screen) as u32;
         let max_rows = self.ansi_handler.get_height();
         let height = rc.char_size_y_screen * virtual_lines as f32;
         let width = rc.char_size_x_screen * max_cols as f32;
@@ -321,7 +323,7 @@ impl TerminalWidget {
         // Recompute position to incorporate padding
         let mouse_pos_widget = [
             (mouse_pos_screen[0] - position.offset[0]) / (width + padding[0] * 2.0),
-            (mouse_pos_screen[1] - position.offset[1]) / (height + padding[1] * 2.0),
+            (mouse_pos_screen[1] - (position.offset[1] - bg_height)) / (height + padding[1] * 2.0),
         ];
         self.last_mouse_pos_widget = mouse_pos_widget;
     }
@@ -403,6 +405,7 @@ impl TerminalWidget {
         input: &Input,
         renderer: &mut Renderer,
         position: &LayoutPosition,
+        bg_height: f32,
     ) -> bool {
         if self.primary || !self.is_mouse_in_widget() {
             return false;
@@ -417,7 +420,7 @@ impl TerminalWidget {
                 [self.icon_size_px, self.icon_size_px],
                 [
                     renderer.get_width() as f32 - x_pos,
-                    position.offset[1] * renderer.get_height() as f32 + self.overlay_padding_px[1]
+                    (position.offset[1] - bg_height) * renderer.get_height() as f32 + self.overlay_padding_px[1]
                 ]
             );
 

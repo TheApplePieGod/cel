@@ -70,7 +70,7 @@ impl TerminalContext {
     }
 
     pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
-        self.get_primary_widget_mut().resize(max_rows, max_cols);
+        self.get_primary_widget_mut().resize(max_rows, max_cols, true);
         self.commands.resize(max_rows, max_cols);
     }
 
