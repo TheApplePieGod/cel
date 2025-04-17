@@ -58,6 +58,7 @@ impl TabGroup {
             width_screen,
             height_screen,
             default_char_size_px,
+            default_char_size_px,
             None
         );
 
@@ -324,6 +325,7 @@ impl TabGroup {
             self.width_screen,
             self.height_screen,
             char_size_px,
+            self.default_char_size_px,
             tab.cwd.as_ref().map(|s| s.as_str())
         )
     }
@@ -345,6 +347,7 @@ impl TabGroup {
                 renderer,
                 self.width_screen,
                 self.height_screen,
+                self.default_char_size_px,
                 self.default_char_size_px,
                 None
             ));

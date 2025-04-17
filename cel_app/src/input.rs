@@ -13,6 +13,7 @@ pub enum PressState {
 
 #[derive(Clone, Copy, enum_map::Enum)]
 pub enum InputEvent {
+    ZoomReset,
     ZoomIn,
     ZoomOut,
     TabNew,
@@ -92,6 +93,7 @@ impl Input {
                     if mods.contains(modifier_key | Modifiers::Shift) {
                         let mut handled = true;
                         match *key {
+                            Key::Num0 => self.set_event(InputEvent::ZoomReset),
                             Key::Equal => self.set_event(InputEvent::ZoomIn),
                             Key::Minus => self.set_event(InputEvent::ZoomOut),
                             Key::T => self.set_event(InputEvent::TabNew),

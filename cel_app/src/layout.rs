@@ -23,6 +23,7 @@ pub struct Layout {
     last_accumulated_render_stats: RenderStats,
 
     char_size_px: f32,
+    default_char_size_px: f32,
     min_widget_lines: u32,
 }
 
@@ -32,6 +33,7 @@ impl Layout {
         width_screen: f32,
         height_screen: f32,
         char_size_px: f32,
+        default_char_size_px: f32,
         cwd: Option<&str>
     ) -> Self {
         // Not perfect due to possible initial padding of the widget, but difference
@@ -55,6 +57,7 @@ impl Layout {
             last_accumulated_render_stats: Default::default(),
 
             char_size_px,
+            default_char_size_px,
             min_widget_lines: 5,
         }
     }
@@ -94,6 +97,10 @@ impl Layout {
                 self.scroll_offset = (self.scroll_offset - scroll * speed_factor).min(0.0);
             }
 
+            any_event |= input.consume_event(InputEvent::ZoomReset, || {
+                self.char_size_px = self.default_char_size_px;
+                self.hard_resize(renderer);
+            });
             any_event |= input.consume_event(InputEvent::ZoomIn, || {
                 self.char_size_px = (self.char_size_px + 2.0).min(32.0);
                 self.hard_resize(renderer);
