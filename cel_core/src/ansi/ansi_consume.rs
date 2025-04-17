@@ -184,7 +184,7 @@ impl AnsiHandler {
                 width as usize,
                 height as usize,
                 !self.performer.terminal_state.clear_on_resize,
-                false
+                self.is_alt_screen_buf_active()
             );
 
             if self.performer.terminal_state.clear_on_resize && should_clear {
@@ -625,9 +625,8 @@ impl Perform for Performer {
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
         self.action_performed = true;
 
-        //log::trace!("Handling CSI '{:?}'", c);
-
         let params = self.parse_params(params);
+        //log::warn!("Handling CSI '{:?}' {:?}", c, params);
         match c {
             'A' => {
                 let state = &mut self.terminal_state;

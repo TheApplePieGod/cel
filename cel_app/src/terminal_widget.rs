@@ -132,6 +132,8 @@ impl TerminalWidget {
             format!("Total lines: {}", state.grid.screen_buffer.len()),
             format!("Actual height: {}", self.get_num_physical_lines()),
             format!("Max size (cells): {}x{}", self.ansi_handler.get_width(), self.ansi_handler.get_height()),
+            format!("Mouse mode: {:?}", state.mouse_mode),
+            format!("Mouse tracking mode: {:?}", state.mouse_tracking_mode),
             format!("Hovered cell:"),
             format!("  Screen Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
         ];
