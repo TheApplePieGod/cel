@@ -1,4 +1,5 @@
 use cel_core::ansi::{CellContent, CursorStyle, StyleFlags, TerminalState};
+use std::ops::RangeInclusive;
 use std::time::{Duration, SystemTime};
 use std::{
     cell::RefCell,
@@ -366,6 +367,39 @@ impl Renderer {
         unsafe { gl::Scissor(scaled_x, scaled_y, scaled_width, scaled_height) }
     }
 
+    pub fn compute_visible_lines(
+        &self,
+        terminal_state: &TerminalState,
+        line_size_screen: f32,
+        line_offset: u32,
+        min_lines: u32,
+        screen_offset_y: f32,
+    ) -> (usize, usize, RangeInclusive<usize>) {
+        // Starting line: either the last visible line in the buffer OR the cursor position
+        // if the cursor happens to be below the last line in the buffer and visible
+        let mut start_line = terminal_state.get_num_lines(true).saturating_sub(1);
+        let bottom_line = start_line;
+
+        // If the starting position is below the bottom of the screen, update the start
+        // position to only render the first visible line
+        if screen_offset_y > 1.0 {
+            let start_offset = ((screen_offset_y - 1.0) / line_size_screen).floor();
+            start_line = start_line.saturating_sub(start_offset as usize);
+        }
+
+        // Ending line: we can render at most lines_per_screen lines, so either that offset
+        // from the bottom bounded by the line offset within the buffer
+        let lines_per_screen = (1.0 / line_size_screen).ceil();
+        let end_line = start_line.saturating_sub(lines_per_screen as usize).max(line_offset as usize);
+
+        // Ensure the total lines are >= min_lines
+        let total_lines = start_line - end_line + 1;
+        start_line += (min_lines as usize).saturating_sub(total_lines);
+
+        // Total lines, offset from bottom, range
+        (start_line - end_line + 1, bottom_line.saturating_sub(start_line), end_line..=start_line)
+    }
+
     /// Returns rendered line count
     pub fn render_terminal(
         &mut self,
@@ -373,13 +407,13 @@ impl Renderer {
         screen_size: &[f32; 2],
         screen_offset: &[f32; 2],
         chars_per_line: u32,
-        lines_per_screen: u32,
         line_offset: u32,
-        wrap: bool,
+        min_lines: u32,
         debug_line_number: bool,
         debug_col_number: bool,
         debug_show_cursor: bool,
     ) -> RenderStats {
+        let grid = &terminal_state.grid;
         let mut stats = RenderStats::default();
 
         // Setup render state
@@ -393,60 +427,50 @@ impl Renderer {
         let base_x = ((screen_offset[0] / rc.char_size_x_screen) * rc.char_size_x_px).floor() / rc.char_size_x_px;
         let base_y = ((screen_offset[1] / rc.char_size_y_screen) * rc.char_size_y_px).floor() / rc.char_size_y_px;
         let mut x = base_x;
-        let mut y = base_y - 1.0;
+        let mut y = base_y;
         let mut should_render_cursor = debug_show_cursor
             || (terminal_state.cursor_state.visible
                 && (!terminal_state.cursor_state.blinking || timestamp_seconds.fract() <= 0.5));
         let mut rendered_line_count = 0;
-        let mut max_line_count = 0;
         let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
         let mut raster_quads: Vec<FgQuadData> = vec![];
         let mut bg_quads: Vec<BgQuadData> = vec![];
 
-        //
-        // Populate vertex buffers
-        //
+        // Rendering strategy: render from the last line upward
 
-        let line_offset = line_offset as usize;
-        'outer: for line_idx in line_offset..(line_offset + lines_per_screen as usize) {
+        let (_, start_offset, visible_lines) = self.compute_visible_lines(
+            terminal_state,
+            rc.char_size_y_screen,
+            line_offset,
+            min_lines,
+            screen_offset[1]
+        );
+
+        // Offset the initial rendering position based on offset from the bottom
+        y -= start_offset as f32;
+
+        let buf_cursor = grid.get_buffer_cursor(&grid.cursor);
+        'outer: for line_idx in visible_lines.rev() {
             rendered_line_count += 1;
             x = base_x;
-            y += 1.0;
+            y -= 1.0;
 
-            let line_exists = line_idx < terminal_state.screen_buffer.len();
-            let y_pos_screen = y * rc.char_size_y_screen;
-
-            // Handle offscreen lines
-            if y_pos_screen < 0.0 || y_pos_screen > 1.0 {
-                if !line_exists {
-                    break;
-                }
-
-                let line = &terminal_state.screen_buffer[line_idx];
-                let line_occupancy = (line.len().max(1) - 1) as u32 / chars_per_line + 1;
-                if y_pos_screen + rc.char_size_y_screen * line_occupancy as f32 <= 0.0 {
-                    // Skip rendering iff this line is completely offscreen
-                    rendered_line_count += line_occupancy - 1;
-                    y += (line_occupancy  - 1) as f32;
-                    max_line_count = rendered_line_count;
-
-                    continue;
-                }
+            // Break once we pass the top of the screen
+            if y <= -1.0 {
+                break;
             }
 
             // Render cursor
             if should_render_cursor {
-                let cursor = &terminal_state.global_cursor;
-                if cursor[1] == line_idx {
+                if buf_cursor.0[1] == line_idx {
                     // Compute absolute position to account for wraps
                     should_render_cursor = false;
                     let width = match terminal_state.cursor_state.style {
                         // Adjust width of cursor based on char width
                         CursorStyle::Bar => 0.15,
                         _ => {
-                            if cursor[1] < terminal_state.screen_buffer.len() &&
-                               cursor[0] < terminal_state.screen_buffer[cursor[1]].len() {
-                                match terminal_state.screen_buffer[cursor[1]][cursor[0]].elem {
+                            if grid.cell_exists(&buf_cursor) {
+                                match grid.get_cell_opt(grid.cursor).unwrap().elem {
                                     CellContent::Char(_, w) => w as f32,
                                     CellContent::Grapheme(_, w) => w as f32,
                                     _ => 1.0
@@ -461,8 +485,8 @@ impl Renderer {
                         _ => 1.0,
                     };
                     let pos_min = [
-                        base_x + (cursor[0] % chars_per_line as usize) as f32,
-                        y + (cursor[0] / chars_per_line as usize) as f32,
+                        base_x + (buf_cursor.0[0] % chars_per_line as usize) as f32,
+                        y + (buf_cursor.0[0] / chars_per_line as usize) as f32,
                     ];
                     Self::push_fg_quad(
                         &[1.0, 0.0, 0.0],
@@ -482,34 +506,18 @@ impl Renderer {
                 }
             }
 
+            let line_exists = line_idx < grid.screen_buffer.len();
             if !line_exists {
                 // Continue instead of breaking here so we can render the cursor
+                // TODO: render abs position of the cursor rather than rely on loop
                 continue;
             }
-
-            max_line_count = rendered_line_count;
 
             // Store bg color per line for optimization
             let mut prev_bg_color = terminal_state.background_color;
 
-            let line = &terminal_state.screen_buffer[line_idx];
+            let line = &grid.screen_buffer[line_idx];
             for char_idx in 0..line.len() {
-                if rendered_line_count > lines_per_screen {
-                    max_line_count = lines_per_screen;
-                    break 'outer;
-                }
-
-                let max_x = base_x + chars_per_line as f32 - 0.001;
-                let should_wrap = wrap && x >= max_x;
-                if should_wrap {
-                    max_line_count += 1;
-                    rendered_line_count += 1;
-                    stats.wrapped_line_count += 1;
-                    x = base_x;
-                    y += 1.0;
-                    prev_bg_color = terminal_state.background_color;
-                }
-
                 let elem = &line[char_idx];
 
                 let fg_color = elem.style.fg_color.as_ref().unwrap_or(&[1.0, 1.0, 1.0]);
@@ -603,7 +611,8 @@ impl Renderer {
 
         self.draw_text_quads(&rc, &[0.0, 0.0], &bg_quads, &msdf_quads, &raster_quads);
 
-        stats.rendered_line_count = max_line_count;
+        stats.rendered_line_count = rendered_line_count;
+
         stats
     }
 

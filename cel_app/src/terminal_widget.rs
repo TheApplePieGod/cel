@@ -1,8 +1,8 @@
 use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent};
-use cel_renderer::renderer::{RenderStats, Renderer};
+use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
-use crate::{button::Button, input::Input, layout::LayoutPosition};
+use crate::{button::Button, input::Input, layout::LayoutPosition, terminal_context::TerminalContext};
 
 const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
     (ansi::MouseButton::Mouse1, glfw::MouseButton::Button1),
@@ -14,24 +14,14 @@ pub struct TerminalWidget {
     ansi_handler: AnsiHandler,
     
     last_render_stats: RenderStats,
-    last_computed_height_screen: f32,
-    last_rendered_lines: u32,
-    last_line_height_screen: f32,
-    last_char_width_screen: f32,
     last_mouse_pos_cell: [usize; 2],
     last_mouse_pos_widget: [f32; 2],
-
-    just_closed: bool,
 
     primary: bool,
     closed: bool,
     expanded: bool,
-    wrap: bool,
 
     padding_px: [f32; 2],
-    overlay_padding_px: [f32; 2],
-    icon_size_px: f32,
-    icon_gap_px: f32,
 
     debug_line_number: bool,
     debug_char_number: bool,
@@ -40,28 +30,20 @@ pub struct TerminalWidget {
 
 impl TerminalWidget {
     pub fn new(max_rows: u32, max_cols: u32) -> Self {
+        let max_scrollback = 10000;
+
         Self {
-            ansi_handler: AnsiHandler::new(max_rows, max_cols),
+            ansi_handler: AnsiHandler::new(max_rows, max_cols, max_scrollback),
 
             last_render_stats: Default::default(),
-            last_computed_height_screen: 0.0,
-            last_rendered_lines: 0,
-            last_line_height_screen: 1.0, // To prevent the 'excess space' from blowing up on initial render
-            last_char_width_screen: 0.0,
             last_mouse_pos_cell: [0, 0],
             last_mouse_pos_widget: [0.0, 0.0],
-
-            just_closed: false,
 
             primary: true,
             closed: false,
             expanded: true,
-            wrap: true,
 
             padding_px: [12.0, 12.0],
-            overlay_padding_px: [6.0, 6.0],
-            icon_size_px: 16.0,
-            icon_gap_px: 4.0,
 
             debug_line_number: false,
             debug_char_number: false,
@@ -84,7 +66,6 @@ impl TerminalWidget {
         }
 
         self.closed = true;
-        self.just_closed = true;
         self.reset();
     }
 
@@ -92,13 +73,12 @@ impl TerminalWidget {
         self.ansi_handler.reset();
     }
 
-    pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
-        self.ansi_handler.resize(max_cols, max_rows);
+    pub fn resize(&mut self, max_rows: u32, max_cols: u32, should_clear: bool) {
+        self.ansi_handler.resize(max_cols, max_rows, should_clear);
     }
 
     pub fn reset_render_state(&mut self) {
         self.last_render_stats = Default::default();
-        self.just_closed = false
     }
 
     // Returns true if a rerender should occur after this one
@@ -106,45 +86,56 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         input: &Input,
-        position: &LayoutPosition,
+        widget_pos: &LayoutPosition,
+        layout_pos: &LayoutPosition,
         char_size_px: f32,
-        default_height: f32,
+        min_lines: u32,
         bg_color: Option<[f32; 4]>,
         divider_color: Option<[f32; 4]>,
     ) -> bool {
-        // Align the widget such that the first line is at the top of the screen, rather
-        // than the bottom always being at the bottom if the lines do not fully fill up
-        // the screen space
-        let excess_space = position.max_size[1] - (self.last_line_height_screen * self.ansi_handler.get_height() as f32);
-        let mut real_position = *position;
-        real_position.offset[1] -= excess_space;
+        let padding = self.get_padding(renderer);
+        let max_rows = renderer.get_max_lines(widget_pos.max_size[1] - padding[1] * 2.0, char_size_px);
+        let max_cols = renderer.get_chars_per_line(widget_pos.max_size[0] - padding[0] * 2.0, char_size_px);
+        let rc = renderer.compute_render_constants(widget_pos.max_size[0], max_cols);
+        let line_height_screen = rc.char_size_y_screen;
 
-        self.update_mouse_input(renderer, input, &real_position, char_size_px);
+        // Always resize when rendered to ensure reflow has properly occurred
+        self.resize(max_rows, max_cols, false);
+
+        let mut real_position = *widget_pos;
+        if self.ansi_handler.is_alt_screen_buf_active() {
+            // Align the widget such that the first line is at the top of the screen, rather
+            // than the bottom always being at the bottom if the lines do not fully fill up
+            // the screen space
+            let excess_space = widget_pos.max_size[1] - (line_height_screen * self.ansi_handler.get_height() as f32);
+            real_position.offset[1] -= excess_space;
+        }
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
         let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1, 1.0]);
-        self.render_background(renderer, &real_position, default_height, &bg_color);
-        self.render_divider(renderer, &real_position, &divider_color);
-        self.render_terminal(renderer, &real_position, char_size_px, default_height, &bg_color);
+        let bg_height = self.get_height_screen(renderer, real_position.offset[1], real_position.max_size[0], char_size_px, min_lines);
+        self.render_background(renderer, &real_position, bg_height, &bg_color);
+        self.render_divider(renderer, &real_position, bg_height, &divider_color);
 
-        self.render_overlay(input, renderer, &real_position)
+        self.render_terminal(renderer, &real_position, min_lines, max_cols, &bg_color);
+
+        self.update_input(renderer, input, &real_position, &rc, bg_height, max_cols);
+
+        self.render_overlay(input, renderer, &real_position, &layout_pos, bg_height, char_size_px)
     }
 
     pub fn get_debug_lines(&self) -> Vec<String> {
         let state = self.ansi_handler.get_terminal_state();
         let cur_elem = self.ansi_handler.get_element(self.last_mouse_pos_cell);
         
-        let mouse_global = self.ansi_handler.get_global_cursor(&self.last_mouse_pos_cell);
         let mut text_lines = vec![
-            format!("Total lines: {}", state.screen_buffer.len()),
-            format!("Rendered lines: {}", self.last_rendered_lines),
-            format!("Height (screen): {}", self.last_computed_height_screen),
-            format!("Line height: {}", self.last_line_height_screen),
-            format!("Char width: {}", self.last_char_width_screen),
+            format!("Total lines: {}", state.grid.screen_buffer.len()),
+            format!("Actual height: {}", self.get_num_physical_lines()),
             format!("Max size (cells): {}x{}", self.ansi_handler.get_width(), self.ansi_handler.get_height()),
+            format!("Mouse mode: {:?}", state.mouse_mode),
+            format!("Mouse tracking mode: {:?}", state.mouse_tracking_mode),
             format!("Hovered cell:"),
             format!("  Screen Pos: ({}, {})", self.last_mouse_pos_cell[0], self.last_mouse_pos_cell[1]),
-            format!("  Global Pos: ({}, {})", mouse_global[0], mouse_global[1]),
         ];
 
         text_lines.extend(
@@ -175,96 +166,156 @@ impl TerminalWidget {
         };
     }
 
+    pub fn get_padding(&self, renderer: &Renderer) -> [f32; 2] {
+        // No padding is used when the alt screen buffer is active
+        match self.ansi_handler.is_alt_screen_buf_active() {
+            true => [0.0, 0.0],
+            false => [
+                self.padding_px[0] / renderer.get_width() as f32,
+                self.padding_px[1] / renderer.get_height() as f32
+            ]
+        }
+    }
+
+    pub fn get_line_offset(&self) -> u32 {
+        // Ensure the most recent screen is visible (home cursor) when within the 
+        // ASB
+        match self.ansi_handler.is_alt_screen_buf_active() {
+            true => self.ansi_handler.get_terminal_state().grid.get_top_index() as u32,
+            false => 0
+        }
+    }
+
+    pub fn get_height_screen(
+        &self,
+        renderer: &Renderer,
+        screen_width: f32,
+        screen_offset_y: f32,
+        char_size_px: f32,
+        min_lines: u32
+    ) -> f32 {
+        let padding = self.get_padding(renderer);
+        let max_cols = renderer.get_chars_per_line(screen_width, char_size_px);
+        let rc = renderer.compute_render_constants(screen_width, max_cols);
+        let line_size_screen = rc.char_size_y_screen;
+        let virtual_lines = self.get_num_virtual_lines(renderer, screen_offset_y, line_size_screen, min_lines);
+        self.get_num_physical_lines().max(virtual_lines) as f32 * line_size_screen + padding[1] * 2.0
+    }
+
+    pub fn get_num_physical_lines(&self) -> usize {
+        self.ansi_handler.get_terminal_state().get_num_lines(true)
+    }
+
+    pub fn set_primary(&mut self, primary: bool) {
+        self.primary = primary;
+        if !primary {
+            // Make sure to reset this, so that empty prompt blocks do not get cleared
+            self.ansi_handler.get_terminal_state_mut().clear_on_resize = false;
+        }
+    }
+
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
     pub fn get_current_dir(&self) -> &str { self.ansi_handler.get_current_dir() }
     pub fn get_exit_code(&self) -> Option<u32> { self.ansi_handler.get_exit_code() }
     pub fn get_last_render_stats(&self) -> &RenderStats { &self.last_render_stats }
-    pub fn get_last_computed_height_screen(&self) -> f32 { self.last_computed_height_screen }
-    pub fn get_last_line_height_screen(&self) -> f32 { self.last_line_height_screen }
     pub fn get_closed(&self) -> bool { self.closed }
-    pub fn get_just_closed(&self) -> bool { self.just_closed }
     pub fn get_expanded(&self) -> bool { self.expanded }
     pub fn set_expanded(&mut self, expanded: bool) { self.expanded = expanded }
     pub fn get_primary(&self) -> bool { self.primary }
-    pub fn set_primary(&mut self, primary: bool) { self.primary = primary }
     pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
     pub fn toggle_debug_char_numbers(&mut self) { self.debug_char_number = !self.debug_char_number }
     pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
 
-    fn update_mouse_input(
+    fn get_num_virtual_lines(
+        &self,
+        renderer: &Renderer,
+        screen_offset_y: f32,
+        line_size_screen: f32,
+        min_lines: u32
+    ) -> usize {
+        let padding = self.get_padding(renderer);
+        let line_offset = self.get_line_offset();
+        let (num_visible, _, _) = renderer.compute_visible_lines(
+            self.ansi_handler.get_terminal_state(),
+            line_size_screen,
+            line_offset,
+            min_lines,
+            screen_offset_y - padding[1]
+        );
+        num_visible
+    }
+
+    fn update_input(
         &mut self,
         renderer: &Renderer,
         input: &Input,
         position: &LayoutPosition,
-        char_size_px: f32
+        rc: &RenderConstants,
+        bg_height: f32,
+        max_cols: u32
     ) {
         // Compute the target cell based on the mouse position and widget position
 
-        let padding = match self.ansi_handler.is_alt_screen_buf_active() {
-            true => [0.0, 0.0],
-            false => [
-                self.padding_px[0] / renderer.get_width() as f32,
-                self.padding_px[1] / renderer.get_height() as f32
-            ]
-        };
+        let padding = self.get_padding(renderer);
+
+        let virtual_lines = ((bg_height - padding[1] * 2.0) / rc.char_size_y_screen) as u32;
         let max_rows = self.ansi_handler.get_height();
-        let max_cols = self.ansi_handler.get_width();
-        let last_height = self.last_line_height_screen * self.last_rendered_lines as f32;
-        let last_width = self.last_char_width_screen * max_cols as f32;
+        let height = rc.char_size_y_screen * virtual_lines as f32;
+        let width = rc.char_size_x_screen * max_cols as f32;
         let mouse_pos_px = input.get_mouse_pos();
         let mouse_pos_screen = [
             mouse_pos_px[0] / renderer.get_width() as f32,
             mouse_pos_px[1] / renderer.get_height() as f32,
         ];
         let mouse_pos_widget = [
-            (mouse_pos_screen[0] - position.offset[0] - padding[0]) / last_width,
-            (mouse_pos_screen[1] - position.offset[1] - padding[1]) / last_height,
+            (mouse_pos_screen[0] - (position.offset[0] + padding[0])) / width,
+            (mouse_pos_screen[1] - (position.offset[1] - bg_height + padding[1])) / height,
         ];
 
-        let line_count = self.last_rendered_lines;
-        let widget_row = line_count as f32 * mouse_pos_widget[1];
+        let widget_row = virtual_lines as f32 * mouse_pos_widget[1];
         let screen_row =
             widget_row +
-            max_rows.min(self.last_rendered_lines) as f32 -
-            self.last_rendered_lines as f32;
+            max_rows.min(virtual_lines) as f32 -
+            virtual_lines as f32;
         let screen_col = max_cols as f32 * mouse_pos_widget[0];
 
-        if screen_col >= 0.0 && screen_col < max_cols as f32 && screen_row >= 0.0 && screen_row < self.last_rendered_lines as f32 {
+        let mut key_flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
+        if input.is_shift_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Shift);
+        }
+        if input.is_super_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Meta);
+        }
+        if input.is_ctrl_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Control);
+        }
+        if input.is_alt_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Alt);
+        }
+
+        if screen_col >= 0.0 && screen_col < max_cols as f32 && screen_row >= 0.0 && screen_row < virtual_lines as f32 {
             let cursor = [screen_col as usize, screen_row as usize];
 
-            // Only send inputs to active widget
+            // Only send mouse inputs to active widget
             if self.primary {
-                let mut flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
-                if input.is_shift_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Shift);
-                }
-                if input.is_super_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Meta);
-                }
-                if input.is_ctrl_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Control);
-                }
-                if input.is_alt_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Alt);
-                }
-
                 for entry in MOUSE_BUTTON_MAPPING {
                     self.ansi_handler.handle_mouse_button(
                         entry.0,
                         input.get_mouse_down(entry.1),
-                        flags,
+                        key_flags,
                         &cursor
                     );
                 }
 
-                let scroll_scale = 4.0 / char_size_px; // Empirical
+                let scroll_scale_x = 4.0 / rc.char_size_x_px; // Empirical
+                let scroll_scale_y = 4.0 / rc.char_size_y_px; // Empirical
                 let scroll_delta = input.get_scroll_delta();
                 self.ansi_handler.handle_scroll(
-                    scroll_delta[0] * scroll_scale,
-                    scroll_delta[1] * scroll_scale,
-                    flags,
+                    scroll_delta[0] * scroll_scale_x,
+                    scroll_delta[1] * scroll_scale_y,
+                    key_flags,
                     &cursor
                 );
             }
@@ -272,10 +323,28 @@ impl TerminalWidget {
             self.last_mouse_pos_cell = cursor;
         }
 
+        // Only send special key inputs to active widget
+        if self.primary && key_flags.is_empty() {
+            // Handle special arrow key encoding
+
+            if input.get_key_triggered(glfw::Key::Up) {
+                self.ansi_handler.handle_up_arrow();
+            }
+            if input.get_key_triggered(glfw::Key::Down) {
+                self.ansi_handler.handle_down_arrow();
+            }
+            if input.get_key_triggered(glfw::Key::Left) {
+                self.ansi_handler.handle_left_arrow();
+            }
+            if input.get_key_triggered(glfw::Key::Right) {
+                self.ansi_handler.handle_right_arrow();
+            }
+        }
+
         // Recompute position to incorporate padding
         let mouse_pos_widget = [
-            (mouse_pos_screen[0] - position.offset[0]) / (last_width + padding[0] * 2.0),
-            (mouse_pos_screen[1] - position.offset[1]) / (last_height + padding[1] * 2.0),
+            (mouse_pos_screen[0] - position.offset[0]) / (width + padding[0] * 2.0),
+            (mouse_pos_screen[1] - (position.offset[1] - bg_height)) / (height + padding[1] * 2.0),
         ];
         self.last_mouse_pos_widget = mouse_pos_widget;
     }
@@ -284,12 +353,12 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
-        default_height: f32,
+        height: f32,
         bg_color: &[f32; 4]
     ) {
         renderer.draw_quad(
-            &position.offset,
-            &[1.0, self.get_last_computed_height_screen().max(default_height)],
+            &[position.offset[0], position.offset[1] - height],
+            &[1.0, height],
             bg_color
         );
     }
@@ -298,12 +367,13 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
+        height: f32,
         color: &[f32; 4]
     ) {
         let size_px = 2.0;
         let size = size_px / renderer.get_height() as f32;
         renderer.draw_quad(
-            &[position.offset[0], position.offset[1]],
+            &[position.offset[0], position.offset[1] - height],
             &[1.0, size],
             color
         );
@@ -313,33 +383,12 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         position: &LayoutPosition,
-        char_size_px: f32,
-        default_height: f32,
+        min_lines: u32,
+        max_cols: u32,
         bg_color: &[f32; 4]
     ) {
-        let mut line_offset = 0;
-        let mut padding_px = self.padding_px;
 
-        // If the alt screen buf is active, we can ignore special rendering styles
-        // Also, ensure the most recent screen is visible (home cursor)
-        if self.ansi_handler.is_alt_screen_buf_active() {
-            line_offset = self.ansi_handler.get_terminal_state().global_cursor_home[1] as u32;
-            padding_px = [0.0, 0.0];
-        }
-
-        let width_px = renderer.get_width() as f32 * position.max_size[0];
-        let max_chars = ((width_px - padding_px[0] * 2.0) / char_size_px) as u32;
-        let rc = renderer.compute_render_constants(position.max_size[0], max_chars);
-        let line_size_screen = rc.char_size_y_screen;
-        let max_rows = self.ansi_handler.get_height();
-
-        // Cap max render lines based on the alt screen buffer. Here, the state can
-        // never be larger than the screen, so never render more than we are supposed
-        // to, otherwise dead cells may become visible after resizing
-        let max_render_lines = match self.ansi_handler.get_terminal_state().alt_screen_buffer_state {
-            BufferState::Active => max_rows,
-            _ => 99999999
-        };
+        let padding = self.get_padding(renderer);
 
         let term_color = [bg_color[0], bg_color[1], bg_color[2]];
         self.ansi_handler.set_terminal_color(&term_color);
@@ -347,41 +396,26 @@ impl TerminalWidget {
             self.ansi_handler.hide_cursor();
         }
 
-        let padding_screen = [padding_px[0] / renderer.get_width() as f32, padding_px[1] / renderer.get_height() as f32];
         let render_offset = [
-            position.offset[0] + padding_screen[0],
-            position.offset[1] + padding_screen[1]
+            position.offset[0] + padding[0],
+            position.offset[1] - padding[1]
         ];
         let render_size = [
-            position.max_size[0] - 2.0 * padding_screen[0],
-            position.max_size[1] - 2.0 * padding_screen[1],
+            position.max_size[0] - 2.0 * padding[0],
+            position.max_size[1] - 2.0 * padding[1],
         ];
 
         let render_stats = renderer.render_terminal(
             &self.ansi_handler.get_terminal_state(),
             &render_size,
             &render_offset,
-            max_chars,
-            max_render_lines,
-            line_offset,
-            self.wrap,
+            max_cols,
+            self.get_line_offset(),
+            min_lines,
             self.debug_line_number,
             self.debug_char_number,
             self.debug_show_cursor
         );
-
-        let clamped_height = (
-            render_stats.rendered_line_count as f32 * line_size_screen
-        )
-         .max(default_height);
-
-        // Set the rendered lines based on the height rather than the actual amount of lines
-        self.last_rendered_lines = (clamped_height / line_size_screen).ceil() as u32;
-        self.last_line_height_screen = line_size_screen;
-
-        self.last_char_width_screen = rc.char_size_x_screen;
-
-        self.last_computed_height_screen = self.last_rendered_lines as f32 * line_size_screen + padding_screen[1] * 2.0;
 
         self.last_render_stats = render_stats;
     }
@@ -391,7 +425,10 @@ impl TerminalWidget {
         &mut self,
         input: &Input,
         renderer: &mut Renderer,
-        position: &LayoutPosition,
+        widget_pos: &LayoutPosition,
+        layout_pos: &LayoutPosition,
+        bg_height: f32,
+        char_size_px: f32
     ) -> bool {
         if self.primary || !self.is_mouse_in_widget() {
             return false;
@@ -400,13 +437,17 @@ impl TerminalWidget {
         let mut should_rerender = false;
 
         let icons = ["📋", "❌"];
+        let icon_size_px = char_size_px * 3.0;
+        let icon_gap_px = char_size_px * 0.5;
+        let icon_padding_px = char_size_px;
         for (i, icon) in icons.into_iter().enumerate() {
-            let x_pos = self.icon_size_px * (i as f32 + 1.0) + self.icon_gap_px * i as f32 + self.overlay_padding_px[0];
+            let x_pos = icon_size_px * (i as f32 + 1.0) + icon_gap_px * i as f32 + icon_padding_px;
+            let y_pos = (widget_pos.offset[1] - bg_height).max(layout_pos.offset[1]);
             let button = Button::new_px(
-                [self.icon_size_px, self.icon_size_px],
+                [icon_size_px, icon_size_px],
                 [
                     renderer.get_width() as f32 - x_pos,
-                    position.offset[1] * renderer.get_height() as f32 + self.overlay_padding_px[1]
+                    y_pos * renderer.get_height() as f32 + icon_padding_px
                 ]
             );
 
@@ -414,7 +455,7 @@ impl TerminalWidget {
                 renderer,
                 &[1.0, 1.0, 1.0],
                 &[0.0, 0.0, 0.0, 0.0],
-                self.icon_size_px,
+                icon_size_px,
                 icon
             );
 

@@ -70,10 +70,11 @@ impl TerminalContext {
     }
 
     pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
-        self.get_primary_widget_mut().resize(max_rows, max_cols);
+        self.get_primary_widget_mut().resize(max_rows, max_cols, true);
         self.commands.resize(max_rows, max_cols);
     }
 
+    pub fn get_size(&self) -> [u32; 2] { self.commands.get_size() }
     pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }
     pub fn get_primary_widget_mut(&mut self) -> &mut TerminalWidget { self.widgets.last_mut().unwrap() }
     pub fn get_widgets(&self) -> &Vec<TerminalWidget> { &self.widgets }

@@ -7,7 +7,7 @@ impl AnsiBuilder {
         }
     }
 
-    // Raw
+    // Print
 
     pub fn add_text(self, text: &str) -> Self {
         self.add_raw(text.as_bytes())
@@ -81,6 +81,24 @@ impl AnsiBuilder {
         self.add_raw_csi(&[amount], None, 'M')
     }
 
+    // Modes
+
+    pub fn enable_mode(self, mode: u32) -> Self {
+        self.add_raw_csi(&[mode], Some('?'), 'h')
+    }
+
+    pub fn disable_mode(self, mode: u32) -> Self {
+        self.add_raw_csi(&[mode], Some('?'), 'l')
+    }
+
+    pub fn enable_wrap(self) -> Self {
+        self.enable_mode(7)
+    }
+
+    pub fn disable_wrap(self) -> Self {
+        self.disable_mode(7)
+    }
+
     // Raw
 
     pub fn add_raw_csi(
@@ -92,11 +110,11 @@ impl AnsiBuilder {
         let formatted: Vec<String> = params.iter().map(|p| p.to_string()).collect();
         self.add_raw(format!(
             "\x1b[{}{}{}",
-            formatted.join(";"),
             match intermediate {
                 Some(c) => c.to_string(),
                 None => String::new()
             },
+            formatted.join(";"),
             end_char
         ).as_bytes())
     }
