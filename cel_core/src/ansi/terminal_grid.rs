@@ -42,13 +42,13 @@ impl TerminalGrid {
         let buf_cursor = self.get_buffer_cursor(&self.cursor);
 
         let old_width = self.width;
-        self.width = width;
-        self.height = height;
+        self.width = width.max(1);
+        self.height = height.max(1);
 
         // TODO: relative margins. For now, reset
-        self.margin = Margin::from_dimensions(width, height);
+        self.margin = Margin::from_dimensions(self.width, self.height);
 
-        if reflow && width != old_width {
+        if reflow && self.width != old_width {
             self.reflow(buf_cursor);
         }
 

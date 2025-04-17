@@ -244,7 +244,7 @@ impl Layout {
     // Use dummy ctx to compute the minimum widget height, max rows, max cols
     // TODO: this is not great
     fn get_dummy_ctx_params(&self, renderer: &Renderer) -> (f32, u32, u32) {
-        let dummy_ctx = TerminalWidget::new(0, 0);
+        let dummy_ctx = TerminalWidget::new(1, 1);
         let padding = dummy_ctx.get_padding(renderer);
         let height = dummy_ctx.get_height_screen(renderer, self.width_screen, 1.0, self.char_size_px, self.min_widget_lines);
         let max_rows = renderer.get_max_lines(self.height_screen - padding[1] * 2.0, self.char_size_px);

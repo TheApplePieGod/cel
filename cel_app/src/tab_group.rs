@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::ops::DerefMut;
 use std::path::PathBuf;
+use std::process::exit;
 
 use cel_core::config::get_config_dir;
 use cel_renderer::renderer::Renderer;
@@ -362,7 +363,9 @@ impl TabGroup {
 
     fn pop_layout(&mut self, renderer: &Renderer, idx: usize) {
         if self.layouts.len() <= 1 {
-            return;
+            // TODO: more graceful exit
+            log::info!("No layouts left, exiting");
+            exit(0);
         }
 
         self.layouts.remove(idx);
