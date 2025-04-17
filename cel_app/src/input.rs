@@ -171,7 +171,7 @@ impl Input {
         }
     }
 
-    pub fn get_key_pressed(&self, key: Key) -> bool {
+    pub fn get_key_down(&self, key: Key) -> bool {
         match self.key_states[key as usize].0 {
             PressState::JustPressed | PressState::Repeat => true,
             _ => false
@@ -181,6 +181,12 @@ impl Input {
     pub fn get_key_just_pressed(&self, key: Key) -> bool {
         let state = &self.key_states[key as usize];
         state.0 == PressState::JustPressed && state.1 == self.poll_count
+    }
+
+    // Same as just pressed, but also returns true on each repeat
+    pub fn get_key_triggered(&self, key: Key) -> bool {
+        let state = &self.key_states[key as usize];
+        (state.0 == PressState::JustPressed || state.0 == PressState::Repeat) && state.1 == self.poll_count
     }
 
     pub fn get_key_released(&self, key: Key) -> bool {
@@ -213,10 +219,10 @@ impl Input {
         state.0 == PressState::JustReleased && state.1 == self.poll_count
     }
 
-    pub fn is_super_down(&self) -> bool { self.get_key_pressed(Key::LeftSuper) || self.get_key_pressed(Key::RightSuper) }
-    pub fn is_shift_down(&self) -> bool { self.get_key_pressed(Key::LeftShift) || self.get_key_pressed(Key::RightShift) }
-    pub fn is_ctrl_down(&self) -> bool { self.get_key_pressed(Key::LeftControl) || self.get_key_pressed(Key::RightControl) }
-    pub fn is_alt_down(&self) -> bool { self.get_key_pressed(Key::LeftAlt) || self.get_key_pressed(Key::RightAlt) }
+    pub fn is_super_down(&self) -> bool { self.get_key_down(Key::LeftSuper) || self.get_key_down(Key::RightSuper) }
+    pub fn is_shift_down(&self) -> bool { self.get_key_down(Key::LeftShift) || self.get_key_down(Key::RightShift) }
+    pub fn is_ctrl_down(&self) -> bool { self.get_key_down(Key::LeftControl) || self.get_key_down(Key::RightControl) }
+    pub fn is_alt_down(&self) -> bool { self.get_key_down(Key::LeftAlt) || self.get_key_down(Key::RightAlt) }
     pub fn get_input_buffer(&self) -> &Vec<u8> { &self.input_buffer }
     pub fn get_mouse_pos(&self) -> [f32; 2] { self.mouse_pos }
     pub fn get_mouse_delta(&self) -> [f32; 2] { self.mouse_delta }
@@ -369,10 +375,10 @@ impl Input {
             },
             None => { // Function character
                 let (esc_char, trailer) = match key {
-                    Key::Up => (1, 'A'),
-                    Key::Down => (1, 'B'),
-                    Key::Right => (1, 'C'),
-                    Key::Left => (1, 'D'),
+                    Key::Up if !mods.is_empty() => (1, 'A'),
+                    Key::Down if !mods.is_empty() => (1, 'B'),
+                    Key::Right if !mods.is_empty() => (1, 'C'),
+                    Key::Left if !mods.is_empty() => (1, 'D'),
                     Key::End => (1, 'F'),
                     Key::Home => (1, 'H'),
                     Key::Tab => (b'\t', 'u'),

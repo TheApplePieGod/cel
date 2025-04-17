@@ -119,7 +119,7 @@ impl TerminalWidget {
 
         self.render_terminal(renderer, &real_position, min_lines, max_cols, &bg_color);
 
-        self.update_mouse_input(renderer, input, &real_position, &rc, bg_height, max_cols);
+        self.update_input(renderer, input, &real_position, &rc, bg_height, max_cols);
 
         self.render_overlay(input, renderer, &real_position, &layout_pos, bg_height, char_size_px)
     }
@@ -247,7 +247,7 @@ impl TerminalWidget {
         num_visible
     }
 
-    fn update_mouse_input(
+    fn update_input(
         &mut self,
         renderer: &Renderer,
         input: &Input,
@@ -281,30 +281,30 @@ impl TerminalWidget {
             virtual_lines as f32;
         let screen_col = max_cols as f32 * mouse_pos_widget[0];
 
+        let mut key_flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
+        if input.is_shift_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Shift);
+        }
+        if input.is_super_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Meta);
+        }
+        if input.is_ctrl_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Control);
+        }
+        if input.is_alt_down() {
+            key_flags.insert(ansi::KeyboardModifierFlags::Alt);
+        }
+
         if screen_col >= 0.0 && screen_col < max_cols as f32 && screen_row >= 0.0 && screen_row < virtual_lines as f32 {
             let cursor = [screen_col as usize, screen_row as usize];
 
-            // Only send inputs to active widget
+            // Only send mouse inputs to active widget
             if self.primary {
-                let mut flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
-                if input.is_shift_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Shift);
-                }
-                if input.is_super_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Meta);
-                }
-                if input.is_ctrl_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Control);
-                }
-                if input.is_alt_down() {
-                    flags.insert(ansi::KeyboardModifierFlags::Alt);
-                }
-
                 for entry in MOUSE_BUTTON_MAPPING {
                     self.ansi_handler.handle_mouse_button(
                         entry.0,
                         input.get_mouse_down(entry.1),
-                        flags,
+                        key_flags,
                         &cursor
                     );
                 }
@@ -315,12 +315,30 @@ impl TerminalWidget {
                 self.ansi_handler.handle_scroll(
                     scroll_delta[0] * scroll_scale_x,
                     scroll_delta[1] * scroll_scale_y,
-                    flags,
+                    key_flags,
                     &cursor
                 );
             }
 
             self.last_mouse_pos_cell = cursor;
+        }
+
+        // Only send special key inputs to active widget
+        if self.primary && key_flags.is_empty() {
+            // Handle special arrow key encoding
+
+            if input.get_key_triggered(glfw::Key::Up) {
+                self.ansi_handler.handle_up_arrow();
+            }
+            if input.get_key_triggered(glfw::Key::Down) {
+                self.ansi_handler.handle_down_arrow();
+            }
+            if input.get_key_triggered(glfw::Key::Left) {
+                self.ansi_handler.handle_left_arrow();
+            }
+            if input.get_key_triggered(glfw::Key::Right) {
+                self.ansi_handler.handle_right_arrow();
+            }
         }
 
         // Recompute position to incorporate padding

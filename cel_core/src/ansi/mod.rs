@@ -121,6 +121,8 @@ pub struct TerminalState {
     pub mouse_mode: MouseMode,
     pub mouse_tracking_mode: MouseTrackingMode,
     pub bracketed_paste_enabled: bool,
+    pub alternate_scroll_enabled: bool,
+    pub application_cursor_keys: bool,
     pub clear_on_resize: bool,
 }
 
@@ -191,8 +193,10 @@ impl Default for TerminalState {
             style_state: Default::default(),
             background_color: [0.0, 0.0, 0.0],
             mouse_mode: MouseMode::Default,
-            mouse_tracking_mode: MouseTrackingMode::Disabled,
+            mouse_tracking_mode: MouseTrackingMode::Default,
             bracketed_paste_enabled: false,
+            alternate_scroll_enabled: true,
+            application_cursor_keys: false,
             clear_on_resize: false
         }
     }

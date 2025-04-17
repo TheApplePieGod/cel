@@ -10,6 +10,34 @@ impl TerminalState {
             false => self.grid.get_buffer_len()
         }
     }
+
+    pub fn get_up_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOA",
+            false => b"\x1b[A",
+        }
+    }
+
+    pub fn get_down_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOB",
+            false => b"\x1b[B",
+        }
+    }
+
+    pub fn get_left_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOD",
+            false => b"\x1b[D",
+        }
+    }
+
+    pub fn get_right_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOC",
+            false => b"\x1b[C",
+        }
+    }
 }
 
 impl AnsiHandler {
@@ -50,6 +78,25 @@ impl AnsiHandler {
         None
     }
 
+    pub fn handle_up_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_up_sequence());
+    }
+
+    pub fn handle_down_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_down_sequence());
+    }
+    pub fn handle_left_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_left_sequence());
+    }
+
+    pub fn handle_right_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_right_sequence());
+    }
+
     pub fn handle_scroll(
         &mut self,
         delta_x: f32,
@@ -76,14 +123,26 @@ impl AnsiHandler {
         // Vertical scroll
         if self.scroll_states[1].abs() >= 1.0 {
             let up = self.scroll_states[1] > 0.0;
-            let button = match up {
-                true => MouseButton::Mouse4,
-                false => MouseButton::Mouse5,
-            };
 
-            // Toggle
-            self.handle_mouse_button(button, true, flags, cell_position);
-            self.handle_mouse_button(button, false, flags, cell_position);
+            let state = &self.performer.terminal_state;
+            if self.is_alt_screen_buf_active() && state.alternate_scroll_enabled {
+                // Alternate scroll is active within the ASB, send cursor commands rather than
+                // encoded mouse input
+                match up {
+                    true => self.performer.output_stream.extend_from_slice(state.get_up_sequence()),
+                    false => self.performer.output_stream.extend_from_slice(state.get_down_sequence()),
+                }
+                
+            } else {
+                let button = match up {
+                    true => MouseButton::Mouse4,
+                    false => MouseButton::Mouse5,
+                };
+
+                // Toggle
+                self.handle_mouse_button(button, true, flags, cell_position);
+                self.handle_mouse_button(button, false, flags, cell_position);
+            }
         }
 
         self.scroll_states[0] = self.scroll_states[0].fract();
@@ -864,6 +923,7 @@ impl Perform for Performer {
                     true => {},
                     false => {
                         match params[0] {
+                            1 => self.terminal_state.application_cursor_keys = enabled,
                             7 => self.terminal_state.grid.autowrap = enabled,
                             25 => self.terminal_state.cursor_state.visible = enabled,
                             1000 => self.terminal_state.mouse_tracking_mode = match enabled {
