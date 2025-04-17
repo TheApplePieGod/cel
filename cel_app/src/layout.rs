@@ -137,7 +137,8 @@ impl Layout {
             min_local_offset = min_local_offset.min(local_offset - height);
 
             let (bg_color, divider_color) = match ctx.get_exit_code() {
-                None | Some(0) => (bg_color, divider_color),
+                // Success or CTRL+C
+                None | Some(0) | Some(130) => (bg_color, divider_color),
                 // Error code
                 _ => (err_bg_color, err_divider_color)
             };
