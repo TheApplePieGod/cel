@@ -20,6 +20,7 @@ pub struct Layout {
     scroll_offset: f32,
     context: TerminalContext,
 
+    last_physical_lines: usize,
     last_fullscreen_state: bool,
     last_num_onscreen_widgets: u32,
     last_accumulated_render_stats: RenderStats,
@@ -51,6 +52,7 @@ impl Layout {
             scroll_offset: 0.0,
             context: TerminalContext::new(max_rows, max_cols, cwd),
 
+            last_physical_lines: 0,
             last_fullscreen_state: false,
             last_num_onscreen_widgets: 0,
             last_accumulated_render_stats: Default::default(),
@@ -68,8 +70,10 @@ impl Layout {
         let (ctx_event, ctx_terminated) = self.context.update(input.as_deref_mut());
         any_event |= ctx_event;
 
-        if self.context.just_split() {
+        let num_lines = self.context.get_primary_widget().get_num_physical_lines();
+        if self.context.just_split() || num_lines != self.last_physical_lines {
             self.scroll_offset = 0.0;
+            self.last_physical_lines = num_lines;
         }
 
         // Perform a hard resize when the fullscreen state changes. This ensures

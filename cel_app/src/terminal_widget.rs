@@ -203,6 +203,10 @@ impl TerminalWidget {
         self.get_num_physical_lines().max(virtual_lines) as f32 * line_size_screen + padding[1] * 2.0
     }
 
+    pub fn get_num_physical_lines(&self) -> usize {
+        self.ansi_handler.get_terminal_state().get_num_lines(true)
+    }
+
     pub fn set_primary(&mut self, primary: bool) {
         self.primary = primary;
         if !primary {
@@ -224,10 +228,6 @@ impl TerminalWidget {
     pub fn toggle_debug_line_numbers(&mut self) { self.debug_line_number = !self.debug_line_number }
     pub fn toggle_debug_char_numbers(&mut self) { self.debug_char_number = !self.debug_char_number }
     pub fn toggle_debug_show_cursor(&mut self) { self.debug_show_cursor = !self.debug_show_cursor }
-
-    fn get_num_physical_lines(&self) -> usize {
-        self.ansi_handler.get_terminal_state().get_num_lines(true)
-    }
 
     fn get_num_virtual_lines(
         &self,
