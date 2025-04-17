@@ -22,9 +22,6 @@ pub struct TerminalWidget {
     expanded: bool,
 
     padding_px: [f32; 2],
-    overlay_padding_px: [f32; 2],
-    icon_size_px: f32,
-    icon_gap_px: f32,
 
     debug_line_number: bool,
     debug_char_number: bool,
@@ -45,9 +42,6 @@ impl TerminalWidget {
             expanded: true,
 
             padding_px: [12.0, 12.0],
-            overlay_padding_px: [6.0, 6.0],
-            icon_size_px: 16.0,
-            icon_gap_px: 4.0,
 
             debug_line_number: false,
             debug_char_number: false,
@@ -90,27 +84,28 @@ impl TerminalWidget {
         &mut self,
         renderer: &mut Renderer,
         input: &Input,
-        position: &LayoutPosition,
+        widget_pos: &LayoutPosition,
+        layout_pos: &LayoutPosition,
         char_size_px: f32,
         min_lines: u32,
         bg_color: Option<[f32; 4]>,
         divider_color: Option<[f32; 4]>,
     ) -> bool {
         let padding = self.get_padding(renderer);
-        let max_rows = renderer.get_max_lines(position.max_size[1] - padding[1] * 2.0, char_size_px);
-        let max_cols = renderer.get_chars_per_line(position.max_size[0] - padding[0] * 2.0, char_size_px);
-        let rc = renderer.compute_render_constants(position.max_size[0], max_cols);
+        let max_rows = renderer.get_max_lines(widget_pos.max_size[1] - padding[1] * 2.0, char_size_px);
+        let max_cols = renderer.get_chars_per_line(widget_pos.max_size[0] - padding[0] * 2.0, char_size_px);
+        let rc = renderer.compute_render_constants(widget_pos.max_size[0], max_cols);
         let line_height_screen = rc.char_size_y_screen;
 
         // Always resize when rendered to ensure reflow has properly occurred
         self.resize(max_rows, max_cols, false);
 
-        let mut real_position = *position;
+        let mut real_position = *widget_pos;
         if self.ansi_handler.is_alt_screen_buf_active() {
             // Align the widget such that the first line is at the top of the screen, rather
             // than the bottom always being at the bottom if the lines do not fully fill up
             // the screen space
-            let excess_space = position.max_size[1] - (line_height_screen * self.ansi_handler.get_height() as f32);
+            let excess_space = widget_pos.max_size[1] - (line_height_screen * self.ansi_handler.get_height() as f32);
             real_position.offset[1] -= excess_space;
         }
 
@@ -124,7 +119,7 @@ impl TerminalWidget {
 
         self.update_mouse_input(renderer, input, &real_position, &rc, bg_height, max_cols);
 
-        self.render_overlay(input, renderer, &real_position, bg_height)
+        self.render_overlay(input, renderer, &real_position, &layout_pos, bg_height, char_size_px)
     }
 
     pub fn get_debug_lines(&self) -> Vec<String> {
@@ -408,8 +403,10 @@ impl TerminalWidget {
         &mut self,
         input: &Input,
         renderer: &mut Renderer,
-        position: &LayoutPosition,
+        widget_pos: &LayoutPosition,
+        layout_pos: &LayoutPosition,
         bg_height: f32,
+        char_size_px: f32
     ) -> bool {
         if self.primary || !self.is_mouse_in_widget() {
             return false;
@@ -418,13 +415,17 @@ impl TerminalWidget {
         let mut should_rerender = false;
 
         let icons = ["📋", "❌"];
+        let icon_size_px = char_size_px * 3.0;
+        let icon_gap_px = char_size_px * 0.5;
+        let icon_padding_px = char_size_px;
         for (i, icon) in icons.into_iter().enumerate() {
-            let x_pos = self.icon_size_px * (i as f32 + 1.0) + self.icon_gap_px * i as f32 + self.overlay_padding_px[0];
+            let x_pos = icon_size_px * (i as f32 + 1.0) + icon_gap_px * i as f32 + icon_padding_px;
+            let y_pos = (widget_pos.offset[1] - bg_height).max(layout_pos.offset[1]);
             let button = Button::new_px(
-                [self.icon_size_px, self.icon_size_px],
+                [icon_size_px, icon_size_px],
                 [
                     renderer.get_width() as f32 - x_pos,
-                    (position.offset[1] - bg_height) * renderer.get_height() as f32 + self.overlay_padding_px[1]
+                    y_pos * renderer.get_height() as f32 + icon_padding_px
                 ]
             );
 
@@ -432,7 +433,7 @@ impl TerminalWidget {
                 renderer,
                 &[1.0, 1.0, 1.0],
                 &[0.0, 0.0, 0.0, 0.0],
-                self.icon_size_px,
+                icon_size_px,
                 icon
             );
 
