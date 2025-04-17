@@ -122,10 +122,6 @@ impl Layout {
         let offset_x_screen = self.offset_x_screen;
         let char_size_px = self.char_size_px;
 
-        let max_cols = renderer.get_chars_per_line(self.width_screen, self.char_size_px);
-        let rc = renderer.compute_render_constants(self.width_screen, max_cols);
-        let line_size_screen = rc.char_size_y_screen;
-
         renderer.enable_scissor();
         renderer.update_scissor_screen(
             self.offset_x_screen,
