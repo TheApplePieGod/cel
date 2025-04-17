@@ -309,8 +309,16 @@ impl TerminalWidget {
                     );
                 }
 
-                let scroll_scale_x = 4.0 / rc.char_size_x_px; // Empirical
-                let scroll_scale_y = 4.0 / rc.char_size_y_px; // Empirical
+                // Empirical
+                #[cfg(target_os = "macos")]
+                let scroll_scale = 4.0;
+                #[cfg(target_os = "linux")]
+                let scroll_scale = 12.0;
+                #[cfg(target_os = "windows")]
+                let scroll_scale = 12.0;
+
+                let scroll_scale_x = scroll_scale / rc.char_size_x_px;
+                let scroll_scale_y = scroll_scale / rc.char_size_y_px;
                 let scroll_delta = input.get_scroll_delta();
                 self.ansi_handler.handle_scroll(
                     scroll_delta[0] * scroll_scale_x,

@@ -193,7 +193,7 @@ impl Default for TerminalState {
             style_state: Default::default(),
             background_color: [0.0, 0.0, 0.0],
             mouse_mode: MouseMode::Default,
-            mouse_tracking_mode: MouseTrackingMode::Default,
+            mouse_tracking_mode: MouseTrackingMode::Disabled,
             bracketed_paste_enabled: false,
             alternate_scroll_enabled: true,
             application_cursor_keys: false,
