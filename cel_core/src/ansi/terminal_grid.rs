@@ -454,7 +454,8 @@ impl TerminalGrid {
                 // in the scrolling region with the next or prev depending on direction,
                 // erasing the final line at the end
 
-                todo!("Scroll region with x margin");
+                // TODO
+                //todo!("Scroll region with x margin");
             }
         }
     }
