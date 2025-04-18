@@ -313,9 +313,9 @@ impl TerminalWidget {
                 #[cfg(target_os = "macos")]
                 let scroll_scale = 4.0;
                 #[cfg(target_os = "linux")]
-                let scroll_scale = 12.0;
+                let scroll_scale = 16.0;
                 #[cfg(target_os = "windows")]
-                let scroll_scale = 12.0;
+                let scroll_scale = 16.0;
 
                 let scroll_scale_x = scroll_scale / rc.char_size_x_px;
                 let scroll_scale_y = scroll_scale / rc.char_size_y_px;

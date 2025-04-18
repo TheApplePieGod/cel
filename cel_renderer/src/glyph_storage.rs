@@ -371,7 +371,7 @@ impl GlyphStorage {
             }
         };
 
-        image = image.flipv().resize(
+        image = image.flipv().resize_exact(
             MSDF_SIZE,
             MSDF_SIZE,
             image::imageops::FilterType::Lanczos3
