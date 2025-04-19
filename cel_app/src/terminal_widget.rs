@@ -225,6 +225,12 @@ impl TerminalWidget {
         }
     }
 
+    pub fn is_command_running(&self) -> bool {
+        // Good heuristic for now (always false after preexec) but maybe will
+        // need to change when we introduce support for other shells
+        !self.ansi_handler.get_terminal_state().clear_on_resize
+    }
+
     pub fn is_empty(&self) -> bool { self.ansi_handler.is_empty() }
     pub fn is_fullscreen(&self) -> bool { self.ansi_handler.get_terminal_state().alt_screen_buffer_state == BufferState::Active }
     pub fn is_bracketed_paste_enabled(&self) -> bool { self.ansi_handler.get_terminal_state().bracketed_paste_enabled }
