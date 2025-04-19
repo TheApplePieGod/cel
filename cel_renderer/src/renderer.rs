@@ -365,6 +365,22 @@ impl Renderer {
         unsafe { gl::Scissor(scaled_x, scaled_y, scaled_width, scaled_height) }
     }
 
+    pub fn enable_blending(&self) {
+        unsafe {
+            gl::Enable(gl::BLEND);
+            gl::BlendFuncSeparate(
+                gl::SRC_ALPHA,
+                gl::ONE_MINUS_SRC_ALPHA,
+                gl::ONE,
+                gl::ONE_MINUS_SRC_ALPHA
+            );
+        }
+    }
+
+    pub fn disable_blending(&self) {
+        unsafe { gl::Disable(gl::BLEND); }
+    }
+
     pub fn compute_visible_lines(
         &self,
         terminal_state: &TerminalState,
@@ -1059,24 +1075,6 @@ impl Renderer {
         unsafe {
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
-        }
-    }
-
-    fn enable_blending(&self) {
-        unsafe {
-            gl::Enable(gl::BLEND);
-            gl::BlendFuncSeparate(
-                gl::SRC_ALPHA,
-                gl::ONE_MINUS_SRC_ALPHA,
-                gl::ONE,
-                gl::ONE_MINUS_SRC_ALPHA
-            );
-        }
-    }
-
-    fn disable_blending(&self) {
-        unsafe {
-            gl::Disable(gl::BLEND);
         }
     }
 

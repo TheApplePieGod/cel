@@ -122,7 +122,7 @@ impl Layout {
         err_bg_color: Option<[f32; 4]>,
         err_divider_color: Option<[f32; 4]>,
         renderer: &mut Renderer,
-        input: &Input
+        input: &mut Input
     ) -> bool {
         let min_widget_lines = self.min_widget_lines;
         let char_size_px = self.char_size_px;

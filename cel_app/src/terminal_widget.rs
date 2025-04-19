@@ -2,7 +2,7 @@ use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent};
 use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
-use crate::{button::Button, input::Input, layout::LayoutPosition, terminal_context::TerminalContext};
+use crate::{button::Button, input::{Input, InputEvent}, layout::LayoutPosition};
 
 const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
     (ansi::MouseButton::Mouse1, glfw::MouseButton::Button1),
@@ -16,6 +16,10 @@ pub struct TerminalWidget {
     last_render_stats: RenderStats,
     last_mouse_pos_cell: [usize; 2],
     last_mouse_pos_widget: [f32; 2],
+
+    // Exclusive
+    current_selection_range: [usize; 2],
+    is_dragging: bool,
 
     primary: bool,
     closed: bool,
@@ -38,6 +42,9 @@ impl TerminalWidget {
             last_render_stats: Default::default(),
             last_mouse_pos_cell: [0, 0],
             last_mouse_pos_widget: [0.0, 0.0],
+
+            current_selection_range: [0, 0],
+            is_dragging: false,
 
             primary: true,
             closed: false,
@@ -85,7 +92,7 @@ impl TerminalWidget {
     pub fn render(
         &mut self,
         renderer: &mut Renderer,
-        input: &Input,
+        input: &mut Input,
         widget_pos: &LayoutPosition,
         layout_pos: &LayoutPosition,
         char_size_px: f32,
@@ -120,6 +127,8 @@ impl TerminalWidget {
         self.render_terminal(renderer, &real_position, min_lines, max_cols, &bg_color);
 
         self.update_input(renderer, input, &real_position, &rc, bg_height, max_cols);
+
+        self.render_selected_text(renderer, &real_position, &rc, bg_height, max_cols);
 
         self.render_overlay(input, renderer, &real_position, &layout_pos, bg_height, char_size_px)
     }
@@ -250,7 +259,7 @@ impl TerminalWidget {
     fn update_input(
         &mut self,
         renderer: &Renderer,
-        input: &Input,
+        input: &mut Input,
         position: &LayoutPosition,
         rc: &RenderConstants,
         bg_height: f32,
@@ -275,11 +284,12 @@ impl TerminalWidget {
         ];
 
         let widget_row = virtual_lines as f32 * mouse_pos_widget[1];
+        let widget_col = max_cols as f32 * mouse_pos_widget[0];
         let screen_row =
             widget_row +
             max_rows.min(virtual_lines) as f32 -
             virtual_lines as f32;
-        let screen_col = max_cols as f32 * mouse_pos_widget[0];
+        let screen_col = widget_col;
 
         let mut key_flags: ansi::KeyboardModifierFlags = ansi::KeyboardModifierFlags::default();
         if input.is_shift_down() {
@@ -295,6 +305,8 @@ impl TerminalWidget {
             key_flags.insert(ansi::KeyboardModifierFlags::Alt);
         }
 
+        // Perform bounds checking to see if the mouse is currently within the "active"
+        // part of the widget, i.e below [0, 0] in terminal space
         if screen_col >= 0.0 && screen_col < max_cols as f32 && screen_row >= 0.0 && screen_row < virtual_lines as f32 {
             let cursor = [screen_col as usize, screen_row as usize];
 
@@ -330,6 +342,69 @@ impl TerminalWidget {
 
             self.last_mouse_pos_cell = cursor;
         }
+
+        // Handle text dragging when with the widget bounds
+        if widget_row >= 0.0 && widget_row < virtual_lines as f32 && widget_col >= 0.0 && widget_col < max_cols as f32 {
+            let cur_widget_pos = (widget_row as u32 * max_cols + widget_col.ceil() as u32) as usize; 
+            if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
+                self.is_dragging = true;
+                self.current_selection_range = [cur_widget_pos, cur_widget_pos];
+            }
+            if self.is_dragging {
+                self.current_selection_range[1] = cur_widget_pos;
+            }
+        } else if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
+            // Otherwise clear selection when clicking
+            self.current_selection_range = [0, 0];
+        }
+
+        // Always reset dragging state on mouse release
+        if input.get_mouse_just_released(glfw::MouseButton::Button1) {
+            self.is_dragging = false;
+        }
+
+        // Try to consume copy, if we have a selected region
+        input.maybe_consume_event(InputEvent::Copy, || {
+            if self.current_selection_range[0] == self.current_selection_range[1] {
+                return false;
+            }
+
+            match ClipboardContext::new() {
+                Ok(mut ctx) => {
+                    let grid = &self.ansi_handler.get_terminal_state().grid;
+
+                    let mut lines = vec![];
+                    self.iter_selected_region(max_cols, |y, start_x, end_x| {
+                        if y >= grid.screen_buffer.len() {
+                            return;
+                        }
+
+                        let line = &grid.screen_buffer[y];
+                        let mut line_text = String::new();
+                        for x in start_x..end_x {
+                            if x >= line.len() {
+                                break;
+                            }
+
+                            grid.append_cell_content(&line[x], &mut line_text);
+                        }
+
+                        lines.push(line_text);
+                    });
+
+                    let text = lines.join("\n");
+                    if !text.is_empty() {
+                        let _ = ctx.set_contents(text);
+                    }
+
+                    true
+                }
+                Err(err) => {
+                    log::error!("Failed to initialize clipboard context: {}", err);
+                    false
+                }
+            }
+        });
 
         // Only send special key inputs to active widget
         if self.primary && key_flags.is_empty() {
@@ -385,6 +460,31 @@ impl TerminalWidget {
             &[1.0, size],
             color
         );
+    }
+
+    fn render_selected_text(
+        &mut self,
+        renderer: &mut Renderer,
+        position: &LayoutPosition,
+        rc: &RenderConstants,
+        height: f32,
+        max_cols: u32
+    ) {
+        renderer.enable_blending();
+
+        let padding = self.get_padding(renderer);
+        self.iter_selected_region(max_cols, |y, start_x, end_x| {
+            renderer.draw_quad(
+                &[
+                    position.offset[0] + padding[0] + start_x as f32 * rc.char_size_x_screen,
+                    position.offset[1] - height + padding[1] + y as f32 * rc.char_size_y_screen
+                ],
+                &[(end_x - start_x) as f32 * rc.char_size_x_screen, rc.char_size_y_screen],
+                &[1.0, 0.0, 0.0, 0.25]
+            );
+        });
+
+        renderer.disable_blending();
     }
 
     fn render_terminal(
@@ -485,5 +585,27 @@ impl TerminalWidget {
     fn is_mouse_in_widget(&self) -> bool {
         self.last_mouse_pos_widget[0] >= 0.0 && self.last_mouse_pos_widget[0] < 1.0 &&
         self.last_mouse_pos_widget[1] >= 0.0 && self.last_mouse_pos_widget[1] < 1.0
+    }
+
+    fn iter_selected_region(&self, max_cols: u32, mut fun: impl FnMut(usize, usize, usize)) {
+        let max_cols = max_cols as usize;
+        let min_idx = self.current_selection_range.iter().min().unwrap();
+        let max_idx = self.current_selection_range.iter().max().unwrap();
+        let start_y = min_idx / max_cols;
+        let end_y = max_idx / max_cols;
+        for y in start_y..=end_y {
+            let start_x = match y == start_y {
+                true => min_idx % max_cols,
+                false => 0
+            };
+            let end_x = match y == end_y {
+                true => max_idx % max_cols,
+                false => max_cols
+            };
+
+            if start_x != end_x {
+                fun(y, start_x, end_x);
+            }
+        }
     }
 }

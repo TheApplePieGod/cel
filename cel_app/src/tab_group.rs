@@ -195,7 +195,7 @@ impl TabGroup {
         &mut self,
         bg_color: Option<[f32; 4]>,
         renderer: &mut Renderer,
-        input: &Input
+        input: &mut Input
     ) -> bool {
         let mut should_rerender = false;
 

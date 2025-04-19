@@ -190,7 +190,7 @@ impl Window {
                     renderer,
                     tab_group,
                     self.window.as_ref().borrow_mut().deref_mut(),
-                    self.input.as_ref().borrow().deref()
+                    self.input.as_ref().borrow_mut().deref_mut()
                 );
                 self.last_render_time = Instant::now();
                 did_render = true;
@@ -344,7 +344,7 @@ impl Window {
         renderer: &mut Renderer,
         tab_group: &mut TabGroup,
         window: &mut glfw::PWindow,
-        input: &Input
+        input: &mut Input
     ) -> bool {
         Self::begin_frame(clear_color);
 

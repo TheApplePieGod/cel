@@ -22,6 +22,7 @@ pub enum InputEvent {
     TabPrev,
     TabMoveLeft,
     TabMoveRight,
+    Copy,
     Paste,
 }
 
@@ -80,7 +81,8 @@ impl Input {
                     if mods.contains(modifier_key) {
                         let mut handled = true;
                         match *key {
-                            Key::V  => self.set_event(InputEvent::Paste),
+                            Key::C => self.set_event(InputEvent::Copy),
+                            Key::V => self.set_event(InputEvent::Paste),
                             _ => handled = false
                         }
 
@@ -166,6 +168,20 @@ impl Input {
             self.event_flags[event] = false;
             fun();
             true
+        } else {
+            false
+        }
+    }
+
+    // Returns true if the event was consumed
+    pub fn maybe_consume_event(&mut self, event: InputEvent, mut fun: impl FnMut() -> bool) -> bool {
+        if self.event_flags[event] {
+            if fun() {
+                self.event_flags[event] = false;
+                true
+            } else {
+                false
+            }
         } else {
             false
         }

@@ -380,6 +380,16 @@ impl TerminalGrid {
         }
     }
 
+    /// Append the stringified content of a cell to the provided string
+    pub fn append_cell_content(&self, cell: &ScreenBufferElement, str: &mut String) {
+        match &cell.elem {
+            CellContent::Char(c, _) => str.push(*c),
+            CellContent::Grapheme(s, _) => str.push_str(&s),
+            CellContent::Continuation(_) => {}
+            CellContent::Empty => str.push(' ')
+        }
+    }
+
     /// Gets the raw text contained in the screen buffer
     pub fn get_text(&self) -> String {
         let mut raw_lines = vec![];
@@ -387,12 +397,7 @@ impl TerminalGrid {
         for buf_line in &self.screen_buffer {
             let mut line = String::new();
             for elem in buf_line {
-                match &elem.elem {
-                    CellContent::Char(c, _) => line.push(*c),
-                    CellContent::Grapheme(s, _) => line.push_str(&s),
-                    CellContent::Continuation(_) => {}
-                    CellContent::Empty => line.push(' ')
-                }
+                self.append_cell_content(elem, &mut line);
             }
             raw_lines.push(line);
         }
