@@ -22,7 +22,7 @@ impl TerminalContext {
     pub fn new(max_rows: u32, max_cols: u32, cwd: Option<&str>) -> Self {
         Self {
             commands: Commands::new(max_rows, max_cols, cwd),
-            widgets: vec![TerminalWidget::new(max_rows, max_cols)],
+            widgets: vec![TerminalWidget::new(max_rows, max_cols, cwd)],
 
             input_buffer: vec![],
             output_buffer: vec![],
@@ -159,7 +159,7 @@ impl TerminalContext {
                         // Primary widget is always the last one
                         let size = self.commands.get_size();
                         self.widgets.last_mut().unwrap().set_primary(false);
-                        self.widgets.push(TerminalWidget::new(size[0], size[1]));
+                        self.widgets.push(TerminalWidget::new(size[0], size[1], None));
                         self.just_split = true;
                     }
                     self.just_split = split;

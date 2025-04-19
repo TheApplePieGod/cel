@@ -16,8 +16,6 @@ use crate::{
     util::Util,
 };
 
-const MAX_CHARACTERS: u32 = 50000;
-
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct FgQuadData {
