@@ -178,6 +178,10 @@ impl Layout {
 
         renderer.disable_scissor();
 
+        // After we've rendered all widgets, consume the copy event to make sure
+        // it doesn't stick around if no widgets consumed it
+        input.consume_event(InputEvent::Copy, || {});
+
         // Lock scrolling to the last widget
         let top = position.offset[1];
         self.can_scroll_up = min_local_offset < top;

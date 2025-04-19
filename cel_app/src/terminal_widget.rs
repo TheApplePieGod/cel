@@ -1,4 +1,4 @@
-use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent};
+use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent, MouseTrackingMode};
 use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
@@ -128,7 +128,9 @@ impl TerminalWidget {
 
         self.update_input(renderer, input, &real_position, &rc, bg_height, max_cols);
 
-        self.render_selected_text(renderer, &real_position, &rc, bg_height, max_cols);
+        if self.should_handle_text_selection() {
+            self.render_selected_text(renderer, &real_position, &rc, bg_height, max_cols);
+        }
 
         self.render_overlay(input, renderer, &real_position, &layout_pos, bg_height, char_size_px)
     }
@@ -343,68 +345,77 @@ impl TerminalWidget {
             self.last_mouse_pos_cell = cursor;
         }
 
-        // Handle text dragging when with the widget bounds
-        if widget_row >= 0.0 && widget_row < virtual_lines as f32 && widget_col >= 0.0 && widget_col < max_cols as f32 {
-            let cur_widget_pos = (widget_row as u32 * max_cols + widget_col.ceil() as u32) as usize; 
-            if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
-                self.is_dragging = true;
-                self.current_selection_range = [cur_widget_pos, cur_widget_pos];
-            }
-            if self.is_dragging {
-                self.current_selection_range[1] = cur_widget_pos;
-            }
-        } else if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
-            // Otherwise clear selection when clicking
-            self.current_selection_range = [0, 0];
-        }
-
-        // Always reset dragging state on mouse release
-        if input.get_mouse_just_released(glfw::MouseButton::Button1) {
-            self.is_dragging = false;
-        }
-
-        // Try to consume copy, if we have a selected region
-        input.maybe_consume_event(InputEvent::Copy, || {
-            if self.current_selection_range[0] == self.current_selection_range[1] {
-                return false;
+        if self.should_handle_text_selection() {
+            // Handle text dragging when with the widget bounds
+            if widget_row >= 0.0 && widget_row < virtual_lines as f32 && widget_col >= 0.0 && widget_col < max_cols as f32 {
+                let cur_widget_pos = (widget_row as u32 * max_cols + widget_col.round() as u32) as usize; 
+                if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
+                    self.is_dragging = true;
+                    self.current_selection_range = [cur_widget_pos, cur_widget_pos];
+                }
+                if self.is_dragging {
+                    self.current_selection_range[1] = cur_widget_pos;
+                }
+            } else if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
+                // Otherwise clear selection when clicking
+                self.current_selection_range = [0, 0];
             }
 
-            match ClipboardContext::new() {
-                Ok(mut ctx) => {
-                    let grid = &self.ansi_handler.get_terminal_state().grid;
+            // Always reset dragging state on mouse release
+            if input.get_mouse_just_released(glfw::MouseButton::Button1) {
+                self.is_dragging = false;
+            }
 
-                    let mut lines = vec![];
-                    self.iter_selected_region(max_cols, |y, start_x, end_x| {
-                        if y >= grid.screen_buffer.len() {
-                            return;
-                        }
+            // Try to consume copy, if we have a selected region
+            input.maybe_consume_event(InputEvent::Copy, || {
+                if self.current_selection_range[0] == self.current_selection_range[1] {
+                    return false;
+                }
 
-                        let line = &grid.screen_buffer[y];
-                        let mut line_text = String::new();
-                        for x in start_x..end_x {
-                            if x >= line.len() {
-                                break;
+                match ClipboardContext::new() {
+                    Ok(mut ctx) => {
+                        let grid = &self.ansi_handler.get_terminal_state().grid;
+
+                        let mut lines = vec![];
+                        self.iter_selected_region(max_cols, |y, start_x, end_x| {
+                            if y >= grid.screen_buffer.len() {
+                                return;
                             }
 
-                            grid.append_cell_content(&line[x], &mut line_text);
+                            let line = &grid.screen_buffer[y];
+                            let mut line_text = String::new();
+                            for x in start_x..end_x {
+                                if x >= line.len() {
+                                    break;
+                                }
+
+                                grid.append_cell_content(&line[x], &mut line_text);
+                            }
+
+                            lines.push(line_text);
+                        });
+
+                        let text = lines.join("\n");
+                        if !text.is_empty() {
+                            let _ = ctx.set_contents(text);
                         }
 
-                        lines.push(line_text);
-                    });
+                        // Reset selection
+                        //self.current_selection_range = [0, 0];
 
-                    let text = lines.join("\n");
-                    if !text.is_empty() {
-                        let _ = ctx.set_contents(text);
+                        true
                     }
-
-                    true
+                    Err(err) => {
+                        log::error!("Failed to initialize clipboard context: {}", err);
+                        false
+                    }
                 }
-                Err(err) => {
-                    log::error!("Failed to initialize clipboard context: {}", err);
-                    false
-                }
-            }
-        });
+            });
+        } else {
+            // Ensure state is reset
+            self.is_dragging = false;
+            self.current_selection_range = [0, 0];
+        }
 
         // Only send special key inputs to active widget
         if self.primary && key_flags.is_empty() {
@@ -480,7 +491,7 @@ impl TerminalWidget {
                     position.offset[1] - height + padding[1] + y as f32 * rc.char_size_y_screen
                 ],
                 &[(end_x - start_x) as f32 * rc.char_size_x_screen, rc.char_size_y_screen],
-                &[1.0, 0.0, 0.0, 0.25]
+                &[0.25, 0.5, 0.5, 0.3]
             );
         });
 
@@ -580,6 +591,11 @@ impl TerminalWidget {
         }
 
         should_rerender
+    }
+
+    fn should_handle_text_selection(&self) -> bool {
+        // Disable selection when mouse reporting is enabled 
+        self.ansi_handler.get_terminal_state().mouse_tracking_mode == MouseTrackingMode::Disabled
     }
 
     fn is_mouse_in_widget(&self) -> bool {
