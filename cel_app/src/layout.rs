@@ -69,11 +69,14 @@ impl Layout {
         let (ctx_event, ctx_terminated) = self.context.update(input.as_deref_mut());
         any_event |= ctx_event;
 
+        // Update the scroll offset when the primary widget is outputting new lines. This way,
+        // if the user is scrolled up, the layout does not visibly shift.
         let new_primary_lines = self.context.get_primary_widget().get_num_physical_lines();
-        if new_primary_lines > old_primary_lines {
-            //self.scroll_offset -= (new_primary_lines - old_primary_lines) as f32;
+        if new_primary_lines > old_primary_lines && self.scroll_offset <= -1.0 {
+            self.scroll_offset -= (new_primary_lines - old_primary_lines) as f32;
         }
 
+        // On certain actions, reset the scroll offset to the bottom of the screen
         let command_running_state = self.context.get_primary_widget().is_command_running();
         if self.context.just_split() || command_running_state != self.last_command_running_state {
             self.scroll_offset = 0.0;
@@ -91,8 +94,7 @@ impl Layout {
         // Handle input events
         if let Some(input) = input {
             // Update scroll
-            //let speed_factor = 1.0;
-            let speed_factor = 0.01;
+            let speed_factor = 1.0; // Line space
             let scroll = input.get_scroll_delta()[1];
             if scroll < 0.0 || self.can_scroll_up {
                 if scroll < 0.0 {
@@ -277,10 +279,17 @@ impl Layout {
         renderer: &mut Renderer,
         mut func: impl FnMut(&mut Renderer, &mut TerminalWidget, f32, f32)
     ) {
+        let primary_rc = self.context.get_primary_widget().get_render_constants(
+            renderer,
+            self.position.max_size[0],
+            self.position.max_size[1],
+            self.char_size_px
+        );
+
         let primary_fullscreen = self.context.get_primary_widget().is_fullscreen();
         let scroll_offset = match primary_fullscreen {
             true => 0.0,
-            false => self.scroll_offset
+            false => self.scroll_offset * primary_rc.char_size_y_screen
         };
 
         // Draw visible widgets except the primary
@@ -323,7 +332,7 @@ impl Layout {
                 let height_diff = ctx_height_post - ctx_height_pre;
                 let is_not_top_widget = start_offset - ctx_height_pre > top;
                 if height_diff != 0.0 && is_not_top_widget {
-                    self.scroll_offset = (self.scroll_offset - height_diff).min(0.0);
+                    self.scroll_offset = (self.scroll_offset - (height_diff / primary_rc.char_size_y_screen)).min(0.0)
                 }
             }
 
