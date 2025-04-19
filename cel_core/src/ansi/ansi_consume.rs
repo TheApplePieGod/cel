@@ -108,7 +108,8 @@ impl AnsiHandler {
         self.scroll_states[1] += delta_y;
 
         // Horizontal scroll
-        if self.scroll_states[0].abs() >= 1.0 {
+        let horiz_cells = self.scroll_states[0].trunc().abs() as i32;
+        if horiz_cells >= 1 {
             let left = self.scroll_states[0] > 0.0;
             let button = match left {
                 true => MouseButton::Mouse6,
@@ -116,35 +117,42 @@ impl AnsiHandler {
             };
 
             // Toggle
-            self.handle_mouse_button(button, true, flags, cell_position);
-            self.handle_mouse_button(button, false, flags, cell_position);
+            for _ in 0..horiz_cells {
+                self.handle_mouse_button(button, true, flags, cell_position);
+                self.handle_mouse_button(button, false, flags, cell_position);
+            }
         }
 
         // Vertical scroll
-        if self.scroll_states[1].abs() >= 1.0 {
+        let vert_cells = self.scroll_states[1].trunc().abs() as i32;
+        if vert_cells >= 1 {
             let up = self.scroll_states[1] > 0.0;
 
             let state = &self.performer.terminal_state;
             let use_alt_scroll = self.is_alt_screen_buf_active()
                                  && state.alternate_scroll_enabled
                                  && state.mouse_tracking_mode == MouseTrackingMode::Disabled;
-            if  use_alt_scroll {
-                // Alternate scroll is active within the ASB, send cursor commands rather than
-                // encoded mouse input
-                match up {
-                    true => self.performer.output_stream.extend_from_slice(state.get_up_sequence()),
-                    false => self.performer.output_stream.extend_from_slice(state.get_down_sequence()),
-                }
-                
-            } else {
-                let button = match up {
-                    true => MouseButton::Mouse4,
-                    false => MouseButton::Mouse5,
-                };
 
-                // Toggle
-                self.handle_mouse_button(button, true, flags, cell_position);
-                self.handle_mouse_button(button, false, flags, cell_position);
+            for _ in 0..vert_cells {
+                let state = &self.performer.terminal_state;
+                if  use_alt_scroll {
+                    // Alternate scroll is active within the ASB, send cursor commands rather than
+                    // encoded mouse input
+                    match up {
+                        true => self.performer.output_stream.extend_from_slice(state.get_up_sequence()),
+                        false => self.performer.output_stream.extend_from_slice(state.get_down_sequence()),
+                    }
+                    
+                } else {
+                    let button = match up {
+                        true => MouseButton::Mouse4,
+                        false => MouseButton::Mouse5,
+                    };
+
+                    // Toggle
+                    self.handle_mouse_button(button, true, flags, cell_position);
+                    self.handle_mouse_button(button, false, flags, cell_position);
+                }
             }
         }
 
