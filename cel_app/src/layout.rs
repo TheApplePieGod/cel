@@ -1,4 +1,4 @@
-use cel_renderer::renderer::{RenderStats, Renderer};
+use cel_renderer::renderer::{self, RenderConstants, RenderStats, Renderer};
 
 use crate::terminal_context::TerminalContext;
 use crate::input::{Input, InputEvent};
@@ -36,10 +36,8 @@ impl Layout {
         default_char_size_px: f32,
         cwd: Option<&str>
     ) -> Self {
-        // Not perfect due to possible initial padding of the widget, but difference
-        // should be negligible so it shouldn't matter
-        let max_rows = renderer.get_max_lines(height_screen, char_size_px);
-        let max_cols = renderer.get_chars_per_line(width_screen, char_size_px);
+        // Approximation, but should be fine for the initial size (does not account for padding)
+        let rc = renderer.compute_render_constants(width_screen, height_screen, char_size_px);
 
         Self {
             position: LayoutPosition {
@@ -49,7 +47,7 @@ impl Layout {
 
             can_scroll_up: false,
             scroll_offset: 0.0,
-            context: TerminalContext::new(max_rows, max_cols, cwd),
+            context: TerminalContext::new(rc.max_rows, rc.max_cols, cwd),
 
             last_command_running_state: false,
             last_fullscreen_state: false,
@@ -67,8 +65,14 @@ impl Layout {
         let mut any_event = false;
 
         let mut input = input;
+        let old_primary_lines = self.context.get_primary_widget().get_num_physical_lines();
         let (ctx_event, ctx_terminated) = self.context.update(input.as_deref_mut());
         any_event |= ctx_event;
+
+        let new_primary_lines = self.context.get_primary_widget().get_num_physical_lines();
+        if new_primary_lines > old_primary_lines {
+            //self.scroll_offset -= (new_primary_lines - old_primary_lines) as f32;
+        }
 
         let command_running_state = self.context.get_primary_widget().is_command_running();
         if self.context.just_split() || command_running_state != self.last_command_running_state {
@@ -207,11 +211,13 @@ impl Layout {
         // Resize context after a hard resize
         if !soft {
             // Ensure maximum size accounts for current widget padding
-            let padding = self.context.get_primary_widget().get_padding(renderer);
-            let max_rows = renderer.get_max_lines(self.position.max_size[1] - padding[1] * 2.0, self.char_size_px);
-            let max_cols = renderer.get_chars_per_line(self.position.max_size[0] - padding[0] * 2.0, self.char_size_px);
-
-            self.context.resize(max_rows, max_cols);
+            let rc = self.context.get_primary_widget().get_render_constants(
+                renderer,
+                self.position.max_size[0],
+                self.position.max_size[1],
+                self.char_size_px
+            );
+            self.context.resize(rc.max_rows, rc.max_cols);
         }
     }
 
@@ -255,13 +261,15 @@ impl Layout {
 
     // Use dummy ctx to compute the minimum widget height, max rows, max cols
     // TODO: this is not great
-    fn get_dummy_ctx_params(&self, renderer: &Renderer) -> (f32, u32, u32) {
+    fn get_dummy_ctx_params(&self, renderer: &Renderer) -> (f32, RenderConstants) {
+        let dummy_pos = LayoutPosition {
+            offset: [0.0, 1.0],
+            max_size: self.position.max_size
+        };
         let dummy_ctx = TerminalWidget::new(1, 1, None);
-        let padding = dummy_ctx.get_padding(renderer);
-        let height = dummy_ctx.get_height_screen(renderer, self.position.max_size[0], 1.0, self.char_size_px, self.min_widget_lines);
-        let max_rows = renderer.get_max_lines(self.position.max_size[1] - padding[1] * 2.0, self.char_size_px);
-        let max_cols = renderer.get_chars_per_line(self.position.max_size[0] - padding[0] * 2.0, self.char_size_px);
-        (height, max_rows, max_cols)
+        let rc = dummy_ctx.get_render_constants(renderer, dummy_pos.max_size[0], dummy_pos.max_size[1], self.char_size_px);
+        let height = dummy_ctx.get_height_screen(renderer, &dummy_pos, self.char_size_px, self.min_widget_lines);
+        (height, rc)
     }
 
     fn map_onscreen_widgets(
@@ -295,8 +303,13 @@ impl Layout {
                 break;
             }
 
+            let widget_pos = LayoutPosition {
+                offset: [self.position.offset[0], start_offset],
+                max_size: self.position.max_size
+            };
+
             // Only render if not primary (handled later) and actually visible on screen
-            let ctx_height_pre = ctx.get_height_screen(renderer, self.position.max_size[0], start_offset, self.char_size_px, self.min_widget_lines);
+            let ctx_height_pre = ctx.get_height_screen(renderer, &widget_pos, self.char_size_px, self.min_widget_lines);
             if !ctx.get_primary() && start_offset - ctx_height_pre < bottom {
                 func(renderer, ctx, start_offset, ctx_height_pre);
 
@@ -306,7 +319,7 @@ impl Layout {
                 // not at the top of the screen (i.e. when there are widgets above that would be affected by the height
                 // difference). This approach lets us perform the expensive reflow in a deferred manner only
                 // when the widget is rendered rather than doing them all at once when the screen is resized.
-                let ctx_height_post = ctx.get_height_screen(renderer, self.position.max_size[0], start_offset, self.char_size_px, self.min_widget_lines);
+                let ctx_height_post = ctx.get_height_screen(renderer, &widget_pos, self.char_size_px, self.min_widget_lines);
                 let height_diff = ctx_height_post - ctx_height_pre;
                 let is_not_top_widget = start_offset - ctx_height_pre > top;
                 if height_diff != 0.0 && is_not_top_widget {
@@ -322,9 +335,13 @@ impl Layout {
         // such that it grows when scrolling down and shrinks when scrolling up,
         // up to a minimum size
 
-        let (min_height, _, _) = self.get_dummy_ctx_params(renderer);
+        let primary_pos = LayoutPosition {
+            offset: [self.position.offset[0], bottom],
+            max_size: self.position.max_size
+        };
+        let (min_height, _) = self.get_dummy_ctx_params(renderer);
         let primary_ctx = self.context.get_primary_widget_mut();
-        let primary_height = primary_ctx.get_height_screen(renderer, self.position.max_size[0], bottom, self.char_size_px, self.min_widget_lines);
+        let primary_height = primary_ctx.get_height_screen(renderer, &primary_pos, self.char_size_px, self.min_widget_lines);
         let start_offset = (bottom - scroll_offset).min(bottom + primary_height - min_height);
         func(renderer, primary_ctx, start_offset, primary_height);
     }

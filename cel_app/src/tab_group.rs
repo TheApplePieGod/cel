@@ -49,7 +49,7 @@ impl TabGroup {
         width_screen: f32,
         height_screen: f32
     ) -> Self {
-        let default_char_size_px = 8.0;
+        let default_char_size_px = 14.0;
         let mut sessions_file_path = get_config_dir();
         sessions_file_path.push("session.json");
 

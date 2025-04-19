@@ -100,14 +100,11 @@ impl TerminalWidget {
         bg_color: Option<[f32; 4]>,
         divider_color: Option<[f32; 4]>,
     ) -> bool {
-        let padding = self.get_padding(renderer);
-        let max_rows = renderer.get_max_lines(widget_pos.max_size[1] - padding[1] * 2.0, char_size_px);
-        let max_cols = renderer.get_chars_per_line(widget_pos.max_size[0] - padding[0] * 2.0, char_size_px);
-        let rc = renderer.compute_render_constants(widget_pos.max_size[0], max_cols);
+        let rc = self.get_render_constants(renderer, widget_pos.max_size[0], widget_pos.max_size[1], char_size_px);
         let line_height_screen = rc.char_size_y_screen;
 
         // Always resize when rendered to ensure reflow has properly occurred
-        self.resize(max_rows, max_cols, false);
+        self.resize(rc.max_rows, rc.max_cols, false);
 
         let mut real_position = *widget_pos;
         if self.ansi_handler.is_alt_screen_buf_active() {
@@ -120,16 +117,16 @@ impl TerminalWidget {
 
         let bg_color = bg_color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
         let divider_color = divider_color.unwrap_or([0.1, 0.1, 0.1, 1.0]);
-        let bg_height = self.get_height_screen(renderer, real_position.offset[1], real_position.max_size[0], char_size_px, min_lines);
+        let bg_height = self.get_height_screen(renderer, &real_position, char_size_px, min_lines);
         self.render_background(renderer, &real_position, bg_height, &bg_color);
         self.render_divider(renderer, &real_position, bg_height, &divider_color);
 
-        self.render_terminal(renderer, &real_position, min_lines, max_cols, &bg_color);
+        self.render_terminal(renderer, &real_position, min_lines, char_size_px, &bg_color);
 
-        self.update_input(renderer, input, &real_position, &rc, bg_height, max_cols);
+        self.update_input(renderer, input, &real_position, &rc, bg_height);
 
         if self.should_handle_text_selection() {
-            self.render_selected_text(renderer, &real_position, &rc, bg_height, max_cols);
+            self.render_selected_text(renderer, &real_position, &rc, bg_height);
         }
 
         self.render_overlay(input, renderer, &real_position, &layout_pos, bg_height, char_size_px)
@@ -197,19 +194,32 @@ impl TerminalWidget {
         }
     }
 
-    pub fn get_height_screen(
+    pub fn get_render_constants(
         &self,
         renderer: &Renderer,
         screen_width: f32,
-        screen_offset_y: f32,
+        screen_height: f32,
+        char_size_px: f32,
+    ) -> RenderConstants {
+        let padding = self.get_padding(renderer);
+        renderer.compute_render_constants(
+            screen_width - padding[0] * 2.0,
+            screen_height - padding[1] * 2.0,
+            char_size_px
+        )
+    }
+
+    pub fn get_height_screen(
+        &self,
+        renderer: &Renderer,
+        position: &LayoutPosition,
         char_size_px: f32,
         min_lines: u32
     ) -> f32 {
+        let rc = self.get_render_constants(renderer, position.max_size[0], position.max_size[1], char_size_px);
         let padding = self.get_padding(renderer);
-        let max_cols = renderer.get_chars_per_line(screen_width, char_size_px);
-        let rc = renderer.compute_render_constants(screen_width, max_cols);
         let line_size_screen = rc.char_size_y_screen;
-        let virtual_lines = self.get_num_virtual_lines(renderer, screen_offset_y, line_size_screen, min_lines);
+        let virtual_lines = self.get_num_virtual_lines(renderer, position.offset[1], line_size_screen, min_lines);
         self.get_num_physical_lines().max(virtual_lines) as f32 * line_size_screen + padding[1] * 2.0
     }
 
@@ -271,7 +281,6 @@ impl TerminalWidget {
         position: &LayoutPosition,
         rc: &RenderConstants,
         bg_height: f32,
-        max_cols: u32
     ) {
         // Compute the target cell based on the mouse position and widget position
 
@@ -280,7 +289,7 @@ impl TerminalWidget {
         let virtual_lines = ((bg_height - padding[1] * 2.0) / rc.char_size_y_screen) as u32;
         let max_rows = self.ansi_handler.get_height();
         let height = rc.char_size_y_screen * virtual_lines as f32;
-        let width = rc.char_size_x_screen * max_cols as f32;
+        let width = rc.char_size_x_screen * rc.max_cols as f32;
         let mouse_pos_px = input.get_mouse_pos();
         let mouse_pos_screen = [
             mouse_pos_px[0] / renderer.get_width() as f32,
@@ -292,7 +301,7 @@ impl TerminalWidget {
         ];
 
         let widget_row = virtual_lines as f32 * mouse_pos_widget[1];
-        let widget_col = max_cols as f32 * mouse_pos_widget[0];
+        let widget_col = rc.max_cols as f32 * mouse_pos_widget[0];
         let screen_row =
             widget_row +
             max_rows.min(virtual_lines) as f32 -
@@ -315,7 +324,7 @@ impl TerminalWidget {
 
         // Perform bounds checking to see if the mouse is currently within the "active"
         // part of the widget, i.e below [0, 0] in terminal space
-        if screen_col >= 0.0 && screen_col < max_cols as f32 && screen_row >= 0.0 && screen_row < virtual_lines as f32 {
+        if screen_col >= 0.0 && screen_col < rc.max_cols as f32 && screen_row >= 0.0 && screen_row < virtual_lines as f32 {
             let cursor = [screen_col as usize, screen_row as usize];
 
             // Only send mouse inputs to active widget
@@ -353,8 +362,8 @@ impl TerminalWidget {
 
         if self.should_handle_text_selection() {
             // Handle text dragging when with the widget bounds
-            if widget_row >= 0.0 && widget_row < virtual_lines as f32 && widget_col >= 0.0 && widget_col < max_cols as f32 {
-                let cur_widget_pos = (widget_row as u32 * max_cols + widget_col.round() as u32) as usize; 
+            if widget_row >= 0.0 && widget_row < virtual_lines as f32 && widget_col >= 0.0 && widget_col < rc.max_cols as f32 {
+                let cur_widget_pos = (widget_row as u32 * rc.max_cols + widget_col.round() as u32) as usize; 
                 if input.get_mouse_just_pressed(glfw::MouseButton::Button1) {
                     self.is_dragging = true;
                     self.current_selection_range = [cur_widget_pos, cur_widget_pos];
@@ -383,7 +392,7 @@ impl TerminalWidget {
                         let grid = &self.ansi_handler.get_terminal_state().grid;
 
                         let mut lines = vec![];
-                        self.iter_selected_region(max_cols, |y, start_x, end_x| {
+                        self.iter_selected_region(rc.max_cols, |y, start_x, end_x| {
                             if y >= grid.screen_buffer.len() {
                                 return;
                             }
@@ -484,13 +493,12 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
         rc: &RenderConstants,
-        height: f32,
-        max_cols: u32
+        height: f32
     ) {
         renderer.enable_blending();
 
         let padding = self.get_padding(renderer);
-        self.iter_selected_region(max_cols, |y, start_x, end_x| {
+        self.iter_selected_region(rc.max_cols, |y, start_x, end_x| {
             renderer.draw_quad(
                 &[
                     position.offset[0] + padding[0] + start_x as f32 * rc.char_size_x_screen,
@@ -509,7 +517,7 @@ impl TerminalWidget {
         renderer: &mut Renderer,
         position: &LayoutPosition,
         min_lines: u32,
-        max_cols: u32,
+        char_size_px: f32,
         bg_color: &[f32; 4]
     ) {
 
@@ -534,7 +542,7 @@ impl TerminalWidget {
             &self.ansi_handler.get_terminal_state(),
             &render_size,
             &render_offset,
-            max_cols,
+            char_size_px,
             self.get_line_offset(),
             min_lines,
             self.debug_line_number,

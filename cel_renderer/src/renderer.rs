@@ -46,7 +46,9 @@ pub struct RenderConstants {
     pub char_size_y_px: f32,
     pub char_size_x_screen: f32,
     pub char_size_y_screen: f32,
-    pub atlas_pixel_size: f32
+    pub atlas_pixel_size: f32,
+    pub max_cols: u32,
+    pub max_rows: u32,
 }
 
 pub struct Renderer {
@@ -420,7 +422,7 @@ impl Renderer {
         terminal_state: &TerminalState,
         screen_size: &[f32; 2],
         screen_offset: &[f32; 2],
-        chars_per_line: u32,
+        char_size_px: f32,
         line_offset: u32,
         min_lines: u32,
         debug_line_number: bool,
@@ -431,7 +433,7 @@ impl Renderer {
         let mut stats = RenderStats::default();
 
         // Setup render state
-        let rc = self.compute_render_constants(screen_size[0], chars_per_line);
+        let rc = self.compute_render_constants(screen_size[0], screen_size[1], char_size_px);
 
         let timestamp_seconds = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -499,8 +501,8 @@ impl Renderer {
                         _ => 1.0,
                     };
                     let pos_min = [
-                        base_x + (buf_cursor.0[0] % chars_per_line as usize) as f32,
-                        y + (buf_cursor.0[0] / chars_per_line as usize) as f32,
+                        base_x + (buf_cursor.0[0] % rc.max_cols as usize) as f32,
+                        y + (buf_cursor.0[0] / rc.max_cols as usize) as f32,
                     ];
                     Self::push_fg_quad(
                         &[1.0, 0.0, 0.0],
@@ -667,7 +669,7 @@ impl Renderer {
         centered: bool,
         text: &str,
     ) {
-        let rc = self.compute_render_constants_from_height(char_height_px);
+        let rc = self.compute_render_constants(1.0, 1.0, char_height_px);
 
         let mut msdf_quads: Vec<FgQuadData> = vec![]; // TODO: reuse
         let mut raster_quads: Vec<FgQuadData> = vec![];
@@ -723,33 +725,15 @@ impl Renderer {
         self.disable_blending();
     }
 
-    pub fn get_chars_per_line(&self, width_screen: f32, char_width_px: f32) -> u32 {
-        let width_px = width_screen * self.width as f32;
-        ((width_px / char_width_px) as u32).max(1)
-    }
-
-    pub fn get_max_lines(&self, height_screen: f32, char_width_px: f32) -> u32 {
-        let font = &mut self.font.as_ref().borrow_mut();
-        let char_size_y_px = (char_width_px * font.get_aspect_ratio()).round();
-        let char_size_y_screen = char_size_y_px / self.height as f32;
-        let lines_per_screen = (1.0 / char_size_y_screen).floor();
-        (lines_per_screen * height_screen) as u32
-    }
-
-    pub fn get_max_lines_from_rc(&self, rc: &RenderConstants, screen_height: f32) -> u32 {
-        let lines_per_screen = (1.0 / rc.char_size_y_screen).floor();
-        (lines_per_screen * screen_height) as u32
-    }
-
     pub fn compute_render_constants(
         &self,
         width_screen: f32,
-        chars_per_line: u32
+        height_screen: f32,
+        char_size_px: f32 // Height
     ) -> RenderConstants {
         let font = &mut self.font.as_ref().borrow_mut();
-        let width_px = width_screen * self.width as f32;
-        let char_size_x_px = (width_px / chars_per_line as f32).round();
-        let char_size_y_px = (char_size_x_px * font.get_aspect_ratio()).round();
+        let char_size_y_px = char_size_px;
+        let char_size_x_px = (char_size_y_px / font.get_aspect_ratio()).round();
         let char_size_x_screen = char_size_x_px / self.width as f32;
         let char_size_y_screen = char_size_y_px / self.height as f32;
         let atlas_size = font.get_glyph_storage().get_atlas_size();
@@ -759,28 +743,8 @@ impl Renderer {
         // Scale the size to be 1em worth
         let font_size_px = char_size_x_px / font.get_width_em();
 
-        RenderConstants {
-            font_size_px,
-            char_size_x_px,
-            char_size_y_px,
-            char_size_x_screen,
-            char_size_y_screen,
-            atlas_pixel_size
-        }
-    }
-
-    pub fn compute_render_constants_from_height(
-        &self,
-        height_px: f32,
-    ) -> RenderConstants {
-        let font = &mut self.font.as_ref().borrow_mut();
-        let char_size_y_px = height_px;
-        let char_size_x_px = (char_size_y_px / font.get_aspect_ratio()).round();
-        let char_size_x_screen = char_size_x_px / self.width as f32;
-        let char_size_y_screen = char_size_y_px / self.height as f32;
-        let atlas_size = font.get_glyph_storage().get_atlas_size();
-        let atlas_pixel_size = 1.0 / atlas_size as f32;
-        let font_size_px = char_size_x_px / font.get_width_em();
+        let max_cols = ((width_screen / char_size_x_screen) as u32).max(1);
+        let max_rows = ((height_screen / char_size_y_screen) as u32).max(1);
 
         RenderConstants {
             font_size_px,
@@ -788,7 +752,9 @@ impl Renderer {
             char_size_y_px,
             char_size_x_screen,
             char_size_y_screen,
-            atlas_pixel_size
+            atlas_pixel_size,
+            max_cols,
+            max_rows
         }
     }
 
