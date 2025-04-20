@@ -570,8 +570,8 @@ impl TerminalWidget {
         let mut should_rerender = false;
 
         let icons = ["📋", "❌"];
-        let icon_size_px = char_size_px * 3.0;
-        let icon_gap_px = char_size_px * 0.5;
+        let icon_size_px = char_size_px * 1.25;
+        let icon_gap_px = icon_size_px * 0.25;
         let icon_padding_px = char_size_px;
         for (i, icon) in icons.into_iter().enumerate() {
             let x_pos = icon_size_px * (i as f32 + 1.0) + icon_gap_px * i as f32 + icon_padding_px;
