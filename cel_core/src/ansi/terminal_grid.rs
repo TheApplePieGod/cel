@@ -298,7 +298,7 @@ impl TerminalGrid {
         }
     }
 
-    /// Physically insert/remove 'amount' from into the screen buffer at the specified cursor,
+    /// Physically insert/remove 'amount' lines from/into the screen buffer at the specified cursor,
     /// going downward
     pub fn insert_or_remove_lines(&mut self, cursor: Cursor, amount: u32, remove: bool) {
         if !self.is_in_margins(cursor) {
@@ -313,18 +313,26 @@ impl TerminalGrid {
         }
     }
 
-    /// Physically delete 'amount' cells from the screen buffer at the specified cursor,
-    /// going to the right within the line
-    pub fn delete_cells(&mut self, cursor: Cursor, amount: u32) {
-        let cursor = self.get_buffer_cursor(&cursor);
-        if !self.cell_exists(&cursor) {
-            return; 
+    /// Physically insert/remove 'amount' chars from/into the screen buffer at the specified cursor,
+    /// going to the right
+    pub fn insert_or_remove_cells(&mut self, cursor: Cursor, amount: u32, remove: bool) {
+        if !self.is_in_margins(cursor) {
+            return;
         }
 
+        // TODO: implement removal in terms of scrolling (when we have x margin)
+
+        let cursor = self.get_buffer_cursor(&cursor);
         let offset = cursor.0[0];
         let line = &mut self.screen_buffer[cursor.0[1]];
-        let range = offset..((offset + amount as usize).min(line.len()));
-        line.drain(range);
+        if remove {
+            let range = offset..((offset + amount as usize).min(line.len()));
+            line.drain(range);
+        } else {
+            for _ in 0..amount {
+                line.insert(offset, Default::default());
+            }
+        }
     }
 
     /// Scroll within the current margin up or down by one line. Up 

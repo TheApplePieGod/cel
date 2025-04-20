@@ -701,6 +701,15 @@ impl Perform for Performer {
         let params = self.parse_params(params);
         //log::warn!("Handling CSI '{:?}' {:?}", c, params);
         match c {
+            '@' => { // Insert characters
+                let state = &mut self.terminal_state;
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as u32;
+                log::debug!("Insert chars [{:?}]", amount);
+                state.grid.insert_or_remove_cells(state.grid.cursor, amount, false);
+            },
             'A' => {
                 let state = &mut self.terminal_state;
                 let amount = match params.len() {
@@ -854,7 +863,7 @@ impl Perform for Performer {
                     _ => params[0]
                 } as u32;
                 log::debug!("Delete chars [{:?}]", amount);
-                state.grid.delete_cells(state.grid.cursor, amount);
+                state.grid.insert_or_remove_cells(state.grid.cursor, amount, true);
             },
             'S' | 'T' => { // Scroll region
                 let state = &mut self.terminal_state;
