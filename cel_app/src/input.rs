@@ -75,7 +75,7 @@ impl Input {
                     #[cfg(target_os = "macos")]
                     let modifier_key = Modifiers::Super;
                     #[cfg(not(target_os = "macos"))]
-                    let modifier_key = Modifiers::Control;
+                    let modifier_key = Modifiers::Control | Modifiers::Shift;
 
                     // Copy/Paste
                     if mods.contains(modifier_key) {
