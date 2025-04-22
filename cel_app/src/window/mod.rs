@@ -243,7 +243,7 @@ impl Window {
         let (win_x, win_y) = window.get_pos();
         let (win_w, win_h) = window.get_size();
 
-        self.glfw_instance.with_connected_monitors(|_, monitors| {
+        let found = self.glfw_instance.with_connected_monitors(|_, monitors| {
             for monitor in monitors {
                 if let Some(video_mode) = monitor.get_video_mode() {
                     let (mon_x, mon_y) = monitor.get_pos();
@@ -251,6 +251,7 @@ impl Window {
                     let mon_h = video_mode.height as i32;
 
                     // Check if window is within the monitor's bounds
+                    // Will fail if window is between monitors / offscreen
                     if win_x >= mon_x && win_x + win_w <= mon_x + mon_w &&
                        win_y >= mon_y && win_y + win_h <= mon_y + mon_h {
                         return Some(MonitorInfo {
@@ -261,6 +262,27 @@ impl Window {
                     }
                 }
             }
+
+            None
+        });
+        
+        if let Some(found) = found {
+            return Some(found);
+        }
+
+        // Attempt to load primary monitor info
+        self.glfw_instance.with_primary_monitor(|_, monitor| {
+            if let Some(monitor) = monitor {
+                if let Some(video_mode) = monitor.get_video_mode() {
+                    let (mon_x, mon_y) = monitor.get_pos();
+                    return Some(MonitorInfo {
+                        refresh_rate: video_mode.refresh_rate,
+                        position: (mon_x, mon_y),
+                        size: (video_mode.width, video_mode.height),
+                    })
+                }
+            }
+
             None
         })
     }
