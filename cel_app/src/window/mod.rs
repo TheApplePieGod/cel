@@ -74,7 +74,7 @@ impl Window {
         ));
 
         let (mut window, event_receiver) = glfw_instance.create_window(
-            1920, 600, "cel_", 
+            1200, 800, "cel_", 
             glfw::WindowMode::Windowed
         ).expect("Failed to create GLFW window.");
 
