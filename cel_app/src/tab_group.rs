@@ -13,6 +13,7 @@ use anyhow::{Result, bail};
 use crate::button::Button;
 use crate::input::{Input, InputEvent};
 use crate::layout::Layout;
+use crate::window::PWindowExt;
 
 #[derive(Serialize, Deserialize, Default)]
 struct SessionTab {
@@ -34,9 +35,6 @@ pub struct TabGroup {
 
     layouts: Vec<Layout>,
     active_layout_idx: usize,
-    is_dragging_window: bool,
-    mouse_drag_start_pos: Option<(i32, i32)>,
-    window_drag_start_pos: Option<(i32, i32)>,
 
     tab_underline_px: f32,
     tab_active_underline_px: f32,
@@ -78,9 +76,6 @@ impl TabGroup {
             
             active_layout_idx: 0,
             layouts: vec![ default_layout ],
-            is_dragging_window: false,
-            mouse_drag_start_pos: None,
-            window_drag_start_pos: None,
 
             tab_underline_px: 2.0,
             tab_active_underline_px: 2.0,
@@ -143,8 +138,7 @@ impl TabGroup {
     pub fn update(
         &mut self,
         renderer: &Renderer,
-        input: &mut Input,
-        window: &mut PWindow
+        input: &mut Input
     ) -> bool {
         let mut any_event = false;
 
@@ -199,38 +193,6 @@ impl TabGroup {
             self.active_layout_idx = new_idx;
         });
 
-        // Handle window dragging
-        // TODO: does this belong in TabGroup? how can we get this out of here?
-        if self.is_dragging_window {
-            // Prefer get_cursor_pos() directly rather than relying on input.get_mouse_pos() since
-            // we need to make sure we are accessing the most up-to-date cursor position for computing
-            // absolute coordinates
-            let mouse_pos = window.get_cursor_pos();
-            let window_pos = window.get_pos();
-            let mouse_absolute = (mouse_pos.0 as i32 + window_pos.0, mouse_pos.1 as i32 + window_pos.1);
-            if self.window_drag_start_pos.is_none() {
-                self.window_drag_start_pos = Some(window_pos);
-            }
-            if self.mouse_drag_start_pos.is_none() {
-                self.mouse_drag_start_pos = Some(mouse_absolute);
-            }
-
-            if input.get_mouse_down(glfw::MouseButton::Button1) {
-                let dx = mouse_absolute.0 - self.mouse_drag_start_pos.unwrap().0;
-                let dy = mouse_absolute.1 - self.mouse_drag_start_pos.unwrap().1;
-                
-                window.set_pos(
-                    self.window_drag_start_pos.unwrap().0 + dx, 
-                    self.window_drag_start_pos.unwrap().1 + dy
-                );
-            } else {
-                // Mouse released
-                self.is_dragging_window = false;
-                self.window_drag_start_pos = None;
-                self.mouse_drag_start_pos = None;
-            }
-        }
-
         if any_event {
             let _ = self.write_session();
         }
@@ -243,7 +205,8 @@ impl TabGroup {
         &mut self,
         bg_color: Option<[f32; 4]>,
         renderer: &mut Renderer,
-        input: &mut Input
+        input: &mut Input,
+        window: &mut PWindow
     ) -> bool {
         let mut should_rerender = false;
 
@@ -324,7 +287,7 @@ impl TabGroup {
                 }
 
                 // Don't enable window dragging when tab has the mouse focus
-                if button.is_hovered(input) && input.get_mouse_down(glfw::MouseButton::Button1) {
+                if button.is_hovered(input) {
                     should_drag_window = false;
                 }
 
@@ -332,13 +295,8 @@ impl TabGroup {
             }
         }
 
-        // Signal start of dragging logic if no tabs are focused 
-        let mouse_pos = input.get_mouse_pos();
-        let mouse_just_pressed = input.get_mouse_just_pressed(glfw::MouseButton::Button1);
-        let in_titlebar_region = mouse_pos[1] <= self.tab_height_px;
-        if !self.is_dragging_window && should_drag_window && mouse_just_pressed && in_titlebar_region {
-            self.is_dragging_window = true;
-        }
+        // Disable dragging when hovering over a tab
+        window.set_draggable(should_drag_window);
 
         should_rerender
     }

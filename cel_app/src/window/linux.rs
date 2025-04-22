@@ -10,3 +10,7 @@ pub fn get_titlebar_height_px(window: &PWindow) -> f32 {
 pub fn get_titlebar_decoration_width_px(window: &PWindow) -> f32 {
     0.0
 }
+
+pub fn set_draggable(window: &PWindow, draggable: bool) {
+
+}

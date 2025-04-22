@@ -1,6 +1,6 @@
 use glfw::PWindow;
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
-use cocoa::appkit::{CGFloat, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle};
+use cocoa::appkit::{CGFloat, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle};
 use cocoa::base::{id, nil, BOOL, NO, YES};
 use objc::{Encode, Encoding};
 
@@ -10,10 +10,7 @@ pub fn setup_platform_window(window: &PWindow) {
     unsafe {
         let () = msg_send![ns_window, setTitleVisibility: NSWindowTitleVisibility::NSWindowTitleHidden];
         let () = msg_send![ns_window, setTitlebarAppearsTransparent: YES];
-
-        // Handled by app directly
         let () = msg_send![ns_window, setMovableByWindowBackground: NO];
-        let () = msg_send![ns_window, setMovable:NO];
 
         // Cover titlebar with window content
         let current_style: NSWindowStyleMask = msg_send![ns_window, styleMask];
@@ -76,3 +73,7 @@ pub fn get_titlebar_decoration_width_px(window: &PWindow) -> f32 {
     }
 }
 
+pub fn set_draggable(window: &PWindow, draggable: bool) {
+    let ns_window = window.get_cocoa_window() as id;
+    unsafe { ns_window.setMovable_(draggable) }
+}

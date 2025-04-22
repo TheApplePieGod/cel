@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use cel_renderer::renderer::Renderer;
-use glfw::{Context, fail_on_errors};
+use glfw::{fail_on_errors, Context, PWindow};
 use macos::get_titlebar_decoration_width_px;
 
 use crate::app_state::AppState;
@@ -14,17 +14,21 @@ use crate::tab_group::TabGroup;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-use self::macos::{setup_platform_window, get_titlebar_height_px};
+use self::macos::*;
 
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-use self::windows::{setup_platform_window, get_titlebar_height_px};
+use self::windows::*;
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use self::linux::{setup_platform_window, get_titlebar_height_px};
+use self::linux::*;
+
+pub trait PWindowExt {
+    fn set_draggable(&mut self, draggable: bool);
+}
 
 pub struct MonitorInfo {
     pub refresh_rate: u32,
@@ -47,6 +51,13 @@ pub struct Window {
 
     debug_widget_width_px: f32,
     debug_show_widget: bool,
+}
+
+impl PWindowExt for PWindow {
+    fn set_draggable(&mut self, draggable: bool) {
+        // Platform call
+        set_draggable(self, draggable);
+    }
 }
 
 impl Window {
@@ -178,7 +189,6 @@ impl Window {
             any_event |= tab_group.update(
                 renderer,
                 self.input.as_ref().borrow_mut().deref_mut(),
-                self.window.as_ref().borrow_mut().deref_mut()
             );
 
             if any_event {
@@ -384,7 +394,7 @@ impl Window {
     ) -> bool {
         Self::begin_frame(clear_color);
 
-        let should_rerender = tab_group.render(Some(*clear_color), renderer, input);
+        let should_rerender = tab_group.render(Some(*clear_color), renderer, input, window);
 
         if end_frame {
             Self::end_frame(window);
