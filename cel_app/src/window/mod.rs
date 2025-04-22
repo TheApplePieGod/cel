@@ -29,7 +29,7 @@ use self::linux::*;
 pub trait PWindowExt {
     fn set_draggable(&mut self, draggable: bool);
     fn get_titlebar_height_px(&self) -> f32;
-    fn get_titlebar_decoration_width_px(&self, fullscreen: bool) -> f32;
+    fn get_titlebar_decoration_width_px(&self) -> f32;
 }
 
 pub struct MonitorInfo {
@@ -66,8 +66,8 @@ impl PWindowExt for PWindow {
         get_titlebar_height_px(self)
     }
 
-    fn get_titlebar_decoration_width_px(&self, fullscreen: bool) -> f32 {
-        get_titlebar_decoration_width_px(self, fullscreen)
+    fn get_titlebar_decoration_width_px(&self) -> f32 {
+        get_titlebar_decoration_width_px(self)
     }
 }
 
@@ -100,7 +100,6 @@ impl Window {
         window.set_content_scale_polling(true);
         window.set_focus_polling(true);
         window.set_pos_polling(true);
-        window.set_maximize_polling(true);
         window.set_resizable(true);
 
         setup_platform_window(&window);
@@ -120,7 +119,7 @@ impl Window {
         );
 
         let titlebar_height_px = window.get_titlebar_height_px();
-        let titlebar_dec_width_px = window.get_titlebar_decoration_width_px(false);
+        let titlebar_dec_width_px = window.get_titlebar_decoration_width_px();
         let mut tab_group = TabGroup::new(
             &renderer,
             1.0, 1.0,
@@ -332,18 +331,16 @@ impl Window {
                 glfw::WindowEvent::Size(_, _) => {
                     any_event = true;
                     resize = true;
+
+                    // Dynamically update the tab group inset when switching in/out of
+                    // fullscreen, as it may change
+                    let new_dec_width = self.window.as_ref().borrow().get_titlebar_decoration_width_px();
+                    self.tab_group.as_ref().borrow_mut().set_tab_inset_px(new_dec_width);
+
                 },
                 glfw::WindowEvent::ContentScale(_, _) => {
                     any_event = true;
                     self.renderer.as_ref().borrow_mut().update_scale(self.get_scale());
-                },
-                glfw::WindowEvent::Maximize(maximized) => {
-                    any_event = true;
-                    
-                    // Dynamically update the tab group inset when switching in/out of
-                    // fullscreen, as it may change
-                    let new_dec_width = self.window.as_ref().borrow().get_titlebar_decoration_width_px(maximized);
-                    self.tab_group.as_ref().borrow_mut().set_tab_inset_px(new_dec_width);
                 },
                 _ => {},
             }

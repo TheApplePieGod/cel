@@ -20,7 +20,7 @@ fn handle_window_delegate(ns_window: *mut Object) {
         let delegate_class: *mut Class = msg_send![existing_delegate, class];
         
         unsafe extern "C" fn window_will_use_fullscreen_presentation_options(
-            this: &Object, 
+            _this: &Object, 
             _sel: Sel, 
             _window: id, 
             _proposed_options: NSUInteger
@@ -43,6 +43,14 @@ fn handle_window_delegate(ns_window: *mut Object) {
             std::mem::transmute(method),
             b"@:@Q\0".as_ptr() as *const i8
         );
+    }
+}
+
+#[allow(unexpected_cfgs)]
+pub fn is_window_fullscreen(ns_window: id) -> bool {
+    unsafe {
+        let style_mask: NSWindowStyleMask = msg_send![ns_window, styleMask];
+        style_mask.contains(NSWindowStyleMask::NSFullScreenWindowMask)
     }
 }
 
@@ -93,13 +101,13 @@ pub fn get_titlebar_height_px(window: &PWindow) -> f32 {
 }
 
 #[allow(unexpected_cfgs)]
-pub fn get_titlebar_decoration_width_px(window: &PWindow, fullscreen: bool) -> f32 {
-    if fullscreen {
+pub fn get_titlebar_decoration_width_px(window: &PWindow) -> f32 {
+    let ns_window = window.get_cocoa_window() as id;
+
+    if is_window_fullscreen(ns_window) {
         // No buttons visible in fullscreen
         return 0.0;
     }
-
-    let ns_window = window.get_cocoa_window() as id;
 
     unsafe {
         let close_button: id = msg_send![ns_window, standardWindowButton:0]; // NSWindowCloseButton
