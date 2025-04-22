@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use cel_renderer::renderer::Renderer;
 use glfw::{Context, fail_on_errors};
+use macos::get_titlebar_decoration_width_px;
 
 use crate::app_state::AppState;
 use crate::input::Input;
@@ -13,17 +14,17 @@ use crate::tab_group::TabGroup;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-use self::macos::setup_platform_window;
+use self::macos::{setup_platform_window, get_titlebar_height_px};
 
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-use self::windows::setup_platform_window;
+use self::windows::{setup_platform_window, get_titlebar_height_px};
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use self::linux::setup_platform_window;
+use self::linux::{setup_platform_window, get_titlebar_height_px};
 
 pub struct MonitorInfo {
     pub refresh_rate: u32,
@@ -93,7 +94,14 @@ impl Window {
             AppState::current().as_ref().borrow().font.clone()
         );
 
-        let mut tab_group = TabGroup::new(&renderer, 1.0, 1.0);
+        let titlebar_height_px = get_titlebar_height_px(&window);
+        let titlebar_dec_width_px = get_titlebar_decoration_width_px(&window);
+        let mut tab_group = TabGroup::new(
+            &renderer,
+            1.0, 1.0,
+            titlebar_height_px,
+            titlebar_dec_width_px
+        );
         let _ = tab_group.load_session(&renderer);
 
         Self {
@@ -167,7 +175,11 @@ impl Window {
             // Update tab group
             let renderer = &mut self.renderer.as_ref().borrow_mut();
             let tab_group = &mut self.tab_group.as_ref().borrow_mut();
-            any_event |= tab_group.update(renderer, self.input.as_ref().borrow_mut().deref_mut());
+            any_event |= tab_group.update(
+                renderer,
+                self.input.as_ref().borrow_mut().deref_mut(),
+                self.window.as_ref().borrow_mut().deref_mut()
+            );
 
             if any_event {
                 self.last_event_time = Instant::now();
@@ -321,11 +333,13 @@ impl Window {
 
         let bg_color = [0.5, 0.1, 0.1, 0.75];
         let size_x = self.debug_widget_width_px / self.get_width() as f32;
+        renderer.enable_blending();
         renderer.draw_quad(
             &[1.0 - size_x, 0.0],
             &[size_x, 0.75],
             &bg_color
         );
+        renderer.disable_blending();
 
         renderer.draw_text(
             10.0,
