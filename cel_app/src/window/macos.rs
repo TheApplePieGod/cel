@@ -1,9 +1,52 @@
-use glfw::PWindow;
-use cocoa::foundation::{NSPoint, NSRect, NSSize};
-use cocoa::appkit::{CGFloat, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle};
-use cocoa::base::{id, nil, BOOL, NO, YES};
-use objc::{Encode, Encoding};
+use std::ffi::c_void;
 
+use glfw::PWindow;
+use cocoa::foundation::{NSRect, NSUInteger};
+use cocoa::appkit::{CGFloat, NSApplicationPresentationOptions, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle};
+use cocoa::base::{id, nil, BOOL, NO, YES};
+use objc::declare::ClassDecl;
+use objc::runtime::{Object, Sel, Class};
+
+#[allow(unexpected_cfgs)]
+fn handle_window_delegate(ns_window: *mut Object) {
+    // Update the window delegate so we can control fullscreen options.
+    // Specifically, we need to hide the toolbar
+
+    unsafe {
+        // Get the existing delegate
+        let existing_delegate: id = msg_send![ns_window, delegate];
+        
+        // Get the class of the existing delegate
+        let delegate_class: *mut Class = msg_send![existing_delegate, class];
+        
+        unsafe extern "C" fn window_will_use_fullscreen_presentation_options(
+            this: &Object, 
+            _sel: Sel, 
+            _window: id, 
+            _proposed_options: NSUInteger
+        ) -> NSUInteger {
+            let mut opts: NSApplicationPresentationOptions = Default::default();
+            opts |= NSApplicationPresentationOptions::NSApplicationPresentationAutoHideToolbar;
+            opts |= NSApplicationPresentationOptions::NSApplicationPresentationAutoHideMenuBar;
+            opts |= NSApplicationPresentationOptions::NSApplicationPresentationFullScreen;
+            opts.bits()
+        }
+
+        // Inject the method
+        let method: *mut c_void = std::mem::transmute(
+            window_will_use_fullscreen_presentation_options as unsafe extern "C" fn(&Object, Sel, id, NSUInteger) -> NSUInteger
+        );
+        let selector = sel!(window:willUseFullScreenPresentationOptions:);
+        let _ = objc::runtime::class_addMethod(
+            delegate_class,
+            selector,
+            std::mem::transmute(method),
+            b"@:@Q\0".as_ptr() as *const i8
+        );
+    }
+}
+
+#[allow(unexpected_cfgs)]
 pub fn setup_platform_window(window: &PWindow) {
     let ns_window = window.get_cocoa_window() as id;
     
@@ -22,14 +65,18 @@ pub fn setup_platform_window(window: &PWindow) {
         let tb_id: id = msg_send![tb_id, initWithUTF8String:"toolbar"];
         let toolbar: id = msg_send![class!(NSToolbar), alloc];
         let toolbar: id = msg_send![toolbar, initWithIdentifier: tb_id];
+        let () = msg_send![toolbar, setShowsBaselineSeparator: NO];
         let () = msg_send![ns_window, setToolbar: toolbar];
         let () = msg_send![ns_window, setToolbarStyle: NSWindowToolbarStyle::NSWindowToolbarStyleUnifiedCompact];
 
         // Add shadow for visiblity
         let () = msg_send![ns_window, setHasShadow: YES];
+
+        handle_window_delegate(ns_window);
     }
 }
 
+#[allow(unexpected_cfgs)]
 pub fn get_titlebar_height_px(window: &PWindow) -> f32 {
     let ns_window = window.get_cocoa_window() as id;
 
@@ -45,7 +92,13 @@ pub fn get_titlebar_height_px(window: &PWindow) -> f32 {
     }
 }
 
-pub fn get_titlebar_decoration_width_px(window: &PWindow) -> f32 {
+#[allow(unexpected_cfgs)]
+pub fn get_titlebar_decoration_width_px(window: &PWindow, fullscreen: bool) -> f32 {
+    if fullscreen {
+        // No buttons visible in fullscreen
+        return 0.0;
+    }
+
     let ns_window = window.get_cocoa_window() as id;
 
     unsafe {
@@ -73,6 +126,7 @@ pub fn get_titlebar_decoration_width_px(window: &PWindow) -> f32 {
     }
 }
 
+#[allow(unexpected_cfgs)]
 pub fn set_draggable(window: &PWindow, draggable: bool) {
     let ns_window = window.get_cocoa_window() as id;
     unsafe { ns_window.setMovable_(draggable) }

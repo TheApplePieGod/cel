@@ -88,6 +88,10 @@ impl TabGroup {
         }
     }
 
+    pub fn set_tab_inset_px(&mut self, inset: f32) {
+        self.tab_inset_px = inset;
+    }
+
     pub fn load_session(&mut self, renderer: &Renderer) -> Result<()> {
         let file = File::open(&self.session_file_path)?;
         let reader = BufReader::new(file);
