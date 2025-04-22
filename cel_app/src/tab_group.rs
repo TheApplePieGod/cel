@@ -229,6 +229,20 @@ impl TabGroup {
             input
         );
 
+        let mut cur_offset = self.offset_x_screen * renderer.get_width() as f32 + self.tab_inset_px;
+
+        // Render group icon
+        renderer.draw_text(
+            self.tab_text_px,
+            &[cur_offset / renderer.get_width() as f32, self.offset_y_screen],
+            &[self.tab_height_px / renderer.get_width() as f32, self.tab_height_px / renderer.get_height() as f32],
+            &[1.0, 1.0, 1.0],
+            &[1.0, 0.0, 0.0, 1.0],
+            true,
+            "⏷"
+        );
+        cur_offset += self.tab_height_px + 5.0;
+
         // Render tabs
         let mut should_drag_window = true;
         if self.layouts.len() > 1 {
@@ -247,7 +261,6 @@ impl TabGroup {
                 &[0.133, 0.133, 0.25, 1.0]
             );
 
-            let mut cur_offset = self.offset_x_screen * renderer.get_width() as f32 + self.tab_inset_px;
             for i in 0..self.layouts.len() {
                 let is_active = i == self.active_layout_idx;
                 let button = Button::new_px(

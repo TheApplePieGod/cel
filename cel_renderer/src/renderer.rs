@@ -689,7 +689,7 @@ impl Renderer {
                 glyph.x_pos / rc.char_size_x_px,
                 glyph.line_idx as f32
             ];
-            max_x = max_x.max(pos[0]);
+            max_x = max_x.max(pos[0] + 1.0);
             Self::push_glyph_quad(
                 &glyph.metrics,
                 &rc,
