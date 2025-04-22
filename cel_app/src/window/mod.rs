@@ -88,6 +88,7 @@ impl Window {
         window.set_scroll_polling(true);
         window.set_content_scale_polling(true);
         window.set_focus_polling(true);
+        window.set_pos_polling(true);
         window.set_resizable(true);
 
         setup_platform_window(&window);
@@ -140,6 +141,7 @@ impl Window {
         let window_ptr = self.window.clone();
         let input_ptr = self.input.clone();
         let clear_color = self.background_color;
+
         self.window.as_ref().borrow_mut().set_refresh_callback(move |w| {
             let renderer = &mut renderer_ptr.as_ref().borrow_mut();
             let input = &mut input_ptr.as_ref().borrow_mut();

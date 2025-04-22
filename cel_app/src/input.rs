@@ -70,6 +70,7 @@ impl Input {
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
         let og_mouse_pos = self.mouse_pos;
 
+        //log::warn!("{:?}", event);
         let handled = match event {
             glfw::WindowEvent::Key(key, _, action, mods) => {
                 if Self::handle_input_press(
@@ -153,20 +154,15 @@ impl Input {
 
                 true
             },
-            glfw::WindowEvent::Focus(focused) => {
-                // Clear all input states when we lose focus 
-                if !focused {
-                    self.reset_input_state();
-                }
-
-                false
-            },
-            glfw::WindowEvent::Size(_, _) => {
-                // Reset state on resize to ensure consistency
+            glfw::WindowEvent::Pos(_, _) |
+            glfw::WindowEvent::Size(_, _) |
+            glfw::WindowEvent::Focus(_) => {
+                // These events could cause inconsistent input state (i.e. a mouse
+                // up event is never sent). Thus, we reset to ensure consistency
                 self.reset_input_state();
 
                 false
-            }
+            },
             _ => false,
         };
 
