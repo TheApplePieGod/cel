@@ -377,7 +377,7 @@ impl TerminalWidget {
             }
 
             // Always reset dragging state on mouse release
-            if input.get_mouse_just_released(glfw::MouseButton::Button1) {
+            if !input.get_mouse_down(glfw::MouseButton::Button1) {
                 self.is_dragging = false;
             }
 

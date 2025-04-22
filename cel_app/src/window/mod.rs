@@ -87,6 +87,7 @@ impl Window {
         window.set_cursor_pos_polling(true);
         window.set_scroll_polling(true);
         window.set_content_scale_polling(true);
+        window.set_focus_polling(true);
         window.set_resizable(true);
 
         setup_platform_window(&window);

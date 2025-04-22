@@ -60,6 +60,12 @@ impl Input {
         self.mouse_delta = [0.0, 0.0];
     }
 
+    pub fn reset_input_state(&mut self) {
+        self.key_states = [Default::default(); 512];
+        self.mouse_states = [Default::default(); 16];
+        self.event_flags = EnumMap::default();
+    }
+
     // Returns true if the event was handled
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
         let og_mouse_pos = self.mouse_pos;
@@ -147,6 +153,20 @@ impl Input {
 
                 true
             },
+            glfw::WindowEvent::Focus(focused) => {
+                // Clear all input states when we lose focus 
+                if !focused {
+                    self.reset_input_state();
+                }
+
+                false
+            },
+            glfw::WindowEvent::Size(_, _) => {
+                // Reset state on resize to ensure consistency
+                self.reset_input_state();
+
+                false
+            }
             _ => false,
         };
 
