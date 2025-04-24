@@ -2,7 +2,8 @@ use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent, MouseTrackingM
 use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
-use crate::{button::Button, input::{Input, InputEvent}, layout::LayoutPosition};
+use crate::imui::Button;
+use crate::{input::{Input, InputEvent}, layout::LayoutPosition};
 
 const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
     (ansi::MouseButton::Mouse1, glfw::MouseButton::Button1),

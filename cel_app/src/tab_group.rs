@@ -10,7 +10,7 @@ use glfw::PWindow;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, bail};
 
-use crate::button::Button;
+use crate::imui::Button;
 use crate::input::{Input, InputEvent};
 use crate::layout::Layout;
 use crate::window::PWindowExt;
@@ -232,7 +232,6 @@ impl TabGroup {
         let mut cur_offset = self.tab_inset_px;
 
         // Render group dropdown
-        /*
         renderer.draw_text(
             self.tab_text_px * 1.5,
             &[cur_offset / renderer.get_width() as f32, self.offset_y_screen],
@@ -244,7 +243,6 @@ impl TabGroup {
             "⏷"
         );
         cur_offset += self.tab_height_px + 5.0;
-        */
 
         // Render tabs
         let mut should_drag_window = true;
