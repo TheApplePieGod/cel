@@ -1,66 +1,95 @@
-use cel_renderer::renderer::Renderer;
+use cel_renderer::renderer::{Coord, Renderer};
 
 use crate::input::Input;
 
-// All in pixel space
-pub struct Button {
-    size: [f32; 2],
-    offset: [f32; 2]
+pub struct Button<'a> {
+    size: Coord,
+    offset: Coord,
+    fg_color: [f32; 3],
+    bg_color: [f32; 4],
+    rounding_px: f32,
+    char_height_px: f32,
+    text: Option<&'a str>
 }
 
 // Immediate mode button
-impl Button {
-    // Origin is top left (0, 0), positive y is down
-    pub fn new_px(size: [f32; 2], offset: [f32; 2]) -> Self {
+impl<'a> Button<'a> {
+    pub fn new() -> Self {
         Self {
-            size,
-            offset
+            size: Coord::Px([0.0, 0.0]),
+            offset: Coord::Px([0.0, 0.0]),
+            fg_color: [1.0, 1.0, 1.0],
+            bg_color: [0.0, 0.0, 0.0, 0.0],
+            rounding_px: 0.0,
+            char_height_px: 12.0,
+            text: None
         }
     }
 
-    // Origin is top left (0, 0), positive y is down
-    pub fn new_screen(
-        screen_size: [f32; 2],
-        size: [f32; 2],
-        offset: [f32; 2]
-    ) -> Self {
-        Self {
-            size: [size[0] * screen_size[0], size[1] * screen_size[1]],
-            offset: [offset[0] * screen_size[0], offset[1] * screen_size[1]]
-        }
+    pub fn size(mut self, size: Coord) -> Self {
+        self.size = size;
+        self
     }
 
-    pub fn render(
-        &self,
-        renderer: &mut Renderer,
-        fg_color: &[f32; 3],
-        bg_color: &[f32; 4],
-        rounding_px: f32,
-        char_height_px: f32,
-        text: &str
-    ) {
-        let width = renderer.get_width() as f32;
-        let height = renderer.get_height() as f32;
+    pub fn offset(mut self, offset: Coord) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    pub fn fg_color(mut self, color: [f32; 3]) -> Self {
+        self.fg_color = color;
+        self
+    }
+
+    pub fn bg_color(mut self, color: [f32; 4]) -> Self {
+        self.bg_color = color;
+        self
+    }
+
+    pub fn rounding_px(mut self, rounding: f32) -> Self {
+        self.rounding_px = rounding;
+        self
+    }
+
+    pub fn char_height_px(mut self, height: f32) -> Self {
+        self.char_height_px = height;
+        self
+    }
+
+    pub fn text(mut self, text: &'a str) -> Self {
+        self.text = Some(text);
+        self
+    }
+
+    pub fn render(self, renderer: &mut Renderer) -> Self {
         renderer.draw_text(
-            char_height_px,
-            &[self.offset[0] / width, self.offset[1] / height],
-            &[self.size[0] / width, self.size[1] / height],
-            fg_color,
-            bg_color,
+            self.char_height_px,
+            &self.offset,
+            &self.size,
+            &self.fg_color,
+            &self.bg_color,
             true,
-            rounding_px,
-            text
+            self.rounding_px,
+            self.text.unwrap_or("")
         );
+
+        self
     }
 
-    pub fn is_hovered(&self, input: &Input) -> bool {
+    // ----------------------------------
+
+    pub fn is_hovered(&self, renderer: &Renderer, input: &Input) -> bool {
+        // TODO: store screen mouse in input?
         let [x, y] = input.get_mouse_pos();
 
-        x >= self.offset[0] && x <= self.offset[0] + self.size[0] &&
-        y >= self.offset[1] && y <= self.offset[1] + self.size[1]
+        let offset = self.offset.px(renderer);
+        let size = self.offset.px(renderer);
+
+        x >= offset[0] && x <= offset[0] + size[0] &&
+        y >= offset[1] && y <= offset[1] + size[1]
     }
 
-    pub fn is_clicked(&self, input: &Input, button: glfw::MouseButton) -> bool {
-        self.is_hovered(input) && input.get_mouse_just_released(button)
+    pub fn is_clicked(&self, renderer: &Renderer, input: &Input, button: glfw::MouseButton) -> bool {
+        self.is_hovered(renderer, input) && input.get_mouse_just_released(button)
     }
 }

@@ -1,5 +1,5 @@
 use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent, MouseTrackingMode};
-use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
+use cel_renderer::renderer::{Coord, RenderConstants, RenderStats, Renderer};
 use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
 use crate::imui::Button;
@@ -467,8 +467,8 @@ impl TerminalWidget {
         bg_color: &[f32; 4]
     ) {
         renderer.draw_ui_quad(
-            &[position.offset[0], position.offset[1] - height],
-            &[1.0, height],
+            &Coord::Screen([position.offset[0], position.offset[1] - height]),
+            &Coord::Screen([1.0, height]),
             bg_color,
             0.0
         );
@@ -484,8 +484,8 @@ impl TerminalWidget {
         let size_px = 2.0;
         let size = size_px / renderer.get_height() as f32;
         renderer.draw_ui_quad(
-            &[position.offset[0], position.offset[1] - height],
-            &[1.0, size],
+            &Coord::Screen([position.offset[0], position.offset[1] - height]),
+            &Coord::Screen([1.0, size]),
             color,
             0.0
         );
@@ -503,11 +503,11 @@ impl TerminalWidget {
         let padding = self.get_padding(renderer);
         self.iter_selected_region(rc.max_cols, |y, start_x, end_x| {
             renderer.draw_ui_quad(
-                &[
+                &Coord::Screen([
                     position.offset[0] + padding[0] + start_x as f32 * rc.char_size_x_screen,
                     position.offset[1] - height + padding[1] + y as f32 * rc.char_size_y_screen
-                ],
-                &[(end_x - start_x) as f32 * rc.char_size_x_screen, rc.char_size_y_screen],
+                ]),
+                &Coord::Screen([(end_x - start_x) as f32 * rc.char_size_x_screen, rc.char_size_y_screen]),
                 &[0.25, 0.5, 0.5, 0.3],
                 0.0
             );
@@ -544,8 +544,8 @@ impl TerminalWidget {
 
         let render_stats = renderer.render_terminal(
             &self.ansi_handler.get_terminal_state(),
-            &render_size,
-            &render_offset,
+            &Coord::Screen(render_size),
+            &Coord::Screen(render_offset),
             char_size_px,
             self.get_line_offset(),
             min_lines,
@@ -579,25 +579,16 @@ impl TerminalWidget {
         let icon_padding_px = char_size_px;
         for (i, icon) in icons.into_iter().enumerate() {
             let x_pos = icon_size_px * (i as f32 + 1.0) + icon_gap_px * i as f32 + icon_padding_px;
-            let y_pos = (widget_pos.offset[1] - bg_height).max(layout_pos.offset[1]);
-            let button = Button::new_px(
-                [icon_size_px, icon_size_px],
-                [
-                    renderer.get_width() as f32 - x_pos,
-                    y_pos * renderer.get_height() as f32 + icon_padding_px
-                ]
-            );
+            let y_pos = ((widget_pos.offset[1] - bg_height).max(layout_pos.offset[1])) * renderer.get_height() as f32;
+            let button = Button::new()
+                .size(Coord::Px([icon_size_px, icon_size_px]))
+                .offset(Coord::Px([renderer.get_width() as f32 - x_pos, y_pos + icon_padding_px]))
+                .fg_color([1.0, 1.0, 1.0])
+                .char_height_px(icon_size_px)
+                .text(icon)
+                .render(renderer);
 
-            button.render(
-                renderer,
-                &[1.0, 1.0, 1.0],
-                &[0.0, 0.0, 0.0, 0.0],
-                0.0,
-                icon_size_px,
-                icon
-            );
-
-            if button.is_clicked(input, glfw::MouseButton::Button1) {
+            if button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
                 should_rerender = true;
                 match i {
                     // Copy

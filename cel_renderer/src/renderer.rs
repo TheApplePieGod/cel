@@ -17,6 +17,14 @@ use crate::{
     util::Util,
 };
 
+// Origin is top left (0, 0), positive y is down
+pub enum Coord {
+    Screen([f32; 2]),
+    Px([f32; 2]),
+    MixedPS([f32; 2]), // Mixed [px, screen]
+    MixedSP([f32; 2]), // Mixed [screen, px]
+}
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct FgQuadData {
@@ -74,6 +82,40 @@ pub struct Renderer {
     height: u32,
     scale: [f32; 2],
     font: Rc<RefCell<Font>>,
+}
+
+impl Coord {
+    pub fn screen(&self, renderer: &Renderer) -> [f32; 2] {
+        match self {
+            Self::Screen(v) => *v,
+            Self::Px(v) => [
+                v[0] / renderer.get_width() as f32,
+                v[1] / renderer.get_height() as f32
+            ],
+            Self::MixedPS(v) => [
+                v[0] / renderer.get_width() as f32, v[1]
+            ],
+            Self::MixedSP(v) => [
+                v[0], v[1] / renderer.get_height() as f32
+            ]
+        }
+    }
+
+    pub fn px(&self, renderer: &Renderer) -> [f32; 2] {
+        match self {
+            Self::Screen(v) => [
+                v[0] * renderer.get_width() as f32,
+                v[1] * renderer.get_height() as f32
+            ],
+            Self::Px(v) => *v,
+            Self::MixedPS(v) => [
+                v[0], v[1] * renderer.get_height() as f32
+            ],
+            Self::MixedSP(v) => [
+                v[0] * renderer.get_width() as f32, v[1]
+            ]
+        }
+    }
 }
 
 impl Renderer {
@@ -325,8 +367,8 @@ impl Renderer {
     pub fn render_terminal(
         &mut self,
         terminal_state: &TerminalState,
-        screen_size: &[f32; 2],
-        screen_offset: &[f32; 2],
+        size: &Coord,
+        offset: &Coord,
         char_size_px: f32,
         line_offset: u32,
         min_lines: u32,
@@ -336,6 +378,9 @@ impl Renderer {
     ) -> RenderStats {
         let grid = &terminal_state.grid;
         let mut stats = RenderStats::default();
+
+        let screen_size = size.screen(self);
+        let screen_offset = offset.screen(self);
 
         // Setup render state
         let rc = self.compute_render_constants(screen_size[0], screen_size[1], char_size_px);
@@ -539,17 +584,20 @@ impl Renderer {
 
     pub fn draw_ui_quad(
         &self,
-        screen_offset: &[f32; 2],
-        size_screen: &[f32; 2],
+        offset: &Coord,
+        size: &Coord,
         color: &[f32; 4],
         rounding_px: f32
     ) {
         let mut quads: Vec<UiQuadData> = vec![];
 
+        let screen_offset = offset.screen(self);
+        let screen_size = size.screen(self);
+
         Self::push_ui_quad(
             color,
-            screen_offset,
-            &[screen_offset[0] + size_screen[0], screen_offset[1] + size_screen[1]],
+            &screen_offset,
+            &[screen_offset[0] + screen_size[0], screen_offset[1] + screen_size[1]],
             rounding_px / self.width as f32,
             &mut quads
         );
@@ -563,8 +611,8 @@ impl Renderer {
     pub fn draw_text(
         &mut self,
         char_height_px: f32,
-        screen_offset: &[f32; 2],
-        bg_size_screen: &[f32; 2],
+        offset: &Coord,
+        bg_size: &Coord,
         fg_color: &[f32; 3],
         bg_color: &[f32; 4],
         centered: bool,
@@ -608,7 +656,10 @@ impl Renderer {
 
         self.enable_blending();
 
-        self.draw_ui_quad(screen_offset, bg_size_screen, bg_color, rounding_px);
+        self.draw_ui_quad(offset, bg_size, bg_color, rounding_px);
+
+        let screen_offset = &offset.screen(self);
+        let bg_size_screen = &bg_size.screen(self);
 
         // Draw text, centered on background
         let centered_offset = [

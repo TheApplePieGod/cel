@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::Instant;
 
-use cel_renderer::renderer::Renderer;
+use cel_renderer::renderer::{Coord, Renderer};
 use glfw::{fail_on_errors, Context, PWindow};
 use macos::get_titlebar_decoration_width_px;
 
@@ -388,8 +388,8 @@ impl Window {
 
         renderer.draw_text(
             10.0,
-            &[1.0 - size_x, 0.0],
-            &[size_x, 0.75],
+            &Coord::Screen([1.0 - size_x, 0.0]),
+            &Coord::Screen([size_x, 0.75]),
             &[1.0, 1.0, 1.0],
             &bg_color,
             false,

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::exit;
 
 use cel_core::config::get_config_dir;
-use cel_renderer::renderer::Renderer;
+use cel_renderer::renderer::{Coord, Renderer};
 use glfw::PWindow;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, bail};
@@ -234,8 +234,8 @@ impl TabGroup {
         // Render group dropdown
         renderer.draw_text(
             self.tab_text_px * 1.5,
-            &[cur_offset / renderer.get_width() as f32, self.offset_y_screen],
-            &[self.tab_height_px / renderer.get_width() as f32, self.tab_height_px / renderer.get_height() as f32],
+            &Coord::MixedPS([cur_offset, self.offset_y_screen]),
+            &Coord::Px([self.tab_height_px, self.tab_height_px]),
             &[1.0, 1.0, 1.0],
             &[1.0, 0.0, 0.0, 1.0],
             true,
@@ -260,18 +260,14 @@ impl TabGroup {
 
             // Tab underline
             renderer.draw_ui_quad(
-                &[self.offset_x_screen, underline_y_screen],
-                &[self.width_screen, self.tab_underline_px / renderer.get_height() as f32],
+                &Coord::Screen([self.offset_x_screen, underline_y_screen]),
+                &Coord::MixedSP([self.width_screen, self.tab_underline_px]),
                 &[0.133, 0.133, 0.25, 1.0],
                 0.0
             );
 
             for i in 0..self.layouts.len() {
                 let is_active = i == self.active_layout_idx;
-                let button = Button::new_px(
-                    [tab_width_real, self.tab_height_px - self.tab_active_underline_px],
-                    [cur_offset + self.offset_x_screen * renderer.get_width() as f32, self.offset_y_screen * renderer.get_height() as f32]
-                );
 
                 let name = match self.layouts[i].get_name() {
                     "" => "Tab".to_string(),
@@ -287,31 +283,30 @@ impl TabGroup {
                     false => [0.5, 0.5, 0.5],
                 };
 
-                button.render(
-                    renderer,
-                    &text_color,
-                    &[0.0, 0.0, 0.0, 0.0],
-                    0.0,
-                    self.tab_text_px,
-                    &name
-                );
+                let button = Button::new()
+                    .size(Coord::Px([tab_width_real, self.tab_height_px - self.tab_active_underline_px]))
+                    .offset(Coord::MixedPS([cur_offset + self.offset_x_screen * renderer.get_width() as f32, self.offset_y_screen]))
+                    .fg_color(text_color)
+                    .char_height_px(self.tab_text_px)
+                    .text(&name)
+                    .render(renderer);
 
                 if is_active {
                     renderer.draw_ui_quad(
-                        &[cur_offset / renderer.get_width() as f32 + self.offset_x_screen, underline_y_screen],
-                        &renderer.to_screen_f32([tab_width_real, self.tab_active_underline_px]),
+                        &Coord::Screen([cur_offset / renderer.get_width() as f32 + self.offset_x_screen, underline_y_screen]),
+                        &Coord::Px([tab_width_real, self.tab_active_underline_px]),
                         &[0.933, 0.388, 0.321, 1.0],
                         0.0
                     );
                 }
 
-                if button.is_clicked(input, glfw::MouseButton::Button1) {
+                if button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
                     self.active_layout_idx = i;
                     should_rerender = true;
                 }
 
                 // Don't enable window dragging when tab has the mouse focus
-                if button.is_hovered(input) {
+                if button.is_hovered(renderer, input) {
                     should_drag_window = false;
                 }
 
