@@ -215,10 +215,11 @@ impl Window {
             //  - rerender is requested
             //  - interval passes, so that blinking effects will render
             //  - another render has not happened too recently
+            //  - the debug widget is visible
             let render_time_dist = (Instant::now() - self.last_render_time).as_millis();
             let interval_render = render_time_dist > 250 && self.get_is_focused();
             let very_recent_event = event_time_dist <= 0.05;
-            if self.rerender_requested || any_event || interval_render || very_recent_event {
+            if self.rerender_requested || any_event || interval_render || very_recent_event || self.debug_show_widget {
                 //log::warn!("{}, {}", render_time_dist, any_event);
                 self.rerender_requested = Self::render_wrapper(
                     false,
@@ -233,7 +234,6 @@ impl Window {
             }
         }
 
-        // Always rerender debug widget
         if self.debug_show_widget {
             self.render_debug_widget(
                 self.renderer.as_ref().borrow_mut().deref_mut(),
@@ -385,21 +385,15 @@ impl Window {
 
         let bg_color = [0.5, 0.1, 0.1, 0.75];
         let size_x = self.debug_widget_width_px / self.get_width() as f32;
-        renderer.enable_blending();
-        renderer.draw_quad(
-            &[1.0 - size_x, 0.0],
-            &[size_x, 0.75],
-            &bg_color
-        );
-        renderer.disable_blending();
 
         renderer.draw_text(
             10.0,
             &[1.0 - size_x, 0.0],
-            &[0.0, 0.0],
+            &[size_x, 0.75],
             &[1.0, 1.0, 1.0],
             &bg_color,
             false,
+            8.0,
             &text_lines.join("\n")
         );
     }

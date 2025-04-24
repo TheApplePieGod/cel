@@ -10,6 +10,7 @@ use std::{
 
 use crate::font::{ShapeParams, TextCache};
 use crate::glyph_storage::{GlyphStorage, GlyphMetrics, RenderType};
+use crate::shaders::*;
 use crate::{
     font::Font,
     glchk,
@@ -32,6 +33,14 @@ pub struct BgQuadData {
     pub color: [f32; 4],     // r, g, b, a (bg)
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct UiQuadData {
+    pub position: [f32; 4],  // x0, y0, x1, y1
+    pub color: [f32; 4],     // r, g, b, a (bg)
+    pub rounding: f32,
+}
+
 #[derive(Copy, Clone, Default)]
 pub struct RenderStats {
     pub num_fg_instances: u32,
@@ -52,9 +61,11 @@ pub struct RenderConstants {
 }
 
 pub struct Renderer {
+    ui_program: u32,
     msdf_program: u32,
     raster_program: u32,
     bg_program: u32,
+    ui_quad_vao: u32,
     fg_quad_vao: u32,
     bg_quad_vao: u32,
     quad_ibo: u32,
@@ -68,18 +79,18 @@ pub struct Renderer {
 impl Renderer {
     pub fn new(width: i32, height: i32, scale: [f32; 2], default_font: Rc<RefCell<Font>>) -> Self {
         // Generate buffers
+        let mut ui_quad_vao: u32 = 0;
         let mut fg_quad_vao: u32 = 0;
         let mut bg_quad_vao: u32 = 0;
         let mut instance_vbo: u32 = 0;
         let mut quad_ibo: u32 = 0;
         unsafe {
-            // FG VAO
-            gl::GenVertexArrays(1, &mut fg_quad_vao);
-            gl::BindVertexArray(fg_quad_vao);
-
-            let base_indices: [u32; 6] = [0, 2, 3, 0, 1, 2];
+            // Instance VBO
+            gl::GenBuffers(1, &mut instance_vbo);
+            gl::BindBuffer(gl::ARRAY_BUFFER, instance_vbo);
 
             // Main IBO
+            let base_indices: [u32; 6] = [0, 2, 3, 0, 1, 2];
             gl::GenBuffers(1, &mut quad_ibo);
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, quad_ibo);
             gl::BufferData(
@@ -89,9 +100,29 @@ impl Renderer {
                 gl::STATIC_DRAW,
             );
 
-            // Instance VBO
-            gl::GenBuffers(1, &mut instance_vbo);
-            gl::BindBuffer(gl::ARRAY_BUFFER, instance_vbo);
+            // UI VAO
+            gl::GenVertexArrays(1, &mut ui_quad_vao);
+            gl::BindVertexArray(ui_quad_vao);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, quad_ibo);
+
+            // UI VAO attributes
+            let instance_stride = size_of::<UiQuadData>() as i32;
+            let pos_stride = size_of::<f32>() as i32 * 4;
+            let color_stride = size_of::<f32>() as i32 * 4 + pos_stride;
+            gl::VertexAttribPointer(0, 4, gl::FLOAT, gl::FALSE, instance_stride, null());
+            gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, instance_stride, pos_stride as _);
+            gl::VertexAttribPointer(2, 1, gl::FLOAT, gl::FALSE, instance_stride, color_stride as _);
+            gl::EnableVertexAttribArray(0);
+            gl::EnableVertexAttribArray(1);
+            gl::EnableVertexAttribArray(2);
+            gl::VertexAttribDivisor(0, 1);
+            gl::VertexAttribDivisor(1, 1);
+            gl::VertexAttribDivisor(2, 1);
+
+            // FG VAO
+            gl::GenVertexArrays(1, &mut fg_quad_vao);
+            gl::BindVertexArray(fg_quad_vao);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, quad_ibo);
 
             // FG VAO attributes
             let instance_stride = size_of::<FgQuadData>() as i32;
@@ -114,8 +145,6 @@ impl Renderer {
             // BG VAO
             gl::GenVertexArrays(1, &mut bg_quad_vao);
             gl::BindVertexArray(bg_quad_vao);
-
-            // Bind IBO
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, quad_ibo);
 
             // BG VAO attributes
@@ -129,149 +158,12 @@ impl Renderer {
             gl::VertexAttribDivisor(1, 1);
         }
 
-        let fg_vert_shader_source = b"
-            #version 330 core
-
-            layout (location = 0) in vec4 inPos;
-            layout (location = 1) in vec4 inTexCoord;
-            layout (location = 2) in vec3 inColor;
-            layout (location = 3) in uint inFlags;
-
-            out vec2 texCoord;
-            out vec3 fgColor;
-            flat out uint flags;
-
-            uniform mat4 model;
-
-            const vec2 offsets[4] = vec2[](
-                vec2(0.0, 0.0), // Bottom-left
-                vec2(1.0, 0.0), // Bottom-right
-                vec2(1.0, 1.0), // Top-right
-                vec2(0.0, 1.0)  // Top-left
-            );
-
-            void main()
-            {
-                // Extract quad corners
-                vec2 p0 = inPos.xy;
-                vec2 p1 = inPos.zw;
-
-                // Compute vertex position based on gl_VertexID
-                vec2 offset = offsets[gl_VertexID % 4];
-                vec2 pos = mix(p0, p1, offset);
-
-                // Apply shear transformation
-                float shearAmount = (inFlags & 8U) * 0.015f;
-                pos.x += offset.y * shearAmount;
-
-                // Compute texture coordinates
-                vec2 tex0 = inTexCoord.xy;
-                vec2 tex1 = inTexCoord.zw;
-                vec2 coord = mix(tex0, tex1, offset);
-
-                gl_Position = model * vec4(pos, 0.0, 1.0)
-                    * vec4(2.f, -2.f, 1.f, 1.f) // Scale up by 2 & flip y
-                    + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
-                texCoord = coord;
-                fgColor = inColor;
-                flags = inFlags;
-            }
-        \0";
-
-        let bg_vert_shader_source = b"
-            #version 330 core
-
-            layout (location = 0) in vec4 inPos;
-            layout (location = 1) in vec4 inColor;
-
-            out vec4 bgColor;
-
-            uniform mat4 model;
-
-            const vec2 offsets[4] = vec2[](
-                vec2(0.0, 0.0), // Bottom-left
-                vec2(1.0, 0.0), // Bottom-right
-                vec2(1.0, 1.0), // Top-right
-                vec2(0.0, 1.0)  // Top-left
-            );
-
-            void main()
-            {
-                // Extract quad corners
-                vec2 p0 = inPos.xy;
-                vec2 p1 = inPos.zw;
-
-                // Compute vertex position based on gl_VertexID
-                vec2 offset = offsets[gl_VertexID % 4];
-                vec2 pos = mix(p0, p1, offset);
-
-                gl_Position = model * vec4(pos, 0.0, 1.0)
-                    * vec4(2.f, -2.f, 1.f, 1.f) // Scale up by 2
-                    + vec4(-1.f, 1.f, 0.f, 0.f); // Move origin to top left 
-                bgColor = inColor;
-            }
-        \0";
-
-        let msdf_frag_shader_source = b"
-            #version 330 core
-
-            in vec2 texCoord;
-            in vec3 fgColor;
-            flat in uint flags;
-
-            out vec4 fragColor;
-
-            uniform sampler2D atlasTex;
-            uniform float pixelRange;
-
-            float median(float r, float g, float b, float a) {
-                return max(min(r, g), min(max(r, g), b));
-            }
-
-            void main()
-            {
-                float sdFactor = 1.05 + (flags & 1U) * 0.3 - (flags & 2U) * 0.05;
-                vec4 msd = texture(atlasTex, texCoord);
-                float sd = median(msd.r, msd.g, msd.b, msd.a) * sdFactor;
-                float screenPxDistance = pixelRange * (sd - 0.5);
-                float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-                
-                fragColor = vec4(fgColor, opacity);
-            }
-        \0";
-
-        let raster_frag_shader_source = b"
-            #version 330 core
-
-            in vec2 texCoord;
-            in vec3 fgColor;
-
-            out vec4 fragColor;
-
-            uniform sampler2D atlasTex;
-
-            void main()
-            {
-                vec4 color = texture(atlasTex, texCoord);
-                fragColor = vec4(color.rgb * fgColor, color.a);
-            }
-        \0";
-
-        let bg_frag_shader_source = b"
-            #version 330 core
-
-            in vec2 texCoord;
-            in vec4 bgColor;
-
-            out vec4 fragColor;
-
-            void main()
-            {
-                fragColor = bgColor;
-            }
-        \0";
 
         // Compile shaders & generate program
+        let ui_vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, ui_vert_shader_source) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to compile vertex shader: {}", msg),
+        };
         let fg_vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, fg_vert_shader_source) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile vertex shader: {}", msg),
@@ -279,6 +171,11 @@ impl Renderer {
         let bg_vert_shader = match Self::compile_shader(gl::VERTEX_SHADER, bg_vert_shader_source) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile vertex shader: {}", msg),
+        };
+        let ui_frag_shader = match Self::compile_shader(gl::FRAGMENT_SHADER, ui_frag_shader_source)
+        {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to compile frag shader: {}", msg),
         };
         let msdf_frag_shader =
             match Self::compile_shader(gl::FRAGMENT_SHADER, msdf_frag_shader_source) {
@@ -295,6 +192,10 @@ impl Renderer {
             Ok(id) => id,
             Err(msg) => panic!("Failed to compile bg frag shader: {}", msg),
         };
+        let ui_program = match Self::link_program(ui_vert_shader, ui_frag_shader) {
+            Ok(id) => id,
+            Err(msg) => panic!("Failed to link ui program: {}", msg),
+        };
         let msdf_program = match Self::link_program(fg_vert_shader, msdf_frag_shader) {
             Ok(id) => id,
             Err(msg) => panic!("Failed to link msdf program: {}", msg),
@@ -310,17 +211,21 @@ impl Renderer {
 
         // Free shaders
         unsafe {
+            gl::DeleteShader(ui_vert_shader);
             gl::DeleteShader(fg_vert_shader);
             gl::DeleteShader(bg_vert_shader);
+            gl::DeleteShader(ui_frag_shader);
             gl::DeleteShader(msdf_frag_shader);
             gl::DeleteShader(raster_frag_shader);
             gl::DeleteShader(bg_frag_shader);
         }
 
         let mut obj = Self {
+            ui_program,
             msdf_program,
             raster_program,
             bg_program,
+            ui_quad_vao,
             fg_quad_vao,
             bg_quad_vao,
             quad_ibo,
@@ -466,7 +371,7 @@ impl Renderer {
         y -= start_offset as f32;
 
         let buf_cursor = grid.get_buffer_cursor(&grid.cursor);
-        'outer: for line_idx in visible_lines.rev() {
+        for line_idx in visible_lines.rev() {
             rendered_line_count += 1;
             x = base_x;
             y -= 1.0;
@@ -632,30 +537,26 @@ impl Renderer {
         stats
     }
 
-    pub fn draw_quad(
+    pub fn draw_ui_quad(
         &self,
         screen_offset: &[f32; 2],
-        bg_size_screen: &[f32; 2],
-        bg_color: &[f32; 4],
+        size_screen: &[f32; 2],
+        color: &[f32; 4],
+        rounding_px: f32
     ) {
-        let mut bg_quads: Vec<BgQuadData> = vec![];
+        let mut quads: Vec<UiQuadData> = vec![];
 
-        // Draw background, separately from text
-        let bg_model_mat: [f32; 16] = [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            screen_offset[0], screen_offset[1], 0.0, 1.0,
-        ];
-        Self::push_bg_quad(
-            bg_color,
-            &[0.0, 0.0],
-            &bg_size_screen,
-            &mut bg_quads
+        Self::push_ui_quad(
+            color,
+            screen_offset,
+            &[screen_offset[0] + size_screen[0], screen_offset[1] + size_screen[1]],
+            rounding_px / self.width as f32,
+            &mut quads
         );
-        //self.enable_blending();
-        self.draw_background_quads(&bg_quads, &bg_model_mat);
-        //self.disable_blending();
+        self.enable_backface_culling();
+        self.enable_blending();
+        self.draw_ui_quads(&quads);
+        self.disable_blending();
     }
 
     // Origin top left to bottom right
@@ -667,6 +568,7 @@ impl Renderer {
         fg_color: &[f32; 3],
         bg_color: &[f32; 4],
         centered: bool,
+        rounding_px: f32,
         text: &str,
     ) {
         let rc = self.compute_render_constants(1.0, 1.0, char_height_px);
@@ -682,6 +584,7 @@ impl Renderer {
         };
 
         let mut max_x: f32 = 0.0;
+        let mut max_y: f32 = 0.0;
         let mut text_cache = TextCache::new();
         text_cache.set_text(text);
         for glyph in self.font.as_ref().borrow_mut().shape_text(&shape_params, &mut text_cache) {
@@ -690,6 +593,7 @@ impl Renderer {
                 glyph.line_idx as f32
             ];
             max_x = max_x.max(pos[0] + 1.0);
+            max_y = max_y.max(pos[1] + 1.0);
             Self::push_glyph_quad(
                 &glyph.metrics,
                 &rc,
@@ -704,12 +608,12 @@ impl Renderer {
 
         self.enable_blending();
 
-        self.draw_quad(screen_offset, bg_size_screen, bg_color);
+        self.draw_ui_quad(screen_offset, bg_size_screen, bg_color, rounding_px);
 
         // Draw text, centered on background
         let centered_offset = [
             screen_offset[0] + (bg_size_screen[0] - max_x * rc.char_size_x_screen) * 0.5,
-            screen_offset[1] + (bg_size_screen[1] - rc.char_size_y_screen) * 0.5,
+            screen_offset[1] + (bg_size_screen[1] - max_y * rc.char_size_y_screen) * 0.5,
         ];
         self.draw_text_quads(
             &rc,
@@ -809,6 +713,21 @@ impl Renderer {
         arr.push(BgQuadData {
             position: [pos_min[0], pos_max[1], pos_max[0], pos_min[1]],
             color: *bg_color,
+        });
+    }
+
+    // Min: TL, max: BR
+    fn push_ui_quad(
+        bg_color: &[f32; 4],
+        pos_min: &[f32; 2],
+        pos_max: &[f32; 2],
+        rounding: f32,
+        arr: &mut Vec<UiQuadData>
+    ) {
+        arr.push(UiQuadData {
+            position: [pos_min[0], pos_max[1], pos_max[0], pos_min[1]],
+            color: *bg_color,
+            rounding
         });
     }
 
@@ -976,7 +895,7 @@ impl Renderer {
             );
         }
 
-        self.bind_vertex_shader_data(self.msdf_program, model);
+        self.bind_text_shader_data(self.msdf_program, model);
 
         self.enable_blending();
         self.draw_indexed_instanced(arr.len() as i32);
@@ -1003,7 +922,7 @@ impl Renderer {
             "atlasTex",
         );
 
-        self.bind_vertex_shader_data(self.raster_program, model);
+        self.bind_text_shader_data(self.raster_program, model);
 
         self.enable_blending();
         self.draw_indexed_instanced(arr.len() as i32);
@@ -1020,12 +939,36 @@ impl Renderer {
         // Update instance data
         self.update_buffer_data(self.instance_vbo, gl::ARRAY_BUFFER, arr);
 
-        self.bind_vertex_shader_data(self.bg_program, model);
+        self.bind_text_shader_data(self.bg_program, model);
 
         self.draw_indexed_instanced(arr.len() as i32);
     }
 
-    fn bind_vertex_shader_data(&self, program_id: u32, model: &[f32; 16]) {
+    fn draw_ui_quads(&self, arr: &[UiQuadData]) {
+        // Bind program data
+        unsafe {
+            gl::UseProgram(self.ui_program);
+            gl::BindVertexArray(self.ui_quad_vao);
+        }
+
+        // Update instance data
+        self.update_buffer_data(self.instance_vbo, gl::ARRAY_BUFFER, arr);
+
+        self.bind_ui_shader_data(self.ui_program);
+
+        self.draw_indexed_instanced(arr.len() as i32);
+    }
+
+    fn bind_ui_shader_data(&self, program_id: u32) {
+        unsafe {
+            gl::Uniform1f(
+                self.get_uniform_location(program_id, "aspect"),
+                self.get_aspect_ratio()
+            );
+        }
+    }
+
+    fn bind_text_shader_data(&self, program_id: u32, model: &[f32; 16]) {
         // Set global model matrix (column major)
         unsafe {
             gl::UniformMatrix4fv(
@@ -1129,11 +1072,12 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        let del_vao: [u32; 2] = [self.fg_quad_vao, self.bg_quad_vao];
+        let del_vao: [u32; 3] = [self.ui_quad_vao, self.fg_quad_vao, self.bg_quad_vao];
         let del_buf: [u32; 2] = [self.quad_ibo, self.instance_vbo];
         unsafe {
             gl::DeleteVertexArrays(del_vao.len() as i32, del_vao.as_ptr());
             gl::DeleteBuffers(del_buf.len() as i32, del_buf.as_ptr());
+            gl::DeleteProgram(self.ui_program);
             gl::DeleteProgram(self.msdf_program);
             gl::DeleteProgram(self.raster_program);
             gl::DeleteProgram(self.bg_program);

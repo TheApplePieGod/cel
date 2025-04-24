@@ -229,43 +229,50 @@ impl TabGroup {
             input
         );
 
-        let mut cur_offset = self.offset_x_screen * renderer.get_width() as f32 + self.tab_inset_px;
+        let mut cur_offset = self.tab_inset_px;
 
-        // Render group icon
+        // Render group dropdown
+        /*
         renderer.draw_text(
-            self.tab_text_px,
+            self.tab_text_px * 1.5,
             &[cur_offset / renderer.get_width() as f32, self.offset_y_screen],
             &[self.tab_height_px / renderer.get_width() as f32, self.tab_height_px / renderer.get_height() as f32],
             &[1.0, 1.0, 1.0],
             &[1.0, 0.0, 0.0, 1.0],
             true,
+            8.0,
             "⏷"
         );
         cur_offset += self.tab_height_px + 5.0;
+        */
 
         // Render tabs
         let mut should_drag_window = true;
-        if self.layouts.len() > 1 {
-            let width_px = self.width_screen * renderer.get_width() as f32 - self.tab_inset_px;
-            let tab_width_real = match self.tab_width_px * self.layouts.len() as f32 > width_px {
-                true => width_px / self.layouts.len() as f32,
+        let num_layouts = self.layouts.len() as f32;
+        if num_layouts > 1.0 {
+            let width_px = self.width_screen * renderer.get_width() as f32 - cur_offset;
+            let gap_width = self.tab_gap_px * (num_layouts - 1.0).max(0.0);
+            let total_width = self.tab_width_px * num_layouts + gap_width;
+            let tab_width_real = match total_width > width_px {
+                true => (width_px - gap_width) / num_layouts,
                 false => self.tab_width_px
             };
             let max_chars = (tab_width_real / self.tab_text_px).ceil() as usize;
             let underline_y_screen = self.offset_y_screen + (self.tab_height_px - self.tab_active_underline_px) / renderer.get_height() as f32;
 
             // Tab underline
-            renderer.draw_quad(
+            renderer.draw_ui_quad(
                 &[self.offset_x_screen, underline_y_screen],
                 &[self.width_screen, self.tab_underline_px / renderer.get_height() as f32],
-                &[0.133, 0.133, 0.25, 1.0]
+                &[0.133, 0.133, 0.25, 1.0],
+                0.0
             );
 
             for i in 0..self.layouts.len() {
                 let is_active = i == self.active_layout_idx;
                 let button = Button::new_px(
                     [tab_width_real, self.tab_height_px - self.tab_active_underline_px],
-                    [cur_offset, self.offset_y_screen * renderer.get_height() as f32]
+                    [cur_offset + self.offset_x_screen * renderer.get_width() as f32, self.offset_y_screen * renderer.get_height() as f32]
                 );
 
                 let name = match self.layouts[i].get_name() {
@@ -286,15 +293,17 @@ impl TabGroup {
                     renderer,
                     &text_color,
                     &[0.0, 0.0, 0.0, 0.0],
+                    0.0,
                     self.tab_text_px,
                     &name
                 );
 
                 if is_active {
-                    renderer.draw_quad(
-                        &[cur_offset / renderer.get_width() as f32, underline_y_screen],
+                    renderer.draw_ui_quad(
+                        &[cur_offset / renderer.get_width() as f32 + self.offset_x_screen, underline_y_screen],
                         &renderer.to_screen_f32([tab_width_real, self.tab_active_underline_px]),
-                        &[0.933, 0.388, 0.321, 1.0]
+                        &[0.933, 0.388, 0.321, 1.0],
+                        0.0
                     );
                 }
 

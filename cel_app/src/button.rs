@@ -35,6 +35,7 @@ impl Button {
         renderer: &mut Renderer,
         fg_color: &[f32; 3],
         bg_color: &[f32; 4],
+        rounding_px: f32,
         char_height_px: f32,
         text: &str
     ) {
@@ -47,6 +48,7 @@ impl Button {
             fg_color,
             bg_color,
             true,
+            rounding_px,
             text
         );
     }

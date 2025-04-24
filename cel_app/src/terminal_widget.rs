@@ -465,10 +465,11 @@ impl TerminalWidget {
         height: f32,
         bg_color: &[f32; 4]
     ) {
-        renderer.draw_quad(
+        renderer.draw_ui_quad(
             &[position.offset[0], position.offset[1] - height],
             &[1.0, height],
-            bg_color
+            bg_color,
+            0.0
         );
     }
 
@@ -481,10 +482,11 @@ impl TerminalWidget {
     ) {
         let size_px = 2.0;
         let size = size_px / renderer.get_height() as f32;
-        renderer.draw_quad(
+        renderer.draw_ui_quad(
             &[position.offset[0], position.offset[1] - height],
             &[1.0, size],
-            color
+            color,
+            0.0
         );
     }
 
@@ -499,13 +501,14 @@ impl TerminalWidget {
 
         let padding = self.get_padding(renderer);
         self.iter_selected_region(rc.max_cols, |y, start_x, end_x| {
-            renderer.draw_quad(
+            renderer.draw_ui_quad(
                 &[
                     position.offset[0] + padding[0] + start_x as f32 * rc.char_size_x_screen,
                     position.offset[1] - height + padding[1] + y as f32 * rc.char_size_y_screen
                 ],
                 &[(end_x - start_x) as f32 * rc.char_size_x_screen, rc.char_size_y_screen],
-                &[0.25, 0.5, 0.5, 0.3]
+                &[0.25, 0.5, 0.5, 0.3],
+                0.0
             );
         });
 
@@ -588,6 +591,7 @@ impl TerminalWidget {
                 renderer,
                 &[1.0, 1.0, 1.0],
                 &[0.0, 0.0, 0.0, 0.0],
+                0.0,
                 icon_size_px,
                 icon
             );
