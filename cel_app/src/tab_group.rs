@@ -10,7 +10,7 @@ use glfw::PWindow;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, bail};
 
-use crate::imui::Button;
+use crate::imui;
 use crate::input::{Input, InputEvent};
 use crate::layout::Layout;
 use crate::window::PWindowExt;
@@ -242,6 +242,11 @@ impl TabGroup {
             8.0,
             "⏷"
         );
+
+        imui::Layout::new()
+            .offset(size)
+        ;
+
         cur_offset += self.tab_height_px + 5.0;
 
         // Render tabs
@@ -283,7 +288,7 @@ impl TabGroup {
                     false => [0.5, 0.5, 0.5],
                 };
 
-                let button = Button::new()
+                let button = imui::Button::new()
                     .size(Coord::Px([tab_width_real, self.tab_height_px - self.tab_active_underline_px]))
                     .offset(Coord::MixedPS([cur_offset + self.offset_x_screen * renderer.get_width() as f32, self.offset_y_screen]))
                     .fg_color(text_color)

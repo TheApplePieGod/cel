@@ -2,6 +2,8 @@ use cel_renderer::renderer::{Coord, Renderer};
 
 use crate::input::Input;
 
+use super::traits::{Offsetable, Sizable};
+
 pub struct Button<'a> {
     size: Coord,
     offset: Coord,
@@ -10,6 +12,20 @@ pub struct Button<'a> {
     rounding_px: f32,
     char_height_px: f32,
     text: Option<&'a str>
+}
+
+impl<'a> Sizable for Button<'a> {
+    fn size(mut self, size: Coord) -> Self {
+        self.size = size;
+        self
+    }
+}
+
+impl<'a> Offsetable for Button<'a> {
+    fn offset(mut self, offset: Coord) -> Self {
+        self.offset = offset;
+        self
+    }
 }
 
 // Immediate mode button
@@ -26,14 +42,12 @@ impl<'a> Button<'a> {
         }
     }
 
-    pub fn size(mut self, size: Coord) -> Self {
-        self.size = size;
-        self
+    pub fn size(self, size: Coord) -> Self {
+        Sizable::size(self, size)
     }
 
     pub fn offset(mut self, offset: Coord) -> Self {
-        self.offset = offset;
-        self
+        Offsetable::offset(self, offset)
     }
 
     pub fn fg_color(mut self, color: [f32; 3]) -> Self {
