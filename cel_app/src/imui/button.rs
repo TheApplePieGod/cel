@@ -2,29 +2,50 @@ use cel_renderer::renderer::{Coord, Renderer};
 
 use crate::input::Input;
 
-use super::traits::{Offsetable, Sizable};
+use super::traits::*;
 
 pub struct Button<'a> {
     size: Coord,
     offset: Coord,
     fg_color: [f32; 3],
-    bg_color: [f32; 4],
+    bg_color: Option<[f32; 4]>,
     rounding_px: f32,
     char_height_px: f32,
     text: Option<&'a str>
 }
 
 impl<'a> Sizable for Button<'a> {
-    fn size(mut self, size: Coord) -> Self {
+    fn set_size(&mut self, size: Coord) {
         self.size = size;
-        self
+    }
+
+    fn get_size(&self) -> &Coord {
+        &self.size
     }
 }
 
 impl<'a> Offsetable for Button<'a> {
-    fn offset(mut self, offset: Coord) -> Self {
+    fn set_offset(&mut self, offset: Coord) {
         self.offset = offset;
-        self
+    }
+
+    fn get_offset(&self) -> &Coord {
+        &self.offset
+    }
+}
+
+impl<'a> Renderable for Button<'a> {
+    fn render(&self, renderer: &mut Renderer) {
+        renderer.draw_text(
+            self.char_height_px,
+            &self.offset,
+            &self.size,
+            &self.fg_color,
+            &self.bg_color,
+            true,
+            self.rounding_px,
+            self.text.unwrap_or("")
+        );
     }
 }
 
@@ -35,19 +56,26 @@ impl<'a> Button<'a> {
             size: Coord::Px([0.0, 0.0]),
             offset: Coord::Px([0.0, 0.0]),
             fg_color: [1.0, 1.0, 1.0],
-            bg_color: [0.0, 0.0, 0.0, 0.0],
+            bg_color: None,
             rounding_px: 0.0,
             char_height_px: 12.0,
             text: None
         }
     }
 
-    pub fn size(self, size: Coord) -> Self {
-        Sizable::size(self, size)
+    pub fn size(mut self, size: Coord) -> Self {
+        Sizable::set_size(&mut self, size);
+        self
     }
 
     pub fn offset(mut self, offset: Coord) -> Self {
-        Offsetable::offset(self, offset)
+        Offsetable::set_offset(&mut self, offset);
+        self
+    }
+
+    pub fn render(self, renderer: &mut Renderer) -> Self {
+        Renderable::render(&self, renderer);
+        self
     }
 
     pub fn fg_color(mut self, color: [f32; 3]) -> Self {
@@ -56,7 +84,7 @@ impl<'a> Button<'a> {
     }
 
     pub fn bg_color(mut self, color: [f32; 4]) -> Self {
-        self.bg_color = color;
+        self.bg_color = Some(color);
         self
     }
 
@@ -75,21 +103,6 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn render(self, renderer: &mut Renderer) -> Self {
-        renderer.draw_text(
-            self.char_height_px,
-            &self.offset,
-            &self.size,
-            &self.fg_color,
-            &self.bg_color,
-            true,
-            self.rounding_px,
-            self.text.unwrap_or("")
-        );
-
-        self
-    }
-
     // ----------------------------------
 
     pub fn is_hovered(&self, renderer: &Renderer, input: &Input) -> bool {
@@ -97,7 +110,7 @@ impl<'a> Button<'a> {
         let [x, y] = input.get_mouse_pos();
 
         let offset = self.offset.px(renderer);
-        let size = self.offset.px(renderer);
+        let size = self.size.px(renderer);
 
         x >= offset[0] && x <= offset[0] + size[0] &&
         y >= offset[1] && y <= offset[1] + size[1]

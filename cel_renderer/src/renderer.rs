@@ -18,6 +18,7 @@ use crate::{
 };
 
 // Origin is top left (0, 0), positive y is down
+#[derive(Debug, Copy, Clone)]
 pub enum Coord {
     Screen([f32; 2]),
     Px([f32; 2]),
@@ -115,6 +116,19 @@ impl Coord {
                 v[0] * renderer.get_width() as f32, v[1]
             ]
         }
+    }
+
+    pub fn map(&self, f: impl Fn(&[f32; 2]) -> [f32; 2]) -> Self {
+        match self {
+            Self::Screen(v) => Self::Screen(f(v)),
+            Self::Px(v) => Self::Px(f(v)),
+            Self::MixedPS(v) => Self::MixedPS(f(v)),
+            Self::MixedSP(v) => Self::MixedSP(f(v)),
+        }
+    }
+
+    pub fn scale(&self, scale: f32) -> Self {
+        self.map(|v| [v[0] * scale, v[1] * scale])
     }
 }
 
@@ -614,7 +628,7 @@ impl Renderer {
         offset: &Coord,
         bg_size: &Coord,
         fg_color: &[f32; 3],
-        bg_color: &[f32; 4],
+        bg_color: &Option<[f32; 4]>,
         centered: bool,
         rounding_px: f32,
         text: &str,
@@ -656,7 +670,9 @@ impl Renderer {
 
         self.enable_blending();
 
-        self.draw_ui_quad(offset, bg_size, bg_color, rounding_px);
+        if let Some(bg_color) = bg_color {
+            self.draw_ui_quad(offset, bg_size, bg_color, rounding_px);
+        }
 
         let screen_offset = &offset.screen(self);
         let bg_size_screen = &bg_size.screen(self);

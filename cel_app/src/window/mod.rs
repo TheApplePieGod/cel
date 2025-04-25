@@ -391,7 +391,7 @@ impl Window {
             &Coord::Screen([1.0 - size_x, 0.0]),
             &Coord::Screen([size_x, 0.75]),
             &[1.0, 1.0, 1.0],
-            &bg_color,
+            &Some(bg_color),
             false,
             8.0,
             &text_lines.join("\n")

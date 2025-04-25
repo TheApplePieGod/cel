@@ -35,6 +35,7 @@ pub struct TabGroup {
 
     layouts: Vec<Layout>,
     active_layout_idx: usize,
+    group_dropdown_open: bool,
 
     tab_underline_px: f32,
     tab_active_underline_px: f32,
@@ -60,7 +61,7 @@ impl TabGroup {
 
         let default_layout = Layout::new(
             renderer,
-            width_screen,
+width_screen,
             height_screen,
             default_char_size_px,
             default_char_size_px,
@@ -76,6 +77,7 @@ impl TabGroup {
             
             active_layout_idx: 0,
             layouts: vec![ default_layout ],
+            group_dropdown_open: false,
 
             tab_underline_px: 2.0,
             tab_active_underline_px: 2.0,
@@ -213,6 +215,7 @@ impl TabGroup {
         window: &mut PWindow
     ) -> bool {
         let mut should_rerender = false;
+        let mut should_drag_window = true;
 
         let opacity = bg_color.map(|c| c[3]).unwrap_or(1.0);
         let err_bg_color = Some([0.3, 0.03, 0.03, opacity]);
@@ -231,26 +234,23 @@ impl TabGroup {
 
         let mut cur_offset = self.tab_inset_px;
 
-        // Render group dropdown
-        renderer.draw_text(
-            self.tab_text_px * 1.5,
-            &Coord::MixedPS([cur_offset, self.offset_y_screen]),
-            &Coord::Px([self.tab_height_px, self.tab_height_px]),
-            &[1.0, 1.0, 1.0],
-            &[1.0, 0.0, 0.0, 1.0],
-            true,
-            8.0,
-            "⏷"
-        );
-
-        imui::Layout::new()
-            .offset(size)
-        ;
+        // Render group dropdown select button
+        let dropdown_button = imui::Button::new()
+            .size(Coord::Px([self.tab_height_px, self.tab_height_px]))
+            .offset(Coord::MixedPS([cur_offset, self.offset_y_screen]))
+            .char_height_px(self.tab_text_px * 1.5)
+            .text("⏷")
+            .render(renderer);
+        if dropdown_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+            self.group_dropdown_open = true;
+        }
+        if dropdown_button.is_hovered(renderer, input) {
+            should_drag_window  = false;
+        }
 
         cur_offset += self.tab_height_px + 5.0;
 
         // Render tabs
-        let mut should_drag_window = true;
         let num_layouts = self.layouts.len() as f32;
         if num_layouts > 1.0 {
             let width_px = self.width_screen * renderer.get_width() as f32 - cur_offset;
@@ -305,7 +305,8 @@ impl TabGroup {
                     );
                 }
 
-                if button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
+                // Handle click, but only when the dropdown is not currently focused
+                if !self.group_dropdown_open && button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
                     self.active_layout_idx = i;
                     should_rerender = true;
                 }
@@ -319,7 +320,34 @@ impl TabGroup {
             }
         }
 
-        // Disable dragging when hovering over a tab
+        // Render dropdown when open flag is set
+        if self.group_dropdown_open {
+            imui::Layout::new()
+                .offset(Coord::MixedPS([self.tab_inset_px, self.offset_y_screen]))
+                .mode(imui::LayoutMode::Grow)
+                .render_next_item(renderer, &mut imui::Button::new()
+                    .size(Coord::Px([200.0, 25.0]))
+                    .bg_color([1.0, 0.0, 0.0, 1.0])
+                    .text("Button1")
+                )
+                .render_next_item(renderer, &mut imui::Button::new()
+                    .size(Coord::Px([200.0, 25.0]))
+                    .bg_color([0.0, 1.0, 0.0, 1.0])
+                    .text("Button2")
+                )
+                .render_next_item(renderer, &mut imui::Button::new()
+                    .size(Coord::Px([200.0, 25.0]))
+                    .bg_color([0.0, 0.0, 1.0, 1.0])
+                    .text("Button3")
+                );
+
+            // Always close dropdown on press
+            if input.get_mouse_just_pressed(glfw::MouseButtonLeft) {
+                self.group_dropdown_open = false;
+            }
+        }
+
+        // Disable dragging when input is focused
         window.set_draggable(should_drag_window);
 
         should_rerender

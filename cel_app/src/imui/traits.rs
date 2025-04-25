@@ -1,9 +1,15 @@
-use cel_renderer::renderer::Coord;
+use cel_renderer::renderer::{Coord, Renderer};
 
 pub trait Sizable {
-    fn size(self, size: Coord) -> Self;
+    fn set_size(&mut self, size: Coord);
+    fn get_size(&self) -> &Coord;
 }
 
 pub trait Offsetable {
-    fn offset(self, offset: Coord) -> Self;
+    fn set_offset(&mut self, offset: Coord);
+    fn get_offset(&self) -> &Coord;
+}
+
+pub trait Renderable {
+    fn render(&self, renderer: &mut Renderer);
 }
