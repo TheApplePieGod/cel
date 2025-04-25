@@ -22,8 +22,21 @@ struct SessionTab {
 }
 
 #[derive(Serialize, Deserialize, Default)]
-struct Session {
+struct SessionGroup {
     tabs: Option<Vec<SessionTab>>,
+    name: Option<String>
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct Session {
+    groups: Option<Vec<SessionGroup>>,
+}
+
+#[derive(Default)]
+struct GroupData {
+    layouts: Vec<Layout>,
+    active_layout_idx: usize,
+    name: Option<String>
 }
 
 pub struct TabGroup {
@@ -33,8 +46,8 @@ pub struct TabGroup {
     offset_y_screen: f32,
     session_file_path: PathBuf,
 
-    layouts: Vec<Layout>,
-    active_layout_idx: usize,
+    groups: Vec<GroupData>,
+    active_group_idx: usize,
     group_dropdown_open: bool,
 
     tab_underline_px: f32,
@@ -59,24 +72,15 @@ impl TabGroup {
         let mut sessions_file_path = get_config_dir();
         sessions_file_path.push("session.json");
 
-        let default_layout = Layout::new(
-            renderer,
-width_screen,
-            height_screen,
-            default_char_size_px,
-            default_char_size_px,
-            None
-        );
-
-        Self {
+        let mut obj = Self {
             width_screen,
             height_screen,
             offset_x_screen: 0.0,
             offset_y_screen: 0.0,
             session_file_path: sessions_file_path,
             
-            active_layout_idx: 0,
-            layouts: vec![ default_layout ],
+            active_group_idx: 0,
+            groups: vec![],
             group_dropdown_open: false,
 
             tab_underline_px: 2.0,
@@ -87,7 +91,11 @@ width_screen,
             tab_height_px,
             tab_inset_px,
             default_char_size_px,
-        }
+        };
+
+        obj.push_group(renderer);
+
+        obj
     }
 
     pub fn set_tab_inset_px(&mut self, inset: f32) {
@@ -99,10 +107,18 @@ width_screen,
         let reader = BufReader::new(file);
         let session: Session = serde_json::from_reader(reader)?;
 
-        if let Some(tabs) = session.tabs {
-            self.layouts.clear();
-            for tab in tabs {
-                self.layouts.push(self.load_layout_from_session_tab(renderer, &tab));
+        if let Some(groups) = session.groups {
+            self.groups.clear();
+            for group in groups {
+                // TODO: should have else here that pushes default layout
+                if let Some(tabs) = group.tabs {
+                    let mut data: GroupData = Default::default();
+                    data.name = group.name;
+                    for tab in tabs {
+                        data.layouts.push(self.load_layout_from_session_tab(renderer, &tab));
+                    }
+                    self.groups.push(data);
+                }
             }
         }
 
@@ -122,17 +138,26 @@ width_screen,
     pub fn write_session(&self) -> Result<()> {
         let mut session: Session = Default::default();
 
-        let mut tabs = vec![];
-        for i in 0..self.layouts.len() {
-            let tab = self.serialize_layout_to_session_tab(i);
-            if tab.cwd.is_none() || tab.cwd.as_ref().unwrap().is_empty() {
-                // Do not overwrite the session if any of the tabs are currently still
-                // initializing (empty dir)
-                bail!("Not ready");
+        let mut groups = vec![];
+        for g in 0..self.groups.len() {
+            let group = &self.groups[g];
+            let mut tabs = vec![];
+            for l in 0..group.layouts.len() {
+                let tab = self.serialize_layout_to_session_tab(group, l);
+                if tab.cwd.is_none() || tab.cwd.as_ref().unwrap().is_empty() {
+                    // Do not overwrite the session if any of the tabs are currently still
+                    // initializing (empty dir)
+                    bail!("Not ready");
+                }
+                tabs.push(tab);
             }
-            tabs.push(tab);
+
+            groups.push(SessionGroup {
+                tabs: Some(tabs),
+                name: group.name.clone()
+            });
         }
-        session.tabs = Some(tabs);
+        session.groups = Some(groups);
 
         let file = File::create(&self.session_file_path)?;
         let writer = BufWriter::new(file);
@@ -148,16 +173,17 @@ width_screen,
     ) -> bool {
         let mut any_event = false;
 
-        // Update all layouts
+        // Update all layouts for active group
         let mut input = input;
         let mut layout_idx = 0;
         loop {
-            if layout_idx >= self.layouts.len() {
+            let group = &mut self.groups[self.active_group_idx];
+            if layout_idx >= group.layouts.len() {
                 break;
             }
 
-            let input = if layout_idx == self.active_layout_idx { Some(input.deref_mut()) } else { None };
-            let (layout_event, layout_terminated) = self.layouts[layout_idx].update(renderer, input);
+            let input = if layout_idx == group.active_layout_idx { Some(input.deref_mut()) } else { None };
+            let (layout_event, layout_terminated) = group.layouts[layout_idx].update(renderer, input);
             any_event |= layout_event;
 
             if layout_terminated {
@@ -174,29 +200,35 @@ width_screen,
         // Handle input events
         any_event |= input.consume_event(InputEvent::TabNew, || {
             // Push layout copying settings from active layout
+            let group = &self.groups[self.active_group_idx];
             self.push_layout(
                 renderer,
-                Some(self.serialize_layout_to_session_tab(self.active_layout_idx))
+                self.active_group_idx,
+                Some(self.serialize_layout_to_session_tab(group, group.active_layout_idx))
             );
         });
         any_event |= input.consume_event(InputEvent::TabDelete, || {
             self.pop_active_layout(renderer);
         });
         any_event |= input.consume_event(InputEvent::TabPrev, || {
-            self.active_layout_idx = self.active_layout_idx.wrapping_sub(1).min(self.layouts.len() - 1);
+            let group = &mut self.groups[self.active_group_idx];
+            group.active_layout_idx = group.active_layout_idx.wrapping_sub(1).min(group.layouts.len() - 1);
         });
         any_event |= input.consume_event(InputEvent::TabNext, || {
-            self.active_layout_idx = (self.active_layout_idx + 1) % self.layouts.len();
+            let group = &mut self.groups[self.active_group_idx];
+            group.active_layout_idx = (group.active_layout_idx + 1) % group.layouts.len();
         });
         any_event |= input.consume_event(InputEvent::TabMoveLeft, || {
-            let new_idx = self.active_layout_idx.wrapping_sub(1).min(self.layouts.len() - 1);
-            self.layouts.swap(new_idx, self.active_layout_idx);
-            self.active_layout_idx = new_idx;
+            let group = &mut self.groups[self.active_group_idx];
+            let new_idx = group.active_layout_idx.wrapping_sub(1).min(group.layouts.len() - 1);
+            group.layouts.swap(new_idx, group.active_layout_idx);
+            group.active_layout_idx = new_idx;
         });
         any_event |= input.consume_event(InputEvent::TabMoveRight, || {
-            let new_idx = (self.active_layout_idx + 1) % self.layouts.len();
-            self.layouts.swap(new_idx, self.active_layout_idx);
-            self.active_layout_idx = new_idx;
+            let group = &mut self.groups[self.active_group_idx];
+            let new_idx = (group.active_layout_idx + 1) % group.layouts.len();
+            group.layouts.swap(new_idx, group.active_layout_idx);
+            group.active_layout_idx = new_idx;
         });
 
         if any_event {
@@ -216,13 +248,15 @@ width_screen,
     ) -> bool {
         let mut should_rerender = false;
         let mut should_drag_window = true;
+        let mut dropdown_just_opened = false;
 
         let opacity = bg_color.map(|c| c[3]).unwrap_or(1.0);
         let err_bg_color = Some([0.3, 0.03, 0.03, opacity]);
         let divider_color = Some([0.133, 0.133, 0.25, opacity]);
         let err_divider_color = Some([0.5, 0.08, 0.08, opacity]);
 
-        let active_layout = &mut self.layouts[self.active_layout_idx];
+        let active_group = &mut self.groups[self.active_group_idx];
+        let active_layout = &mut active_group.layouts[active_group.active_layout_idx];
         should_rerender |= active_layout.render(
             bg_color,
             divider_color,
@@ -243,6 +277,7 @@ width_screen,
             .render(renderer);
         if dropdown_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
             self.group_dropdown_open = true;
+            dropdown_just_opened = true;
         }
         if dropdown_button.is_hovered(renderer, input) {
             should_drag_window  = false;
@@ -251,7 +286,7 @@ width_screen,
         cur_offset += self.tab_height_px + 5.0;
 
         // Render tabs
-        let num_layouts = self.layouts.len() as f32;
+        let num_layouts = active_group.layouts.len() as f32;
         if num_layouts > 1.0 {
             let width_px = self.width_screen * renderer.get_width() as f32 - cur_offset;
             let gap_width = self.tab_gap_px * (num_layouts - 1.0).max(0.0);
@@ -271,10 +306,10 @@ width_screen,
                 0.0
             );
 
-            for i in 0..self.layouts.len() {
-                let is_active = i == self.active_layout_idx;
+            for i in 0..active_group.layouts.len() {
+                let is_active = i == active_group.active_layout_idx;
 
-                let name = match self.layouts[i].get_name() {
+                let name = match active_group.layouts[i].get_name() {
                     "" => "Tab".to_string(),
                     name => if name.len() > max_chars {
                         format!("...{}", &name[name.len().saturating_sub(max_chars)..])
@@ -307,7 +342,7 @@ width_screen,
 
                 // Handle click, but only when the dropdown is not currently focused
                 if !self.group_dropdown_open && button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
-                    self.active_layout_idx = i;
+                    active_group.active_layout_idx = i;
                     should_rerender = true;
                 }
 
@@ -322,27 +357,41 @@ width_screen,
 
         // Render dropdown when open flag is set
         if self.group_dropdown_open {
-            imui::Layout::new()
-                .offset(Coord::MixedPS([self.tab_inset_px, self.offset_y_screen]))
-                .mode(imui::LayoutMode::Grow)
-                .render_next_item(renderer, &mut imui::Button::new()
+            let mut dropdown = imui::Layout::new()
+                .offset(Coord::Px([
+                    self.tab_inset_px,
+                    self.offset_y_screen * renderer.get_height() as f32 + self.tab_height_px
+                ]))
+                .mode(imui::LayoutMode::Grow);
+
+            
+            // Render button for each group
+            for (i, group) in self.groups.iter().enumerate() {
+                let default_name = format!("Group {}", i + 1);
+                let mut button = imui::Button::new()
                     .size(Coord::Px([200.0, 25.0]))
                     .bg_color([1.0, 0.0, 0.0, 1.0])
-                    .text("Button1")
-                )
-                .render_next_item(renderer, &mut imui::Button::new()
-                    .size(Coord::Px([200.0, 25.0]))
-                    .bg_color([0.0, 1.0, 0.0, 1.0])
-                    .text("Button2")
-                )
-                .render_next_item(renderer, &mut imui::Button::new()
-                    .size(Coord::Px([200.0, 25.0]))
-                    .bg_color([0.0, 0.0, 1.0, 1.0])
-                    .text("Button3")
-                );
+                    .rounding_px(5.0)
+                    .text(&group.name.as_ref().unwrap_or(&default_name));
+                dropdown = dropdown.render_next_item(renderer, &mut button);
+                if button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                    self.active_group_idx = i;
+                }
+            }
 
-            // Always close dropdown on press
-            if input.get_mouse_just_pressed(glfw::MouseButtonLeft) {
+            // Render final add button
+            let mut button = imui::Button::new()
+                .size(Coord::Px([200.0, 25.0]))
+                .bg_color([0.0, 1.0, 0.0, 1.0])
+                .rounding_px(5.0)
+                .text("+");
+            dropdown = dropdown.render_next_item(renderer, &mut button);
+            if button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                self.push_group(renderer);
+            }
+
+            // Always close dropdown on press, if the widget was not just opened
+            if !dropdown_just_opened && input.get_mouse_just_released(glfw::MouseButtonLeft) {
                 self.group_dropdown_open = false;
             }
         }
@@ -361,26 +410,31 @@ width_screen,
         new_offset_screen: [f32; 2]
     ) {
         let tab_height_screen = self.tab_height_px / renderer.get_height() as f32;
-        let mut real_size = new_size_screen;
-        let mut real_offset = new_offset_screen;
-        if self.layouts.len() > 1 {
-            // Display tabs when >1
-            real_size[1] -= tab_height_screen;
-            real_offset[1] += tab_height_screen;
-        }
-        for layout in &mut self.layouts {
-            layout.resize(renderer, soft, real_size, real_offset);
+        for group in &mut self.groups {
+            let mut real_size = new_size_screen;
+            let mut real_offset = new_offset_screen;
+            if group.layouts.len() > 1 {
+                // Display tabs when >1
+                real_size[1] -= tab_height_screen;
+                real_offset[1] += tab_height_screen;
+            }
+            for layout in &mut group.layouts {
+                layout.resize(renderer, soft, real_size, real_offset);
+            }
         }
     }
 
     pub fn get_debug_lines(&self) -> Vec<String> {
+        let group = &self.groups[self.active_group_idx];
         let mut text_lines = vec![
-            format!("Total tabs: {}", self.layouts.len()),
-            format!("Active tab: {}", self.active_layout_idx),
+            format!("Total groups: {}", self.groups.len()),
+            format!("Active group: {}", self.active_group_idx),
+            format!("Total tabs: {}", group.layouts.len()),
+            format!("Active tab: {}", group.active_layout_idx),
             String::from("\n"),
         ];
         
-        let active_layout = &self.layouts[self.active_layout_idx];
+        let active_layout = &group.layouts[group.active_layout_idx];
         text_lines.extend(active_layout.get_debug_lines());
 
         text_lines
@@ -402,8 +456,8 @@ width_screen,
         )
     }
 
-    fn serialize_layout_to_session_tab(&self, layout_idx: usize) -> SessionTab {
-        let layout = &self.layouts[layout_idx];
+    fn serialize_layout_to_session_tab(&self, group: &GroupData, layout_idx: usize) -> SessionTab {
+        let layout = &group.layouts[layout_idx];
         let cwd = layout.get_current_directory().to_string();
         SessionTab {
             cwd: Some(cwd),
@@ -411,11 +465,21 @@ width_screen,
         }
     }
 
-    fn push_layout(&mut self, renderer: &Renderer, tab_data: Option<SessionTab>) {
+    fn push_group(&mut self, renderer: &Renderer) {
+        let new_group_idx = self.groups.len();
+        self.groups.push(Default::default());
+        self.push_layout(renderer, new_group_idx, None);
+        self.active_group_idx = new_group_idx;
+    }
+
+    fn push_layout(&mut self, renderer: &Renderer, group_idx: usize, tab_data: Option<SessionTab>) {
         if let Some(tab_data) = tab_data {
-            self.layouts.push(self.load_layout_from_session_tab(renderer, &tab_data));
+            let layout = self.load_layout_from_session_tab(renderer, &tab_data);
+            let group = &mut self.groups[group_idx];
+            group.layouts.push(layout);
         } else {
-            self.layouts.push(Layout::new(
+            let group = &mut self.groups[group_idx];
+            group.layouts.push(Layout::new(
                 renderer,
                 self.width_screen,
                 self.height_screen,
@@ -425,7 +489,8 @@ width_screen,
             ));
         }
 
-        self.active_layout_idx = self.layouts.len() - 1;
+        let group = &mut self.groups[group_idx];
+        group.active_layout_idx = group.layouts.len() - 1;
 
         // Force resize to account for tab offset shift
         self.resize(
@@ -437,25 +502,34 @@ width_screen,
     }
 
     fn pop_layout(&mut self, renderer: &Renderer, idx: usize) {
-        if self.layouts.len() <= 1 {
-            // TODO: more graceful exit
-            log::info!("No layouts left, exiting");
-            exit(0);
+        let group = &self.groups[self.active_group_idx];
+
+        if group.layouts.len() <= 1 {
+            if self.groups.len() <= 1 {
+                // TODO: more graceful exit
+                log::info!("No layouts or groups left, exiting");
+                exit(0);
+            }
+
+            // Switch to next group
+            self.active_group_idx = self.active_group_idx.min(self.groups.len() - 1);
+        } else {
+            let group = &mut self.groups[self.active_group_idx];
+            group.layouts.remove(idx);
+            group.active_layout_idx = group.active_layout_idx.min(group.layouts.len() - 1);
+
+            // Force resize to account for tab offset shift
+            self.resize(
+                renderer,
+                false,
+                [self.width_screen, self.height_screen],
+                [self.offset_x_screen, self.offset_y_screen],
+            );
         }
-
-        self.layouts.remove(idx);
-        self.active_layout_idx = self.active_layout_idx.min(self.layouts.len() - 1);
-
-        // Force resize to account for tab offset shift
-        self.resize(
-            renderer,
-            false,
-            [self.width_screen, self.height_screen],
-            [self.offset_x_screen, self.offset_y_screen],
-        );
     }
 
     fn pop_active_layout(&mut self, renderer: &Renderer) {
-        self.pop_layout(renderer, self.active_layout_idx);
+        let group = &self.groups[self.active_group_idx];
+        self.pop_layout(renderer, group.active_layout_idx);
     }
 }

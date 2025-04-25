@@ -65,10 +65,13 @@ impl Layout {
         self
     }
 
+    /*
+    // TODO: background rendering
     pub fn bg_color(mut self, color: [f32; 4]) -> Self {
         self.bg_color = Some(color);
         self
     }
+    */
 
     pub fn render_next_item<T: Sizable + Offsetable + Renderable>(
         mut self,
