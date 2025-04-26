@@ -19,6 +19,7 @@ pub struct TerminalGrid {
     pub autowrap: bool,
     pub wants_wrap: bool,
     pub max_scrollback: usize,
+    pub tab_width: usize,
 }
 
 impl TerminalGrid {
@@ -33,7 +34,8 @@ impl TerminalGrid {
             margin: Margin::from_dimensions(width, height),
             autowrap: true,
             wants_wrap: false,
-            max_scrollback: usize::MAX
+            max_scrollback: usize::MAX,
+            tab_width: 8, // Default
         }
     }
 
@@ -262,6 +264,12 @@ impl TerminalGrid {
     /// Computes the cursor directly below the supplied cursor
     pub fn get_cursor_next_line(&self, cursor: Cursor) -> Cursor {
         [cursor[0], (cursor[1] + 1).min(self.height - 1)]
+    }
+    
+    /// Computes the cursor at the start of the next tab stop
+    pub fn get_cursor_next_tab_stop(&self, cursor: Cursor) -> Cursor {
+        let new_x = ((cursor[0] / self.tab_width) + 1) * self.tab_width;
+        [new_x.min(self.width - 1), cursor[1]]
     }
 
     /// Clamp cursor to dimensions
