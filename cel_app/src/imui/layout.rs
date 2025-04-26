@@ -3,6 +3,11 @@ use chrono::offset;
 
 use super::traits::*;
 
+pub enum LayoutDir{
+    Vertical,
+    Horizontal
+}
+
 pub enum LayoutMode {
     Fit(usize), // Max items 
     Grow,
@@ -11,11 +16,12 @@ pub enum LayoutMode {
 
 pub struct Layout {
     mode: LayoutMode,
+    dir: LayoutDir,
     size: Coord,
     offset: Coord,
     bg_color: Option<[f32; 4]>,
     num_items: u32,
-    cur_offset_screen: f32,
+    cur_offset_screen: [f32; 2],
 }
 
 impl Sizable for Layout {
@@ -42,11 +48,12 @@ impl Layout {
     pub fn new() -> Self {
         Layout {
             mode: LayoutMode::Grow,
+            dir: LayoutDir::Vertical,
             size: Coord::Px([0.0, 0.0]),
             offset: Coord::Px([0.0, 0.0]),
             bg_color: None,
             num_items: 0,
-            cur_offset_screen: 0.0,
+            cur_offset_screen: [0.0, 0.0],
         }
     }
 
@@ -65,6 +72,11 @@ impl Layout {
         self
     }
 
+    pub fn dir(mut self, dir: LayoutDir) -> Self {
+        self.dir = dir;
+        self
+    }
+
     /*
     // TODO: background rendering
     pub fn bg_color(mut self, color: [f32; 4]) -> Self {
@@ -73,36 +85,51 @@ impl Layout {
     }
     */
 
-    pub fn render_next_item<T: Sizable + Offsetable + Renderable>(
+    pub fn position_next_item<T: Sizable + Offsetable>(
         mut self,
         renderer: &mut Renderer,
         item: &mut T
     ) -> Self {
+        let dir_idx = match self.dir {
+            LayoutDir::Horizontal => 0,
+            LayoutDir::Vertical => 1,
+        };
+
         let size_screen = self.size.screen(renderer);
         let offset_screen = self.offset.screen(renderer);
+
+        let elem_offset = [offset_screen[0] + self.cur_offset_screen[0], offset_screen[1] + self.cur_offset_screen[1]];
         match self.mode {
             LayoutMode::Fit(max_items) => {
-                let elem_size = [size_screen[0], size_screen[1] / max_items as f32];
-                let elem_offset = [offset_screen[0], offset_screen[1] + self.cur_offset_screen];
+                let mut elem_size = size_screen;
+                elem_size[dir_idx] /= max_items as f32;
+
                 item.set_size(Coord::Screen(elem_size));
                 item.set_offset(Coord::Screen(elem_offset));
-                item.render(renderer);
 
-                self.cur_offset_screen += elem_size[1];
+                self.cur_offset_screen[dir_idx] += elem_size[dir_idx];
             },
             LayoutMode::Grow => {
                 let elem_size = *item.get_size();
-                let elem_offset = [offset_screen[0], offset_screen[1] + self.cur_offset_screen];
                 item.set_offset(Coord::Screen(elem_offset));
-                item.render(renderer);
 
-                self.cur_offset_screen += elem_size.screen(renderer)[1];
+                self.cur_offset_screen[dir_idx] += elem_size.screen(renderer)[dir_idx];
             }
             //LayoutMode::Clip => {}
         }
 
         self.num_items += 1;
 
+        self
+    }
+
+    pub fn render_next_item<T: Sizable + Offsetable + Renderable>(
+        mut self,
+        renderer: &mut Renderer,
+        item: &mut T
+    ) -> Self {
+        self = self.position_next_item(renderer, item);
+        item.render(renderer);
         self
     }
 }

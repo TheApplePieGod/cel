@@ -49,6 +49,8 @@ pub struct TabGroup {
     groups: Vec<GroupData>,
     active_group_idx: usize,
     group_dropdown_open: bool,
+    group_rename_idx: Option<usize>,
+    group_rename_open: bool,
 
     tab_underline_px: f32,
     tab_active_underline_px: f32,
@@ -82,6 +84,8 @@ impl TabGroup {
             active_group_idx: 0,
             groups: vec![],
             group_dropdown_open: false,
+            group_rename_open: false,
+            group_rename_idx: None,
 
             tab_underline_px: 2.0,
             tab_active_underline_px: 2.0,
@@ -341,7 +345,7 @@ impl TabGroup {
                 }
 
                 // Handle click, but only when the dropdown is not currently focused
-                if !self.group_dropdown_open && button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
+                if !self.group_dropdown_open && !self.group_rename_open && button.is_clicked(renderer, input, glfw::MouseButton::Button1) {
                     active_group.active_layout_idx = i;
                     should_rerender = true;
                 }
@@ -355,44 +359,142 @@ impl TabGroup {
             }
         }
 
-        // Render dropdown when open flag is set
+        // Render group dropdown when open flag is set
         if self.group_dropdown_open {
+            let opacity = 0.95;
+            let button_width = 200.0;
+            let button_height = 25.0;
             let mut dropdown = imui::Layout::new()
                 .offset(Coord::Px([
                     self.tab_inset_px,
                     self.offset_y_screen * renderer.get_height() as f32 + self.tab_height_px
                 ]))
+                .dir(imui::LayoutDir::Vertical)
                 .mode(imui::LayoutMode::Grow);
 
-            
-            // Render button for each group
+            // Render buttons for each group
+            let mut removed_group = None;
             for (i, group) in self.groups.iter().enumerate() {
+                let bg_color = match i % 2 == 0 {
+                    true => [0.10, 0.10, 0.2, opacity],
+                    false => [0.15, 0.15, 0.25, opacity],
+                };
+
+                let mut button_layout = imui::Layout::new()
+                    .size(Coord::Px([button_width, button_height]))
+                    .dir(imui::LayoutDir::Horizontal)
+                    .mode(imui::LayoutMode::Grow);
+
+                dropdown = dropdown.position_next_item(renderer, &mut button_layout);
+
                 let default_name = format!("Group {}", i + 1);
-                let mut button = imui::Button::new()
-                    .size(Coord::Px([200.0, 25.0]))
-                    .bg_color([1.0, 0.0, 0.0, 1.0])
-                    .rounding_px(5.0)
+                let mut group_button = imui::Button::new()
+                    .size(Coord::Px([button_width - 2.0 * button_height, button_height]))
+                    .bg_color(bg_color)
                     .text(&group.name.as_ref().unwrap_or(&default_name));
-                dropdown = dropdown.render_next_item(renderer, &mut button);
-                if button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                button_layout = button_layout.render_next_item(renderer, &mut group_button);
+                if group_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
                     self.active_group_idx = i;
                 }
+
+                let mut edit_button = imui::Button::new()
+                    .size(Coord::Px([button_height, button_height]))
+                    .bg_color([0.133, 0.133, 0.25, opacity])
+                    .text("✎");
+                button_layout = button_layout.render_next_item(renderer, &mut edit_button);
+                if edit_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                    self.active_group_idx = i;
+                }
+
+                let mut delete_button = imui::Button::new()
+                    .size(Coord::Px([button_height, button_height]))
+                    .bg_color([0.933, 0.388, 0.321, opacity])
+                    .text("❌");
+                button_layout = button_layout.render_next_item(renderer, &mut delete_button);
+                if delete_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                    log::warn!("Removing {}", i);
+                    removed_group = Some(i);
+                }
+            }
+
+            if let Some(idx) = removed_group {
+                self.pop_group(renderer, idx);
             }
 
             // Render final add button
             let mut button = imui::Button::new()
-                .size(Coord::Px([200.0, 25.0]))
-                .bg_color([0.0, 1.0, 0.0, 1.0])
-                .rounding_px(5.0)
+                .size(Coord::Px([button_width, button_height]))
+                .bg_color([0.44, 0.93, 0.32, opacity])
                 .text("+");
             dropdown = dropdown.render_next_item(renderer, &mut button);
             if button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
-                self.push_group(renderer);
+                //self.push_group(renderer);
+                self.group_rename_open = true;
+                self.group_rename_idx = None;
             }
 
             // Always close dropdown on press, if the widget was not just opened
             if !dropdown_just_opened && input.get_mouse_just_released(glfw::MouseButtonLeft) {
                 self.group_dropdown_open = false;
+            }
+        }
+
+        // Render rename popup when open flag is set
+        if self.group_rename_open {
+            let screen_width = renderer.get_width() as f32;
+            let screen_height = renderer.get_height() as f32;
+
+            // Dimmed background overlay
+            renderer.draw_ui_quad(
+                &Coord::Screen([0.0, 0.0]),
+                &Coord::Screen([1.0, 1.0]),
+                &[0.0, 0.0, 0.0, 0.7],
+                0.0,
+            );
+
+            let dialog_width = 300.0;
+            let dialog_height = 150.0;
+            let center_x = (screen_width - dialog_width) * 0.5;
+            let center_y = (screen_height - dialog_height) * 0.5;
+
+            let mut dialog = imui::Layout::new()
+                .size(Coord::Px([dialog_width, dialog_height]))
+                .offset(Coord::Px([center_x, center_y]))
+                //.padding(Coord::Px([10.0, 10.0]))
+                .dir(imui::LayoutDir::Vertical)
+                .mode(imui::LayoutMode::Grow);
+
+            let idx = self.group_rename_idx.unwrap_or(self.active_group_idx);
+            let name = self.groups[idx].name.get_or_insert_with(String::new);
+
+            // Text input field
+            /*
+            let mut textbox = imui::TextBox::new()
+                .text(name)
+                .char_height_px(14.0);
+            dialog = dialog.render_next_item(renderer, &mut textbox);
+            *name = textbox.get_text().to_string();
+*/
+
+            // Confirm and cancel buttons
+            let mut btn_row = imui::Layout::new()
+                .dir(imui::LayoutDir::Horizontal)
+                .mode(imui::LayoutMode::Grow);
+
+            dialog = dialog.position_next_item(renderer, &mut btn_row);
+
+            let mut ok_button = imui::Button::new().text("OK").size(Coord::Px([100.0, 30.0]));
+            btn_row = btn_row.render_next_item(renderer, &mut ok_button);
+            if ok_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                self.group_rename_open = false;
+                self.group_rename_idx = None;
+            }
+
+            let mut cancel_button = imui::Button::new().text("Cancel").size(Coord::Px([100.0, 30.0]));
+            btn_row = btn_row.render_next_item(renderer, &mut cancel_button);
+            if cancel_button.is_clicked(renderer, input, glfw::MouseButtonLeft) {
+                self.group_rename_open = false;
+                self.group_rename_idx = None;
             }
         }
 
@@ -472,6 +574,18 @@ impl TabGroup {
         self.active_group_idx = new_group_idx;
     }
 
+    fn pop_group(&mut self, renderer: &Renderer, idx: usize) {
+        if self.groups.len() <= 1 {
+            // TODO: more graceful exit
+            log::info!("No groups left, exiting");
+            exit(0);
+        }
+
+        // Switch to next group
+        self.groups.remove(idx);
+        self.active_group_idx = self.active_group_idx.min(self.groups.len() - 1);
+    }
+
     fn push_layout(&mut self, renderer: &Renderer, group_idx: usize, tab_data: Option<SessionTab>) {
         if let Some(tab_data) = tab_data {
             let layout = self.load_layout_from_session_tab(renderer, &tab_data);
@@ -505,14 +619,7 @@ impl TabGroup {
         let group = &self.groups[self.active_group_idx];
 
         if group.layouts.len() <= 1 {
-            if self.groups.len() <= 1 {
-                // TODO: more graceful exit
-                log::info!("No layouts or groups left, exiting");
-                exit(0);
-            }
-
-            // Switch to next group
-            self.active_group_idx = self.active_group_idx.min(self.groups.len() - 1);
+            self.pop_group(renderer, self.active_group_idx);
         } else {
             let group = &mut self.groups[self.active_group_idx];
             group.layouts.remove(idx);
