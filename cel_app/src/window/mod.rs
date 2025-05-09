@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use cel_renderer::renderer::Renderer;
 use glfw::{fail_on_errors, Context, PWindow};
-use macos::get_titlebar_decoration_width_px;
 
 use crate::app_state::AppState;
 use crate::input::Input;
