@@ -1,8 +1,8 @@
 use cel_core::commands::Commands;
-use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
 use crate::input::{Input, InputEvent};
 use crate::terminal_widget::TerminalWidget;
+use crate::clipboard;
 
 pub struct TerminalContext {
     commands: Commands,
@@ -43,20 +43,13 @@ impl TerminalContext {
 
         if let Some(input) = input {
             any_event |= input.consume_event(InputEvent::Paste, || {
-                match ClipboardContext::new() {
-                    Ok(mut ctx) => {
-                        let text = ctx.get_contents().unwrap_or(String::new());
-                        match self.widgets.last_mut().unwrap().is_bracketed_paste_enabled() {
-                            true => {
-                                let bracketed = format!("\x1b[200~{}\x1b[201~", text);
-                                self.input_buffer.extend_from_slice(bracketed.as_bytes())
-                            },
-                            false => self.input_buffer.extend_from_slice(text.as_bytes()),
-                        };
-                    }
-                    Err(err) => {
-                        log::error!("Failed to initialize clipboard context: {}", err);
-                    }
+                let text = clipboard::get_clipboard_contents();
+                match self.widgets.last_mut().unwrap().is_bracketed_paste_enabled() {
+                    true => {
+                        let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                        self.input_buffer.extend_from_slice(bracketed.as_bytes())
+                    },
+                    false => self.input_buffer.extend_from_slice(text.as_bytes()),
                 };
             });
 

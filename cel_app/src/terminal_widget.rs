@@ -1,7 +1,7 @@
 use cel_core::ansi::{self, AnsiHandler, BufferState, CellContent, MouseTrackingMode};
 use cel_renderer::renderer::{RenderConstants, RenderStats, Renderer};
-use cli_clipboard::{ClipboardContext, ClipboardProvider};
 
+use crate::clipboard;
 use crate::{button::Button, input::{Input, InputEvent}, layout::LayoutPosition};
 
 const MOUSE_BUTTON_MAPPING: [(ansi::MouseButton, glfw::MouseButton); 3] = [
@@ -163,15 +163,8 @@ impl TerminalWidget {
     }
 
     pub fn copy_text(&self) {
-        match ClipboardContext::new() {
-            Ok(mut ctx) => {
-                let text = self.ansi_handler.get_text();
-                let _ = ctx.set_contents(text);
-            }
-            Err(err) => {
-                log::error!("Failed to initialize clipboard context: {}", err);
-            }
-        };
+        let text = self.ansi_handler.get_text();
+        clipboard::set_clipboard_contents(&text);
     }
 
     pub fn get_padding(&self, renderer: &Renderer) -> [f32; 2] {
@@ -387,44 +380,36 @@ impl TerminalWidget {
                     return false;
                 }
 
-                match ClipboardContext::new() {
-                    Ok(mut ctx) => {
-                        let grid = &self.ansi_handler.get_terminal_state().grid;
+                let grid = &self.ansi_handler.get_terminal_state().grid;
 
-                        let mut lines = vec![];
-                        self.iter_selected_region(rc.max_cols, |y, start_x, end_x| {
-                            if y >= grid.screen_buffer.len() {
-                                return;
-                            }
+                let mut lines = vec![];
+                self.iter_selected_region(rc.max_cols, |y, start_x, end_x| {
+                    if y >= grid.screen_buffer.len() {
+                        return;
+                    }
 
-                            let line = &grid.screen_buffer[y];
-                            let mut line_text = String::new();
-                            for x in start_x..end_x {
-                                if x >= line.len() {
-                                    break;
-                                }
-
-                                grid.append_cell_content(&line[x], &mut line_text);
-                            }
-
-                            lines.push(line_text);
-                        });
-
-                        let text = lines.join("\n");
-                        if !text.is_empty() {
-                            let _ = ctx.set_contents(text);
+                    let line = &grid.screen_buffer[y];
+                    let mut line_text = String::new();
+                    for x in start_x..end_x {
+                        if x >= line.len() {
+                            break;
                         }
 
-                        // Reset selection
-                        //self.current_selection_range = [0, 0];
+                        grid.append_cell_content(&line[x], &mut line_text);
+                    }
 
-                        true
-                    }
-                    Err(err) => {
-                        log::error!("Failed to initialize clipboard context: {}", err);
-                        false
-                    }
+                    lines.push(line_text);
+                });
+
+                let text = lines.join("\n");
+                if !text.is_empty() {
+                    clipboard::set_clipboard_contents(&text);
                 }
+
+                // Reset selection
+                //self.current_selection_range = [0, 0];
+
+                true
             });
         } else {
             // Ensure state is reset

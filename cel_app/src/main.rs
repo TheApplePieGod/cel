@@ -7,6 +7,7 @@ extern crate objc;
 mod app;
 mod app_state;
 mod logging;
+mod clipboard;
 mod window;
 mod layout;
 mod tab_group;
