@@ -582,31 +582,20 @@ impl Perform for Performer {
         match byte {
             b'\n' => {
                 state.grid.push_cursor_vertically(true);
-
-                /*
-                log::debug!(
-                    "[\\n] Global: {:?} -> {:?}",
-                    old_global,
-                    self.terminal_state.global_cursor
-                );
-                */
             },
             b'\r' => {
                 state.grid.set_cursor(
                     state.grid.get_cursor_sol(state.grid.cursor)
                 );
-
-                /*
-                log::debug!(
-                    "[\\r] Global: {:?} -> {:?}",
-                    old_global,
-                    self.terminal_state.global_cursor
+            },
+            b'\t' => {
+                state.grid.set_cursor(
+                    state.grid.get_cursor_next_tab_stop(state.grid.cursor)
                 );
-                */
             },
             0x07 => { // Bell
                 log::debug!("Bell!!!");
-            }
+            },
             0x08 => { // Backspace
                 state.grid.move_backward();
             },
