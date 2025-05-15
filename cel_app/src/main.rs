@@ -14,7 +14,7 @@ mod tab_group;
 mod input;
 mod terminal_context;
 mod terminal_widget;
-mod button;
+mod imui;
 
 use std::sync::LazyLock;
 

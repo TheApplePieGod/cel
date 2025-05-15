@@ -137,5 +137,5 @@ pub fn get_titlebar_decoration_width_px(window: &PWindow) -> f32 {
 #[allow(unexpected_cfgs)]
 pub fn set_draggable(window: &PWindow, draggable: bool) {
     let ns_window = window.get_cocoa_window() as id;
-    unsafe { ns_window.setMovable_(draggable) }
+    unsafe { ns_window.setMovable_(draggable as BOOL) }
 }
