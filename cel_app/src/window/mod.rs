@@ -74,6 +74,9 @@ impl Window {
     pub fn new() -> Self {
         let mut glfw_instance = glfw::init(fail_on_errors!()).unwrap();
 
+        // TODO: wayland window hint once glfw-rs gets upgraded
+        glfw_instance.window_hint(glfw::WindowHint::X11ClassName(Some("cel".to_string())));
+        glfw_instance.window_hint(glfw::WindowHint::X11InstanceName(Some("cel".to_string())));
         glfw_instance.window_hint(glfw::WindowHint::TransparentFramebuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::DoubleBuffer(true));
         glfw_instance.window_hint(glfw::WindowHint::Resizable(true));
