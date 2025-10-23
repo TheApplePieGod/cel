@@ -1,6 +1,6 @@
 # Cel Terminal
 
-![Cel Terminal](https://raw.githubusercontent.com/TheApplePieGod/cel/main/images/cel.webp)
+![Cel Terminal](https://raw.githubusercontent.com/TheApplePieGod/cel/main/images/cel.png)
 
 A modern, multimodal terminal emulator built with Rust. Cel aims to provide a fast, GPU-accelerated terminal experience for the modern developer.
 
