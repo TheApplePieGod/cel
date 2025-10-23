@@ -1,7 +1,8 @@
 use cel_core::commands::Commands;
 
-use crate::input::Input;
+use crate::input::{Input, InputEvent};
 use crate::terminal_widget::TerminalWidget;
+use crate::clipboard;
 
 pub struct TerminalContext {
     commands: Commands,
@@ -13,14 +14,15 @@ pub struct TerminalContext {
     just_split: bool,
 
     debug_discrete_processing: bool,
-    debug_disable_splits: bool
+    debug_disable_splits: bool,
+    debug_disable_input: bool
 }
 
 impl TerminalContext {
-    pub fn new() -> Self {
+    pub fn new(max_rows: u32, max_cols: u32, cwd: Option<&str>) -> Self {
         Self {
-            commands: Commands::new(),
-            widgets: vec![TerminalWidget::new()],
+            commands: Commands::new(max_rows, max_cols, cwd),
+            widgets: vec![TerminalWidget::new(max_rows, max_cols, cwd)],
 
             input_buffer: vec![],
             output_buffer: vec![],
@@ -28,25 +30,54 @@ impl TerminalContext {
             just_split: false,
 
             debug_discrete_processing: false,
-            debug_disable_splits: false
+            debug_disable_splits: false,
+            debug_disable_input: false
         }
     }
 
-    pub fn update(&mut self, input: &Input) -> bool {
+    // Returns (any_event, terminated)
+    pub fn update(&mut self, input: Option<&mut Input>) -> (bool, bool) {
         let mut any_event = false;
 
-        any_event |= self.handle_user_io(input);
-        any_event |= self.handle_process_io();
+        self.max_sequences_to_process = std::u32::MAX;
 
-        any_event
+        if let Some(input) = input {
+            any_event |= input.consume_event(InputEvent::Paste, || {
+                let text = clipboard::get_clipboard_contents();
+                match self.widgets.last_mut().unwrap().is_bracketed_paste_enabled() {
+                    true => {
+                        let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                        self.input_buffer.extend_from_slice(bracketed.as_bytes())
+                    },
+                    false => self.input_buffer.extend_from_slice(text.as_bytes()),
+                };
+            });
+
+            any_event |= self.handle_user_io(input);
+        }
+
+        let (pio_event, terminated) = self.handle_process_io();
+        any_event |= pio_event;
+
+        (any_event, terminated)
     }
 
+    pub fn resize(&mut self, max_rows: u32, max_cols: u32) {
+        self.get_primary_widget_mut().resize(max_rows, max_cols, true);
+        self.commands.resize(max_rows, max_cols);
+    }
+
+    pub fn get_size(&self) -> [u32; 2] { self.commands.get_size() }
+    pub fn get_primary_widget(&self) -> &TerminalWidget { self.widgets.last().unwrap() }
+    pub fn get_primary_widget_mut(&mut self) -> &mut TerminalWidget { self.widgets.last_mut().unwrap() }
     pub fn get_widgets(&self) -> &Vec<TerminalWidget> { &self.widgets }
     pub fn get_widgets_mut(&mut self) -> &mut Vec<TerminalWidget> { &mut self.widgets }
     pub fn just_split(&self) -> bool { self.just_split }
 
     fn handle_user_io(&mut self, input: &Input) -> bool {
-        self.input_buffer.extend_from_slice(input.get_input_buffer());
+        if !self.debug_disable_input {
+            self.input_buffer.extend_from_slice(input.get_input_buffer());
+        }
 
         let mut any_event = false;
 
@@ -75,7 +106,11 @@ impl TerminalContext {
             self.widgets.last_mut().as_mut().unwrap().toggle_debug_show_cursor();
         }
 
-        self.max_sequences_to_process = std::u32::MAX;
+        if input.get_key_just_pressed(glfw::Key::F7) {
+            any_event |= true;
+            self.debug_disable_input = !self.debug_disable_input;
+        }
+
         if self.debug_discrete_processing {
             self.max_sequences_to_process = 0;
 
@@ -97,20 +132,30 @@ impl TerminalContext {
         any_event
     }
 
-    fn handle_process_io(&mut self) -> bool {
-        let did_split = self.commands.poll_io();
+    // Returns (any_event, terminated)
+    fn handle_process_io(&mut self) -> (bool, bool) {
+        let terminated = self.commands.poll_io();
+
         let output = self.commands.get_output();
+        let any_event = self.commands.get_output().len() > 0;
 
-        let any_event = self.commands.get_output()[0].len() > 0 || self.commands.get_output()[1].len() > 0;
-
-        self.output_buffer.extend_from_slice(&output[0]);
+        self.just_split = false;
+        self.output_buffer.extend_from_slice(&output);
         for _ in 0..self.max_sequences_to_process {
             match self.widgets.last_mut().unwrap().push_chars(
                 &self.output_buffer,
                 self.debug_discrete_processing
             ) {
-                Some(i) => {
+                Some((i, split)) => {
                     self.output_buffer.drain(0..=(i as usize));
+                    if split && !self.debug_disable_splits {
+                        // Primary widget is always the last one
+                        let size = self.commands.get_size();
+                        self.widgets.last_mut().unwrap().set_primary(false);
+                        self.widgets.push(TerminalWidget::new(size[0], size[1], None));
+                        self.just_split = true;
+                    }
+                    self.just_split = split;
                 },
                 None => {
                     self.output_buffer.clear();
@@ -119,26 +164,8 @@ impl TerminalContext {
             }
         }
 
-        if did_split && !self.debug_disable_splits {
-            let widget_len = self.widgets.len();
-            if widget_len > 1 {
-                //self.widgets[widget_len - 2].set_expanded(false);
-            }
-
-            self.widgets.last_mut().unwrap().set_primary(false);
-
-            self.widgets.push(TerminalWidget::new());
-            self.widgets.last_mut().unwrap().push_chars(&output[1], false);
-        }
-        self.just_split = did_split;
-
-        let last_widget = self.widgets.last_mut().unwrap();
-        let last_widget_size = last_widget.get_terminal_size();
-
-        // Next commands should obey the size of the current active widget
-        self.commands.resize(last_widget_size[1], last_widget_size[0]);
-
         // Only need to send input to the active widget
+        let last_widget = self.widgets.last_mut().unwrap();
         self.commands.send_input(&last_widget.consume_output_stream());
 
         self.commands.send_input(&self.input_buffer);
@@ -146,6 +173,6 @@ impl TerminalContext {
 
         self.input_buffer.clear();
 
-        any_event
+        (any_event, terminated)
     }
 }

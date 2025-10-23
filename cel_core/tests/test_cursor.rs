@@ -4,7 +4,7 @@ mod common;
 mod tests {
     use cel_core::ansi::AnsiBuilder;
 
-    use crate::common::{get_final_state, assert_buffer_chars_eq};
+    use crate::common::{assert_buffer_chars_eq, get_final_state, get_final_state_with_actions, HandlerAction};
 
     // TODO: tests for insert, delete lines & chars
     // TODO: tests for scroll region
@@ -12,44 +12,47 @@ mod tests {
     #[test]
     fn basic() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("Hello")
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("World")
         );
 
         let final_buffer = vec![
-            vec!['H', 'e', 'l', 'l', 'o'],
-            vec!['W', 'o', 'r', 'l', 'd'],
+            vec!["H", "e", "l", "l", "o"],
+            vec!["W", "o", "r", "l", "d"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(state.grid.wants_wrap);
     }
     
     #[test]
     fn absolute_position_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67890")
             .add_text("12345")
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("ABCDE")
             .set_cursor_pos(2, 3)
             .add_text("X")
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', 'X', '3', '4', '5'],
-            vec!['A', 'B', 'C', 'D', 'E'],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "X", "3", "4", "5"],
+            vec!["A", "B", "C", "D", "E"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn absolute_position_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .set_cursor_pos(1, 2)
             .add_text("67890")
@@ -58,30 +61,32 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['X', '2', '3', '4', '5'],
-            vec!['6', '7', '8', '9', '0']
+            vec!["X", "2", "3", "4", "5"],
+            vec!["6", "7", "8", "9", "0"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn absolute_position_3() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .set_cursor_pos(1, 1)
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5'],
+            vec!["1", "2", "3", "4", "5"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn relative_position_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .move_cursor_down(1)
             .move_cursor_right(1)
             .add_text("1")
@@ -94,17 +99,18 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['.', '4'],
-            vec!['.', '1',],
-            vec!['3', '.', '2'],
+            vec![".", "4"],
+            vec![".", "1",],
+            vec!["3", ".", "2"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn relative_position_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67890")
             .move_cursor_up(1)
@@ -116,16 +122,17 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', 'H',
-                 '6', '7', '8', 'W', '0']
+            vec!["1", "2", "3", "4", "H"],
+            vec!["|6", "7", "8", "W", "0"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn newline_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67")
             .move_cursor_up(1)
@@ -135,51 +142,76 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '.', '.', 'H']
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", ".", ".", "H"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn newline_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("12345")
+            .add_text("12345")
+            .add_text("6")
+            .set_cursor_pos(5, 2)
+            .add_text("5") // Wrap should be set
+            .add_cr_and_newline()
+            .add_text("H")
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|1", "2", "3", "4", "5"],
+            vec!["|H"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn carriage_return_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .add_text("67")
             .move_cursor_up(1)
             .move_cursor_right(100)
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("H")
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 'H', '7']
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|H", "7"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn carriage_return_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("H")
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5'],
-            vec!['H']
+            vec!["1", "2", "3", "4", "5"],
+            vec!["H"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn home_cursor_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("12345")
             .set_cursor_pos(1, 2)
             .add_text("12345")
@@ -194,43 +226,83 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['H', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5']
+            vec!["H", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn wrap_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("1234567890123") // 3 lines
+            .add_cr_and_newline()
+            .add_cr_and_newline()
+            .add_text("1234567890123") // 3 lines
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec![],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [3, 4]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn wrap_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .disable_wrap()
+            .add_text("1234567890123")
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [4, 0]);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn scroll_region_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', '2', '3',],
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', '2', '3']
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"]
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert_eq!(state.global_cursor_home, [5, 0]);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn scroll_region_2() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .set_scroll_margin_y(2, 4)
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
         );
 
@@ -239,23 +311,23 @@ mod tests {
         // state. If this changes in the future, now you know why.
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5'],
-            vec!['1', '2', '3', '4', '5'],
-            vec!['6', '7', '8', '9', '0'],
-            vec!['1', '2', '3'],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert_eq!(state.margin.top, 1);
-        assert_eq!(state.margin.bottom, 3);
-        assert_eq!(state.global_cursor_home, [0, 0]);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.margin.top, 1);
+        assert_eq!(state.grid.margin.bottom, 3);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn scroll_region_3() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890SAFE") // 3 lines
             .set_scroll_margin_y(2, 4)
             .set_cursor_pos(1, 4)
@@ -265,25 +337,51 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0'],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
             vec![],
             vec![],
-            vec!['1', '2', '3',],
-            vec!['S', 'A', 'F', 'E'],
+            vec!["|1", "2", "3",],
+            vec!["|S", "A", "F", "E"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert_eq!(state.margin.top, 1);
-        assert_eq!(state.margin.bottom, 3);
-        assert_eq!(state.global_cursor_home, [5, 0]);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.margin.top, 1);
+        assert_eq!(state.grid.margin.bottom, 3);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn scroll_region_4() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("1234567890123") // 3 lines
+            .add_cr_and_newline()
+            .add_cr_and_newline()
+            .add_text("1234567890123") // 3 lines
+            .set_scroll_margin_y(4, 5)
+            .set_cursor_pos(1, 4)
+            .remove_lines(1)
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec![],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|1", "2", "3"],
+            vec![]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert!(!state.grid.wants_wrap);
     }
 
     #[test]
     fn reverse_index_1() {
         let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
             .add_text("1234567890123") // 3 lines
-            .add_newline_and_cr()
+            .add_cr_and_newline()
             .add_text("1234567890123") // 3 lines
             .reverse_index()
             .set_cursor_pos(1, 1)
@@ -291,16 +389,210 @@ mod tests {
         );
 
         let final_buffer = vec![
-            vec!['1', '2', '3', '4', '5',
-                 'A', '7', '8', '9', '0',
-                 '1', '2', '3'],
-            vec!['1', '2', '3', '4', '5',
-                 '6', '7', '8', '9', '0',
-                 '1', '2', '3'],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|A", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
         ];
-        assert_buffer_chars_eq(&state.screen_buffer, &final_buffer);
-        assert_eq!(state.global_cursor_home, [5, 0]);
-        assert_eq!(state.screen_cursor, [1, 0]);
-        assert!(!state.wants_wrap);
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [1, 0]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn backspace_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("12345")
+            .add_backspace()
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [4, 0]);
+       assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn backspace_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("123456")
+            .add_backspace()
+            .add_backspace()
+        );
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [4, 0]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn basic_unicode_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("😀😀")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [4, 0]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn basic_unicode_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .enable_wrap()
+            .add_text("😀😀")
+            .set_cursor_pos(2, 1)
+            .add_text("😀")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [2, 0]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    // TODO: bad behavior, revisit
+    /*
+    #[test]
+    fn unicode_wrap_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("😀😀😀")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1", "😀"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [1, 1]);
+        assert!(state.grid.wants_wrap);
+    }
+
+    // TODO: bad behavior, revisit
+    #[test]
+    fn unicode_wrap_2() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("😀😀😀")
+            .set_cursor_pos(1, 2)
+            .add_text("A")
+        );
+
+        let final_buffer = vec![
+            vec!["😀", "+1", "😀", "+1", "😀"],
+            vec!["A"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [1, 1]);
+        assert!(!state.grid.wants_wrap);
+    }
+    */
+
+    #[test]
+    fn unicode_merge_1() {
+        let state = get_final_state(AnsiBuilder::new()
+            .add_text("a🧑‍🧑‍🧒‍🧒a")
+        );
+
+        let final_buffer = vec![
+            vec!["a", "🧑‍🧑‍🧒‍🧒", "+1", "a"]
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [4, 0]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn reflow_1() {
+        let state = get_final_state_with_actions(vec![
+            HandlerAction::AnsiSequence(AnsiBuilder::new()
+                .enable_wrap()
+                .add_text("1234567890123") // 3 lines
+                .add_cr_and_newline()
+                .add_cr_and_newline()
+                .add_text("1234567890123") // 3 lines
+            ),
+            HandlerAction::Resize(7, 7)
+        ]);
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4", "5", "6", "7"],
+            vec!["|8", "9", "0", "1", "2", "3"],
+            vec![],
+            vec!["1", "2", "3", "4", "5", "6", "7"],
+            vec!["|8", "9", "0", "1", "2", "3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [6, 4]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn reflow_2() {
+        let state = get_final_state_with_actions(vec![
+            HandlerAction::AnsiSequence(AnsiBuilder::new()
+                .enable_wrap()
+                .add_text("1234567890123") // 3 lines
+                .add_cr_and_newline()
+                .add_cr_and_newline()
+                .add_text("1234567890123") // 3 lines
+            ),
+            HandlerAction::Resize(4, 4)
+        ]);
+
+        let final_buffer = vec![
+            vec!["1", "2", "3", "4"],
+            vec!["|5", "6", "7", "8"],
+            vec!["|9", "0", "1", "2"],
+            vec!["|3"],
+            vec![],
+            vec!["1", "2", "3", "4"],
+            vec!["|5", "6", "7", "8"],
+            vec!["|9", "0", "1", "2"],
+            vec!["|3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [1, 3]);
+        assert!(!state.grid.wants_wrap);
+    }
+
+    #[test]
+    fn scrollback_1() {
+        let state = get_final_state_with_actions(vec![
+            HandlerAction::SetScrollbackLimit(6),
+            HandlerAction::AnsiSequence(AnsiBuilder::new()
+                .enable_wrap()
+                .add_text("1234567890123") // 3 lines
+                .add_cr_and_newline()
+                .add_cr_and_newline()
+                .add_text("1234567890123") // 3 lines
+            )
+        ]);
+
+        let final_buffer = vec![
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+            vec![],
+            vec!["1", "2", "3", "4", "5"],
+            vec!["|6", "7", "8", "9", "0"],
+            vec!["|1", "2", "3"],
+        ];
+        assert_buffer_chars_eq(&state.grid.screen_buffer, &final_buffer);
+        assert_eq!(state.grid.cursor, [3, 4]);
+        assert!(!state.grid.wants_wrap);
     }
 }

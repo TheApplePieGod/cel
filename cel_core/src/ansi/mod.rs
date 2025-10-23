@@ -1,3 +1,6 @@
+use std::collections::VecDeque;
+
+use terminal_grid::TerminalGrid;
 use vte::Parser;
 use bitflags::bitflags;
 
@@ -6,6 +9,7 @@ pub use self::ansi_consume::*;
 
 mod ansi_produce;
 mod ansi_consume;
+mod terminal_grid;
 
 pub type Color = [f32; 3];
 pub type Cursor = [usize; 2];
@@ -25,6 +29,7 @@ pub enum MouseButton {
 bitflags! {
     #[derive(Copy, Clone, Default)]
     pub struct KeyboardModifierFlags: u32 {
+        const Alt = 2;
         const Shift = 4;
         const Meta = 8;
         const Control = 16;
@@ -80,13 +85,23 @@ pub struct StyleState {
     pub bg_color: Option<Color>
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct ScreenBufferElement {
-    pub elem: char,
-    pub style: StyleState
+#[derive(Clone, Debug)]
+pub enum CellContent {
+    Char(char, usize),
+    Grapheme(String, usize),
+    Continuation(usize),
+    Empty
 }
 
-pub type ScreenBuffer = Vec<Vec<ScreenBufferElement>>;
+#[derive(Clone)]
+pub struct ScreenBufferElement {
+    pub elem: CellContent,
+    pub style: StyleState,
+    pub is_wrap: bool,
+}
+
+pub type ScreenBufferLine = Vec<ScreenBufferElement>;
+pub type ScreenBuffer = VecDeque<ScreenBufferLine>;
 
 #[derive(Default, Clone, Copy)]
 pub struct Margin {
@@ -98,18 +113,17 @@ pub struct Margin {
 
 #[derive(Clone)]
 pub struct TerminalState {
-    pub screen_buffer: ScreenBuffer,
+    pub grid: TerminalGrid,
     pub alt_screen_buffer_state: BufferState,
     pub cursor_state: CursorState,
     pub style_state: StyleState,
     pub background_color: [f32; 3], // Default background color to reset to
-    pub margin: Margin,
-    pub wants_wrap: bool,
-    pub global_cursor_home: Cursor, // Location of (0, 0) in the screen buffer
-    pub global_cursor: Cursor,
-    pub screen_cursor: Cursor,
     pub mouse_mode: MouseMode,
     pub mouse_tracking_mode: MouseTrackingMode,
+    pub bracketed_paste_enabled: bool,
+    pub alternate_scroll_enabled: bool,
+    pub application_cursor_keys: bool,
+    pub clear_on_resize: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -124,6 +138,9 @@ struct Performer {
     pub screen_height: usize,
     pub output_stream: Vec<u8>,
     pub is_empty: bool,
+    pub exit_code: Option<u32>,
+    pub prompt_id: u32,
+    pub current_dir: String,
     action_performed: bool,
 
     // State associated with one specific 'terminal' / 'buffer'
@@ -147,6 +164,16 @@ pub struct AnsiBuilder {
     buffer: Vec<u8>
 }
 
+impl Default for ScreenBufferElement {
+    fn default() -> Self {
+        Self {
+            elem: CellContent::Char('\0', 1),
+            style: Default::default(),
+            is_wrap: false,
+        }
+    }
+}
+
 impl Default for CursorState {
     fn default() -> Self {
         Self {
@@ -160,29 +187,28 @@ impl Default for CursorState {
 impl Default for TerminalState {
     fn default() -> Self {
         Self {
-            screen_buffer: Default::default(),
+            grid: TerminalGrid::new(0, 0),
             alt_screen_buffer_state: BufferState::Enabled,
             cursor_state: Default::default(),
             style_state: Default::default(),
             background_color: [0.0, 0.0, 0.0],
-            margin: Default::default(),
-            wants_wrap: false,
-            global_cursor_home: [0, 0],
-            global_cursor: [0, 0],
-            screen_cursor: [0, 0],
             mouse_mode: MouseMode::Default,
             mouse_tracking_mode: MouseTrackingMode::Disabled,
+            bracketed_paste_enabled: false,
+            alternate_scroll_enabled: true,
+            application_cursor_keys: false,
+            clear_on_resize: false
         }
     }
 }
 
 impl Margin {
-    fn get_from_screen_size(width: u32, height: u32) -> Self {
+    fn from_dimensions(width: usize, height: usize) -> Self {
         Self {
             top: 0,
-            bottom: height as usize - 1,
+            bottom: height.saturating_sub(1),
             left: 0,
-            right: width as usize - 1
+            right: width.saturating_sub(1)
         }
     }
 }

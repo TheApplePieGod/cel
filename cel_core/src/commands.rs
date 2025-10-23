@@ -1,39 +1,33 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, PtyPair};
-use std::{default, sync::mpsc, thread};
+use std::thread;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, mpsc,
+};
 
-#[derive(PartialEq, Eq, Debug)]
-enum ShellState {
-    Init,
-    PromptIdA,
-    PromptIdB,
-    Ready,
-}
+use crate::config;
 
 pub struct Commands {
     io_rx: mpsc::Receiver<Vec<u8>>,
-    //reader: Box<dyn std::io::Read + Send>,
     pty_pair: PtyPair,
     writer: Box<dyn std::io::Write + Send>,
+    //reader: Box<dyn std::io::Read + Send>,
     child: Box<dyn Child + Send + Sync>,
-    output: [Vec<u8>; 2],
+    active: Arc<AtomicBool>,
+    output: Vec<u8>,
     rows: u32,
     cols: u32,
 
-    shell_state: ShellState,
-    parsing_id: String,
-    prompt_id: u32,
 }
 
 impl Commands {
-    pub fn new() -> Self {
+    pub fn new(num_rows: u32, num_cols: u32, cwd: Option<&str>) -> Self {
         let pty_system = native_pty_system();
 
         // Create a new pty
-        let default_rows = 24;
-        let default_cols = 80;
         let pair = pty_system.openpty(PtySize {
-            rows: default_rows,
-            cols: default_cols,
+            rows: num_rows as u16,
+            cols: num_cols as u16,
             // Not all systems support pixel_width, pixel_height,
             // but it is good practice to set it to something
             // that matches the size of the selected font.  That
@@ -44,40 +38,140 @@ impl Commands {
         }).unwrap();
 
         let mut cmd = CommandBuilder::new("");
-        let shell = cmd.get_shell();
-        if shell.ends_with("zsh") {
-            //cmd.args(["-c", &format!("\"{}\"", command)]);
-            //cmd.args(["-c", command]);
-            //cmd.args(["-is"]);
-            //cmd.args(["-i", "-c", "{}; exec {} -i"]);
+
+        let shell = if cfg!(windows) {
+            "powershell.exe".to_string()
+        } else {
+            cmd.get_shell()
+        };
+
+        log::debug!("Using shell '{}'", shell);
+
+        let config_dir = config::get_config_dir();
+
+        if shell.contains("zsh") {
+            let og_dir = std::env::var("ZDOTDIR").unwrap_or("$HOME".to_string());
             cmd.args([
                 "-il", "+o", "promptsp", "+o", "histignorespace"
             ]);
+            cmd.env("ZDOTDIR", config_dir.to_str().unwrap());
+
+            let init = r#"
+                autoload -Uz add-zsh-hook
+                _cel_precmd() {
+                    printf '\033]1339;%s\007' "$?"
+                    CEL_PROMPT_ID=$((CEL_PROMPT_ID + 1))
+                    # Send prompt id
+                    printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
+                    # Send current dir
+                    printf '\033]1338;%s\007' "$(pwd)"
+                    # Enable prompt clearing on resize
+                    printf '\033]1340;1\007'
+                    # Scuffed, but guarantees that things don't get messed up
+                    TERM=tmux-256color
+                }
+                add-zsh-hook precmd _cel_precmd
+
+                _cel_preexec() {
+                    # Disable prompt clearing on resize
+                    printf '\033]1340;0\007'
+                }
+                add-zsh-hook preexec _cel_preexec
+
+                # Map alt+left/right to move by word if not already mapped
+                [[ $(builtin bindkey "^[[1;3C") == *" undefined-key" ]] && builtin bindkey "^[[1;3C" "forward-word"
+                [[ $(builtin bindkey "^[[1;3D") == *" undefined-key" ]] && builtin bindkey "^[[1;3D" "backward-word"
+
+                # Enable UTF8
+                export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+                # Indicate integration
+                export CEL_SHELL_INTEGRATION=1
+                # Reset ZDOTDIR
+                export ZDOTDIR="$OG_DIR"
+
+                # Source the user's original .zshxx files if they exist
+                if [ -f "$OG_DIR/.zshenv" ]; then
+                    source "$OG_DIR/.zshenv"
+                fi
+                if [ -f "$OG_DIR/.zprofile" ]; then
+                    source "$OG_DIR/.zprofile"
+                fi
+                if [ -f "$OG_DIR/.zshrc" ]; then
+                    source "$OG_DIR/.zshrc"
+                fi
+                if [ -f "$OG_DIR/.zlogin" ]; then
+                    source "$OG_DIR/.zlogin"
+                fi
+            "#.replace("$OG_DIR", &og_dir);
+
+            // Copy zsh init to config dir
+            let _ = std::fs::write(config_dir.join(".zshrc"), init);
+        } else if shell.contains("bash") {
+            cmd.args(["--login", "-i"]);
+
+            let init = r#"
+                _cel_precmd() {
+                    printf '\033]1339;%s\007' "$?"
+                    CEL_PROMPT_ID=$(( ${CEL_PROMPT_ID:-0} + 1 ))
+                    printf '\033]1337;%d\007' "$CEL_PROMPT_ID"
+                    printf '\033]1338;%s\007' "$(pwd)"
+                    CEL_LAST_PWD=$(pwd)
+                    # Scuffed, but guarantees that things don't get messed up
+                    TERM=tmux-256color
+                }
+                PROMPT_COMMAND="_cel_precmd"
+
+                bind '"\e[1;3C": forward-word'
+                bind '"\e[1;3D": backward-word'
+
+                export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+            "#;
+
+            // Write the bash init file to the custom config directory (e.g., as ".bashrc").
+            let _ = std::fs::write(config_dir.join(".bashrc"), init);
         }
-        cmd.get_argv_mut()[0] = shell.into();
-        //cmd.cwd("/Users/evant/Documents/Projects/cel/test/");
+
+        cmd.get_argv_mut()[0] = shell.clone().into();
         cmd.env_remove("TERMINFO");
         cmd.env("TERM", "tmux-256color");
         cmd.env("CEL_PROMPT_ID", "0");
+        if let Some(cwd) = cwd {
+            cmd.cwd(cwd);
+        }
 
         let child = pair.slave.spawn_command(cmd).unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
 
-        writer.write_all(" PROMPT_COMMAND=$'printf \\\"\\\\x1f\\\\x15$CEL_PROMPT_ID\\\\x15\\\"'\r".as_bytes());
-        writer.write_all(" precmd() { CEL_PROMPT_ID=$(($CEL_PROMPT_ID + 1)); eval \"$PROMPT_COMMAND\" }\r".as_bytes());
-        writer.write_all(" \r".as_bytes());
-
         //writer.write_all(b"ls -la\r\n\0");
 
+        // Extra init commands
+        if shell.contains("bash") {
+            let _ = writer.write_all(format!(" source '{}'\n", config_dir.join(".bashrc").to_str().unwrap()).as_bytes());
+        } else if shell.contains("powershell") {
+            let _ = writer.write_all("$global:CEL_PROMPT_ID = 0\r\n".as_bytes());
+            let _ = writer.write_all("function prompt {\r\n".as_bytes());
+            let _ = writer.write_all("    $global:CEL_PROMPT_ID++\r\n".as_bytes());
+            let _ = writer.write_all("    $oscSeq = \"{0}]1337;{1}{2}\" -f [char]0x1b, $global:CEL_PROMPT_ID, [char]0x07\r\n".as_bytes());
+            let _ = writer.write_all("    Write-Host -NoNewline $oscSeq\r\n".as_bytes());
+            let _ = writer.write_all("    \"PS \" + (Get-Location) + \"> \"\r\n".as_bytes());
+            let _ = writer.write_all("}\r\n".as_bytes());
+        }
+
         let (tx, rx) = mpsc::channel();
+        let active = Arc::new(AtomicBool::new(true));
+        let active_thread = active.clone();
         thread::spawn(move || {
-            let mut buf: Vec<u8> = vec![0; 1024];
+            let mut buf: Vec<u8> = vec![0; 2048];
             loop {
+                if !active_thread.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 // Blocking (pretty sure)
                 match reader.read(&mut buf) {
                     Ok(n) => if n > 0 {
-                        let _ = tx.send(Vec::from(&buf[0..n]));
+                        let _ = tx.send(Vec::from(&buf[..n]));
                     }
                     Err(_) => {}
                 }
@@ -86,71 +180,24 @@ impl Commands {
 
         Self {
             io_rx: rx,
-            //reader,
             pty_pair: pair,
             writer,
             child,
-            output: [vec![], vec![]],
-            rows: default_rows as u32,
-            cols: default_cols as u32,
-
-            shell_state: ShellState::Init,
-            parsing_id: String::new(),
-            prompt_id: 2,
+            active,
+            output: vec![],
+            rows: num_rows,
+            cols: num_cols,
         }
     }
 
-    // Returns true if the input split while polling
+    // Returns true if the commands have terminated
     pub fn poll_io(&mut self) -> bool {
-        /* 
-        Special state machine for parsing io. Essentially, we give each shell prompt
-        a unique id, and the idea is that each command input by the user will be
-        uniquely identified by this id. Each prompt starts with a sequence of characters
-        and its prompt id, and each command ends with a preprompt with its preprompt id.
-        If both of those match the current prompt id we expect, we indicate that the output
-        has been split. Otherwise, we assume that there was a redraw, and no splits should
-        occur. Anything that occurs inbetween non-current prompts is ignored, which lets
-        us inject arbitrary commands into the shell that the user will never see.
-        */
-
-        let mut output_idx = 0;
         while let Ok(v) = self.io_rx.try_recv() {
-            for byte in v {
-                //log::warn!("{:?}", byte as char);
-                //self.shell_state = ShellState::Ready;
-                match self.shell_state {
-                    ShellState::Init | ShellState::Ready if byte == 0x1f
-                        => self.shell_state = ShellState::PromptIdA,
-                    ShellState::Init
-                        => {}
-                    ShellState::Ready => {
-                        self.output[output_idx].push(byte);
-                    },
-                    ShellState::PromptIdA if byte == 0x15
-                        => self.shell_state = ShellState::PromptIdB,
-                    ShellState::PromptIdB if byte == 0x15 => {
-                        let parsed_id = self.parsing_id.parse::<u32>();
-                        if let Ok(parsed_id) = parsed_id {
-                            if parsed_id == self.prompt_id {
-                                output_idx = 1;
-                                self.set_next_split();
-                                self.shell_state = ShellState::Ready;
-                            } else {
-                                self.shell_state = ShellState::Init;
-                            }
-                        }
-                        self.parsing_id.clear();
-                    }
-                    ShellState::PromptIdB
-                        => self.parsing_id.push(byte as char),
-                    _ => {}
-                }
-
-                //log::warn!("New state: {:?}", self.shell_state);
-            }
+            self.output.extend(v);
         }
 
-        output_idx != 0
+        let wait_result = self.child.try_wait();
+        wait_result.is_err() || wait_result.unwrap().is_some()
     }
 
     pub fn resize(&mut self, rows: u32, cols: u32) {
@@ -160,6 +207,7 @@ impl Commands {
 
         self.rows = rows;
         self.cols = cols;
+
         let _ = self.pty_pair.master.resize(PtySize {
             rows: rows as u16,
             cols: cols as u16,
@@ -175,23 +223,21 @@ impl Commands {
         let _ = self.writer.write_all(input);
     }
 
-    pub fn get_output(&self) -> &[Vec<u8>; 2] {
+    pub fn get_size(&self) -> [u32; 2] {
+        [self.rows, self.cols]
+    }
+
+    pub fn get_output(&self) -> &[u8] {
         &self.output
     }
 
     pub fn clear_output(&mut self) {
-        self.output[0].clear();
-        self.output[1].clear();
+        self.output.clear();
     }
+}
 
-    fn set_next_split(&mut self) {
-        self.prompt_id += 1;
-
-        /*
-        self.writer.write_all(format!(
-            " CEL_PROMPT_ID={}\r",
-            self.prompt_id
-        ).as_bytes());
-        */
+impl Drop for Commands {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Relaxed);
     }
 }

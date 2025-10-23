@@ -1,20 +1,59 @@
-use bitflags::Flags;
 use vte::{Parser, Params, Perform};
 use std::fmt;
 
 use super::*;
 
+impl TerminalState {
+    pub fn get_num_lines(&self, include_cursor: bool) -> usize {
+        match include_cursor && self.cursor_state.visible {
+            true => self.grid.get_buffer_len_with_cursor(),
+            false => self.grid.get_buffer_len()
+        }
+    }
+
+    pub fn get_up_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOA",
+            false => b"\x1b[A",
+        }
+    }
+
+    pub fn get_down_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOB",
+            false => b"\x1b[B",
+        }
+    }
+
+    pub fn get_left_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOD",
+            false => b"\x1b[D",
+        }
+    }
+
+    pub fn get_right_sequence(&self) -> &[u8] {
+        match self.application_cursor_keys {
+            true => b"\x1bOC",
+            false => b"\x1b[C",
+        }
+    }
+}
+
 impl AnsiHandler {
-    pub fn new(width: u32, height: u32) -> Self {
+    pub fn new(max_rows: u32, max_cols: u32, max_scrollback: u32, cwd: Option<&str>) -> Self {
         let mut obj = Self {
-            performer: Performer::new(width, height),
+            performer: Performer::new(max_cols, max_rows, max_scrollback),
             state_machine: Parser::new(),
 
             mouse_states: [(Default::default(), false); 256],
             scroll_states: [0.0; 2]
         };
 
-        obj.resize(width, height);
+        obj.resize(max_cols, max_rows, false);
+        if let Some(cwd) = cwd {
+            obj.performer.current_dir = cwd.to_string();
+        }
 
         obj
     }
@@ -27,17 +66,38 @@ impl AnsiHandler {
         &mut self,
         seq: &[u8],
         stop_early: bool
-    ) -> Option<u32> {
+    ) -> Option<(u32, bool)> {
+        let starting_prompt = self.performer.prompt_id;
         self.performer.action_performed = false;
         for (i, c) in seq.iter().enumerate() {
             //print!("{:?} ", *c as char);
             self.state_machine.advance(&mut self.performer, *c);
-            if stop_early && self.performer.action_performed {
-                return Some(i as u32)
+            let prompt_change = starting_prompt != self.performer.prompt_id;
+            if (stop_early && self.performer.action_performed) || prompt_change {
+                return Some((i as u32, prompt_change))
             }
         }
 
         None
+    }
+
+    pub fn handle_up_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_up_sequence());
+    }
+
+    pub fn handle_down_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_down_sequence());
+    }
+    pub fn handle_left_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_left_sequence());
+    }
+
+    pub fn handle_right_arrow(&mut self) {
+        let state = &self.performer.terminal_state;
+        self.performer.output_stream.extend_from_slice(state.get_right_sequence());
     }
 
     pub fn handle_scroll(
@@ -51,7 +111,8 @@ impl AnsiHandler {
         self.scroll_states[1] += delta_y;
 
         // Horizontal scroll
-        if self.scroll_states[0].abs() >= 1.0 {
+        let horiz_cells = self.scroll_states[0].trunc().abs() as i32;
+        if horiz_cells >= 1 {
             let left = self.scroll_states[0] > 0.0;
             let button = match left {
                 true => MouseButton::Mouse6,
@@ -59,21 +120,43 @@ impl AnsiHandler {
             };
 
             // Toggle
-            self.handle_mouse_button(button, true, flags, cell_position);
-            self.handle_mouse_button(button, false, flags, cell_position);
+            for _ in 0..horiz_cells {
+                self.handle_mouse_button(button, true, flags, cell_position);
+                self.handle_mouse_button(button, false, flags, cell_position);
+            }
         }
 
         // Vertical scroll
-        if self.scroll_states[1].abs() >= 1.0 {
+        let vert_cells = self.scroll_states[1].trunc().abs() as i32;
+        if vert_cells >= 1 {
             let up = self.scroll_states[1] > 0.0;
-            let button = match up {
-                true => MouseButton::Mouse4,
-                false => MouseButton::Mouse5,
-            };
 
-            // Toggle
-            self.handle_mouse_button(button, true, flags, cell_position);
-            self.handle_mouse_button(button, false, flags, cell_position);
+            let state = &self.performer.terminal_state;
+            let use_alt_scroll = self.is_alt_screen_buf_active()
+                                 && state.alternate_scroll_enabled
+                                 && state.mouse_tracking_mode == MouseTrackingMode::Disabled;
+
+            for _ in 0..vert_cells {
+                let state = &self.performer.terminal_state;
+                if  use_alt_scroll {
+                    // Alternate scroll is active within the ASB, send cursor commands rather than
+                    // encoded mouse input
+                    match up {
+                        true => self.performer.output_stream.extend_from_slice(state.get_up_sequence()),
+                        false => self.performer.output_stream.extend_from_slice(state.get_down_sequence()),
+                    }
+                    
+                } else {
+                    let button = match up {
+                        true => MouseButton::Mouse4,
+                        false => MouseButton::Mouse5,
+                    };
+
+                    // Toggle
+                    self.handle_mouse_button(button, true, flags, cell_position);
+                    self.handle_mouse_button(button, false, flags, cell_position);
+                }
+            }
         }
 
         self.scroll_states[0] = self.scroll_states[0].fract();
@@ -103,8 +186,10 @@ impl AnsiHandler {
                     return;
                 }
             },
-            // TODO: tracking when no buttons are pressed
-            MouseTrackingMode::AnyEvent => {},
+            MouseTrackingMode::AnyEvent => {
+                // TODO: tracking when no buttons are pressed
+                return;
+            },
         }
 
         let mut sequence: Vec<u8> = vec![0x1b, b'[']; // TODO: reuse
@@ -160,15 +245,33 @@ impl AnsiHandler {
         self.performer.output_stream.extend(sequence);
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        // TODO: realtive margin update?
-        self.performer.screen_width = width as usize;
-        self.performer.screen_height = height as usize;
-        self.performer.terminal_state.margin = Margin::get_from_screen_size(width, height);
+    pub fn resize(&mut self, width: u32, height: u32, should_clear: bool) {
+        let width = width as usize;
+        let height = height as usize;
+
+        if width != self.performer.screen_width || height != self.performer.screen_height {
+            // TODO: relative margin update?
+            self.performer.screen_width = width;
+            self.performer.screen_height = height;
+            self.performer.terminal_state.grid.resize(
+                width as usize,
+                height as usize,
+                !self.performer.terminal_state.clear_on_resize,
+                self.is_alt_screen_buf_active()
+            );
+
+            if self.performer.terminal_state.clear_on_resize && should_clear {
+                self.performer.terminal_state.grid.clear();
+            }
+        }
     }
 
     pub fn get_terminal_state(&self) -> &TerminalState {
         &self.performer.terminal_state
+    }
+
+    pub fn get_terminal_state_mut(&mut self) -> &mut TerminalState {
+        &mut self.performer.terminal_state
     }
 
     pub fn consume_output_stream(&mut self) -> Vec<u8> {
@@ -183,9 +286,34 @@ impl AnsiHandler {
         self.performer.terminal_state.alt_screen_buffer_state == BufferState::Active
     }
 
+    pub fn get_width(&self) -> u32 {
+        self.performer.screen_width as u32
+    }
+
+    pub fn get_height(&self) -> u32 {
+        self.performer.screen_height as u32
+    }
+
+    pub fn get_current_dir(&self) -> &str {
+        &self.performer.current_dir
+    }
+
+    pub fn get_exit_code(&self) -> Option<u32> {
+        self.performer.exit_code
+    }
+
+    pub fn get_element(&self, pos: Cursor) -> Option<ScreenBufferElement> {
+        let elem = self.performer.terminal_state.grid.get_cell_opt(pos)?;
+        Some(elem.clone())
+    }
+
+    pub fn get_text(&self) -> String {
+        self.performer.terminal_state.grid.get_text()
+    }
+
     pub fn reset(&mut self) {
         self.performer.terminal_state = Default::default();
-        self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32);
+        self.resize(self.performer.screen_width as u32, self.performer.screen_height as u32, false);
     }
 
     // TODO: utilize producer ?
@@ -197,6 +325,7 @@ impl AnsiHandler {
     pub fn set_terminal_color(&mut self, color: &[f32; 3]) {
         self.performer.terminal_state.background_color = *color;
     }
+
 
     fn convert_num_to_ascii(&self, val: u32) -> Vec<u8> {
         if val == 0 {
@@ -218,19 +347,27 @@ impl AnsiHandler {
 }
 
 impl Performer {
-    fn new(width: u32, height: u32) -> Self {
-        Self {
+    fn new(width: u32, height: u32, max_scrollback: u32) -> Self {
+        let mut obj = Self {
             screen_width: width as usize,
             screen_height: height as usize,
             output_stream: vec![],
             is_empty: true,
+            exit_code: None,
+            prompt_id: 0,
+            current_dir: String::new(),
             action_performed: false,
 
             terminal_state: Default::default(),
             saved_terminal_state: Default::default(),
 
             ignore_print: false
-        }
+        };
+
+        obj.terminal_state.grid.resize(width as usize, height as usize, false, false);
+        obj.terminal_state.grid.set_max_scrollback(max_scrollback as usize);
+        
+        obj
     }
 
     fn parse_params(&self, params: &Params) -> Vec<u16> {
@@ -244,15 +381,26 @@ impl Performer {
         res
     }
 
-    fn parse_osc_command(&self, bytes: &[u8]) -> u16 {
-        let mut result = 0;
+    fn parse_ascii_integer(&self, bytes: &[u8]) -> u16 {
+        let mut result: u16 = 0;
 
         // Convert each byte to its integer rep from ascii
         let mut power = 1;
-        for i in 0..bytes.len() {
+        for i in 0..bytes.len().min(5) {
             let byte = bytes[bytes.len() - i - 1];
-            result += (byte - 48) as u16 * power;
-            power *= 10;
+            // Ensure no overflow
+            result = result.saturating_add(((byte.saturating_sub(48)) as u16).saturating_mul(power));
+            power = power.saturating_mul(10);
+        }
+        
+        result
+    }
+
+    fn parse_ascii_string(&self, bytes: &[u8]) -> String {
+        let mut result = String::new();
+
+        for i in 0..bytes.len().min(9999) {
+            result.push(char::from(bytes[i]));
         }
         
         result
@@ -260,34 +408,31 @@ impl Performer {
 
     // Code is [0, 7], assumes weight is already considered
     fn parse_4_bit_color(style_flags: StyleFlags, code: u16) -> [f32; 3] {
+        const BASE_COLORS: [[f32; 3]; 8] = [
+            [0.13, 0.15, 0.17], // Black (dark gray)
+            [0.87, 0.27, 0.27], // Red
+            [0.48, 0.76, 0.29], // Green
+            [0.98, 0.72, 0.21], // Yellow
+            [0.33, 0.63, 0.87], // Blue
+            [0.82, 0.47, 0.87], // Magenta
+            [0.20, 0.80, 0.78], // Cyan
+            [0.90, 0.91, 0.91], // White (light gray)
+        ];
+
         let factor: f32 = if style_flags.contains(StyleFlags::Bold) {
             1.0
         } else if style_flags.contains(StyleFlags::Faint) {
-            0.25
-        } else {
             0.5
+        } else {
+            0.75
         };
 
-        let one = (code & 1) as f32 * factor;
-        let two = ((code & 2) >> 1) as f32 * factor;
-        let four = ((code & 4) >> 2) as f32 * factor;
-        match code {
-            1..=6 => [one, two, four],
-            0 => if style_flags.contains(StyleFlags::Bold) {
-                    [0.5, 0.5, 0.5]
-                } else if style_flags.contains(StyleFlags::Faint) {
-                    [0.25, 0.25, 0.25]
-                } else {
-                    [0.0, 0.0, 0.0]
-                },
-            7 => if style_flags.contains(StyleFlags::Bold) {
-                    [1.0, 1.0, 1.0]
-                } else if style_flags.contains(StyleFlags::Faint) {
-                    [0.5, 0.5, 0.5]
-                } else {
-                    [0.75, 0.75, 0.75]
-                },
-            _ => [0.0, 0.0, 0.0]
+        if code < 8 {
+            let base = BASE_COLORS[code as usize];
+            [base[0] * factor, base[1] * factor, base[2] * factor]
+        } else {
+            // Fallback
+            [0.0, 0.0, 0.0]
         }
     }
 
@@ -321,7 +466,9 @@ impl Performer {
         // TODO: check that params are in range
         let state = &mut self.terminal_state.style_state;
         let mut extended_mode = 0;
-        for (i, code) in params.iter().enumerate() {
+        let mut i = 0;
+        while i < params.len() {
+            let code = params[i];
             match code {
                 0 => *state = Default::default(),
                 1 => {
@@ -345,14 +492,18 @@ impl Performer {
                 3 => state.flags.insert(StyleFlags::Italic),
                 4 => state.flags.insert(StyleFlags::Underline),
                 5 => match extended_mode {
-                    38 => {
+                    38 if i + 1 < params.len() => {
                         state.fg_color = Some(Self::parse_8_bit_color(params[i + 1]));
-                        return;
+                        extended_mode = 0;
+                        i += 1;
                     },
-                    48 => {
+                    38 => {}
+                    48 if i + 1 < params.len() => {
                         state.bg_color = Some(Self::parse_8_bit_color(params[i + 1]));
-                        return;
+                        extended_mode = 0;
+                        i += 1;
                     },
+                    48 => {}
                     _ => state.flags.insert(StyleFlags::Blink)
                 },
                 8 => state.flags.insert(StyleFlags::Invisible),
@@ -376,473 +527,16 @@ impl Performer {
                 49 => state.bg_color = None,
                 _ => {}
             }
+
+            i += 1;
         }
-    }
-
-    /// Top left position is (0, 0)
-    fn compute_new_cursor_pos(
-        &self,
-        cur_screen: Cursor,
-        cur_global: Cursor,
-        target_screen: Cursor
-    ) -> Cursor {
-        let mut cur_screen = cur_screen;
-        let mut cur_global = cur_global;
-        let state = &self.terminal_state;
-        loop {
-            // Can figure out exactly where to go if the lines are empty
-            if cur_global[1] >= state.screen_buffer.len() {
-                return [
-                    target_screen[0],
-                    cur_global[1] + (target_screen[1] - cur_screen[1])
-                ];
-            }
-
-            // log::warn!("Line {}", cur_global[1]);
-
-            // TODO: this could definitely be optimized
-            let line_count = self.get_remaining_wrapped_line_count(&cur_global) + 1;
-            let mut char_idx = cur_global[0];
-            for _ in 0..line_count {
-                let cur_screen_y = cur_screen[1];
-
-                if cur_screen_y == target_screen[1] {
-                    return [
-                        (char_idx as i32 + (target_screen[0] as i32 - cur_screen[0] as i32)) as usize,
-                        cur_global[1]
-                    ];
-                }
-
-                char_idx += self.screen_width;
-                cur_screen[1] += 1;
-            }
-
-            cur_screen[0] = 0;
-            cur_global[0] = 0;
-            cur_global[1] += 1;
-        }
-    }
-
-    /// Get the global cursor pos from an absolute screen position
-    fn get_cursor_pos_absolute(&self, screen_pos: &Cursor) -> Cursor {
-        self.compute_new_cursor_pos(
-            [0, 0],
-            self.terminal_state.global_cursor_home,
-            *screen_pos
-        )
-    }
-
-    fn set_cursor_pos_absolute(&mut self, screen_pos: &Cursor) {
-        let old_screen = self.terminal_state.screen_cursor;
-        let old_global = self.terminal_state.global_cursor;
-
-        // TODO: could optimize if the new position is after the old position
-
-        let clamped_pos = self.clamp_screen_cursor(screen_pos);
-        self.terminal_state.global_cursor = self.get_cursor_pos_absolute(&clamped_pos);
-        self.terminal_state.screen_cursor = clamped_pos;
-        self.terminal_state.wants_wrap = false;
-
-        log::debug!(
-            "[set_cursor_pos_absolute{:?}] Screen: {:?} -> {:?}, Global: {:?} -> {:?}",
-            clamped_pos,
-            old_screen, self.terminal_state.screen_cursor,
-            old_global, self.terminal_state.global_cursor
-        );
-    }
-
-    /// Get the global cursor pos from a position relative to the current screen cursor
-    fn get_cursor_pos_relative(&self, relative_screen: &SignedCursor) -> Cursor {
-        // TODO: optimize better for relative? right now we have to recompute from
-        // the origin in order to ensure correctness
-        let target = self.get_relative_screen_cursor(relative_screen);
-        self.get_cursor_pos_absolute(&target)
-    }
-
-    fn set_cursor_pos_relative(&mut self, relative_screen: &SignedCursor) {
-        let old_screen = self.terminal_state.screen_cursor;
-        let old_global = self.terminal_state.global_cursor;
-        let old_wrap = self.terminal_state.wants_wrap;
-
-        let target = self.get_relative_screen_cursor(relative_screen);
-        self.terminal_state.global_cursor = self.get_cursor_pos_relative(relative_screen);
-        self.terminal_state.screen_cursor = target;
-        self.terminal_state.wants_wrap = false;
-
-        /*
-        log::debug!(
-            "[set_cursor_pos_relative({:?})] Screen: {:?} -> {:?}, Global: {:?} -> {:?} {}",
-            relative_screen,
-            old_screen, self.terminal_state.screen_cursor,
-            old_global, self.terminal_state.global_cursor,
-            match old_wrap {
-                true => "<WRAPPED>",
-                false => ""
-            }
-        );
-        */
-    }
-
-    fn get_max_screen_cursor(&self) -> Cursor {
-        [self.screen_width - 1, self.screen_height - 1]
-    }
-
-    fn clamp_screen_cursor(&self, cursor: &Cursor) -> Cursor {
-        [
-            cursor[0].min(self.screen_width - 1),
-            cursor[1].min(self.screen_height - 1)
-        ]
-    }
-
-    fn is_in_margins(&self, screen_cursor: &Cursor) -> bool {
-        let margin = &self.terminal_state.margin;
-        return screen_cursor[0] >= margin.left
-               && screen_cursor[0] <= margin.right
-               && screen_cursor[1] >= margin.top
-               && screen_cursor[1] <= margin.bottom;
-    }
-
-    fn get_relative_screen_cursor(&self, offset: &SignedCursor) -> Cursor {
-        let screen_cursor = &self.terminal_state.screen_cursor;
-        let relative = [
-            (screen_cursor[0] as isize + offset[0]).max(0) as usize,
-            (screen_cursor[1] as isize + offset[1]).max(0) as usize
-        ];
-
-        self.clamp_screen_cursor(&relative)
-    }
-
-    /// Computes the global cursor pos at the start of the current line
-    fn get_cursor_pos_sol(&self) -> Cursor {
-        let state = &self.terminal_state;
-        [
-            state.global_cursor[0] - state.screen_cursor[0],
-            state.global_cursor[1]
-        ]
-    }
-
-    /// Computes the global cursor pos at the end of the current line
-    fn get_cursor_pos_eol(&self) -> Cursor {
-        let state = &self.terminal_state;
-        [
-            state.global_cursor[0] + (self.screen_width - state.screen_cursor[0] - 1),
-            state.global_cursor[1]
-        ]
-    }
-
-    /// Computes the global cursor pos directly below the supplied cursor
-    fn get_cursor_pos_next_line(&self, cursor: &Cursor) -> Cursor {
-        let keep_line = self.get_remaining_wrapped_line_count(cursor) > 0;
-        if keep_line {
-            [cursor[0] + self.screen_width, cursor[1]]
-        } else {
-            [cursor[0] % self.screen_width, cursor[1] + 1]
-        }
-    }
-
-    /// Computes the global cursor pos directly above the supplied cursor
-    fn get_cursor_pos_prev_line(&self, cursor: &Cursor) -> Cursor {
-        if cursor[1] == 0 {
-            return *cursor;
-        }
-
-        let cur_wrap = cursor[0] % self.screen_width;
-        let cur_line = cursor[0] / self.screen_width;
-        if cur_line == 0 {
-            // Move cursor to wrapped end of previous line
-            let prev_line_count = self.get_total_wrapped_line_count(&[0, cursor[1] - 1]);
-            [
-                (prev_line_count - 1) as usize * self.screen_width + cur_wrap,
-                cursor[1] - 1
-            ]
-        } else {
-            // Subtract wrap from this line
-            [cursor[0] - self.screen_width, cursor[1]]
-        }
-    }
-
-    fn get_total_wrapped_line_count(&self, cursor: &Cursor) -> u32 {
-        let buffer = &self.terminal_state.screen_buffer;
-        match cursor[1] >= buffer.len() {
-            true => 1,
-            false => {
-                let buffer_lines = buffer[cursor[1]].len() / (self.screen_width + 1) + 1;
-
-                buffer_lines as u32
-            }
-        }
-    }
-
-    fn get_remaining_wrapped_line_count(&self, cursor: &Cursor) -> u32 {
-        let buffer = &self.terminal_state.screen_buffer;
-        match cursor[1] >= buffer.len() || cursor[0] >= buffer[cursor[1]].len() {
-            true => 0,
-            false => {
-                let buffer_lines = buffer[cursor[1]].len() / (self.screen_width + 1);
-                let cursor_lines = cursor[0] / self.screen_width;
-
-                (buffer_lines - cursor_lines.min(buffer_lines)) as u32
-            }
-        }
-    }
-
-    // Splits a wrapped line into two lines, where the second line starts on the line
-    // corresponding to cursor[0]
-    fn split_line(&mut self, cursor: &Cursor) -> bool {
-        let buffer = &mut self.terminal_state.screen_buffer;
-        if cursor[1] >= buffer.len() || cursor[0] < self.screen_width {
-            return false;
-        }
-
-        let start_index = cursor[0] - (cursor[0] % self.screen_width);
-        let new_line = buffer[cursor[1]].drain(start_index..).collect();
-        buffer.insert(cursor[1] + 1, new_line);
-
-        true
-    }
-
-    fn erase(&mut self, start: Cursor, end: Cursor) {
-        let state = &mut self.terminal_state;
-        let mut start = start;
-        let mut end = end;
-        if (start[1] == end[1] && end[0] < start[0]) || start[1] > end[1] {
-            (start, end) = (end, start);
-        }
-
-        for y in start[1]..=end[1] {
-            if y >= state.screen_buffer.len() {
-                break;
-            }
-
-            let line = &mut state.screen_buffer[y];
-            if y == start[1] {
-                line.resize(start[0], Default::default());
-            } else if y == end[1] {
-                // TODO: memset
-                for x in 0..=end[0] {
-                    if x >= line.len() {
-                        break;
-                    }
-                    line[x] = Default::default();
-                }
-            } else {
-                line.clear();
-            }
-        }
-
-        /*
-        log::debug!(
-            "[erase] Global: {:?} -> {:?}",
-            start, end
-        );
-        */
-    }
-
-    fn insert_or_remove_lines(&mut self, remove: bool, amount: u32) {
-        if !self.is_in_margins(&self.terminal_state.screen_cursor) {
-            return;
-        }
-
-        let mut removal_margin = self.terminal_state.margin;
-        removal_margin.top = self.terminal_state.screen_cursor[1];
-        for _ in 0..amount {
-            self.scroll_region(remove, removal_margin);
-        }
-    }
-
-    /// Scroll the specified screenspace buffer region up or down by one line. Up 
-    /// refers to the direction the text is moving
-    /// Returns true if the global cursor should be recomputed from the screen cursor
-    /// in the case that the buffer was severely messed with
-    fn scroll_region(&mut self, up: bool, margin: Margin) -> bool {
-        let state = &self.terminal_state;
-
-        log::debug!(
-            "[scroll_region] Margin: T{} B{} L{} R{}, up={}",
-            margin.top, margin.bottom, margin.left, margin.right, up
-        );
-
-        // Only support default scrollback behavior if we don't have any margin. Otherwise,
-        // physically scroll the buffer in memory when adding new characters
-        let support_scrollback = margin.top == 0
-                                 && margin.left == 0
-                                 && margin.bottom == self.screen_height - 1
-                                 && margin.right == self.screen_width - 1;
-
-        if support_scrollback {
-            // Scroll the region with scrollback by updating the reference [0, 0]
-            // position in screen space
-
-            let home_still_wrapped = match state.global_cursor_home[1] < state.screen_buffer.len() {
-                true => {
-                    let global_line = &state.screen_buffer[state.global_cursor_home[1]];
-                    match up {
-                        true => state.global_cursor_home[0] + self.screen_width < global_line.len(),
-                        false => state.global_cursor_home[1] >= self.screen_width
-                    }
-                }
-                false => false
-            };
-            if home_still_wrapped {
-                if up {
-                    self.terminal_state.global_cursor_home[0] += self.screen_width;
-                } else {
-                    self.terminal_state.global_cursor_home[0] -= self.screen_width;
-                }
-            } else {
-                self.terminal_state.global_cursor_home[0] = 0;
-                if up {
-                    self.terminal_state.global_cursor_home[1] += 1;
-                } else if self.terminal_state.global_cursor_home[1] > 0 {
-                    self.terminal_state.global_cursor_home[1] -= 1;
-                }
-            }
-
-            false
-        } else {
-            // Start by isolating the lines in the region to scroll. That is, split
-            // them such that the lines at the top and bottom of the region are their
-            // own lines and are no longer wrapped. This way, we can simply remove /
-            // insert around them without any issues. This simplifies logic greatly.
-            
-            let mut region_cursor_top = self.get_cursor_pos_absolute(&[margin.left, margin.top]);
-            if self.split_line(&region_cursor_top) {
-                region_cursor_top[0] = 0;
-                region_cursor_top[1] += 1;
-            }
-            self.split_line(&self.get_cursor_pos_next_line(&region_cursor_top));
-
-            let mut region_cursor_bot = self.get_cursor_pos_absolute(&[margin.left, margin.bottom]);
-            if self.split_line(&region_cursor_bot) {
-                region_cursor_bot[0] = 0;
-                region_cursor_bot[1] += 1;
-            }
-            self.split_line(&self.get_cursor_pos_next_line(&region_cursor_bot));
-
-            let evict_pos = match up {
-                true => region_cursor_top,
-                false => region_cursor_bot
-            };
-            let replace_pos = match up {
-                true => region_cursor_bot,
-                false => region_cursor_top
-            };
-
-            // We can directly edit the buffer line only if there is no x margin and the 
-            let region_size_x = margin.right - margin.left;
-            let can_trim_lines = region_size_x == self.screen_width - 1;
-            if can_trim_lines {
-                if evict_pos[1] >= self.terminal_state.screen_buffer.len() {
-                    return false;
-                }
-
-                let buf = &mut self.terminal_state.screen_buffer;
-                //log::warn!("Removed buffer line {}: {:?}", evict_pos[1], buf[evict_pos[1]]);
-
-                buf.remove(evict_pos[1]);
-
-                if replace_pos[1] < buf.len() {
-                    buf.insert(replace_pos[1], vec![]);
-                }
-
-                true
-            } else {
-                // Perform simulated scrolling in the margins by replacing the contents of each line
-                // in the scrolling region with the next or prev depending on direction,
-                // erasing the final line at the end
-
-                todo!("Scroll region with x margin");
-                /*
-                let mut evict_pos = evict_pos;
-                let mut replace_pos = match up {
-                    true => replace_pos = self.get_cursor_pos_next_line(&evict_pos),
-                    false => self.get_cursor_pos_prev_line(&evict_pos)
-                };
-
-                for _ in 0..region_size_y {
-                    let evict_range = evict_pos[0]..=(evict_pos[0] + region_size_x);
-                    let replace_range = replace_pos[0]..=(replace_pos[0] + region_size_x);
-
-                    // Ensure the evict region is large enough
-                    let evict_buf = &mut self.terminal_state.screen_buffer[evict_pos[1]];
-                    if evict_buf.len() < evict_pos[0] + region_size_x + 1 {
-                        evict_buf.resize(evict_pos[0] + region_size_x + 1, Default::default());
-                    }
-
-                    // Ensure the replacement region is large enough
-                    let replace_buf = &mut self.terminal_state.screen_buffer[replace_pos[1]];
-                    if replace_buf.len() < replace_pos[0] + region_size_x + 1 {
-                        replace_buf.resize(replace_pos[0] + region_size_x + 1, Default::default());
-                    }
-                    let replace_chars = replace_buf[replace_range].to_vec();
-
-                    self.terminal_state.screen_buffer[evict_pos[1]].splice(
-                        evict_range,
-                        replace_chars
-                    );
-
-                    evict_pos = replace_pos;
-                    replace_pos = match up {
-                        true => self.get_cursor_pos_next_line(&replace_pos),
-                        false => self.get_cursor_pos_prev_line(&replace_pos),
-                    };
-                }
-
-                // Erase the final 'scrolled' line
-                self.erase(
-                    evict_pos,
-                    [evict_pos[0] + region_size_x, evict_pos[1]]
-                );
-
-                false
-                */
-            }
-        }
-    }
-
-    /// Advance the screen cursor y by one, potentially scrolling the region if necessary
-    fn advance_screen_cursor_with_scroll(&mut self, down: bool) {
-        let state = &self.terminal_state;
-        let old_screen = state.screen_cursor;
-        let old_home = state.global_cursor_home;
-        let old_global = state.global_cursor;
-
-        if down && state.screen_cursor[1] < state.margin.bottom {
-            self.terminal_state.screen_cursor[1] += 1;
-        } else if !down && state.screen_cursor[1] > state.margin.top {
-            self.terminal_state.screen_cursor[1] -= 1;
-        } else {
-            if self.scroll_region(down, state.margin) {
-                // After messing with the buffer state, recompute the correct global
-                // cursor absolutely rather than trying to use deltas to figure out
-                // how it should change. This could work in the future, but it's very
-                // complicated with many edge cases and this is much simpler and more
-                // reliable. Another downside to this is that it will not continue wrapping
-                // and put things on a new line (which should be ok)
-                self.terminal_state.global_cursor = self.get_cursor_pos_absolute(
-                    &self.terminal_state.screen_cursor
-                );
-            }
-        }
-
-        log::debug!(
-            "[advance_screen_cursor_with_scroll] Screen: {:?} -> {:?}, Global: {:?} -> {:?}, Home: {:?} -> {:?}, down={}",
-            old_screen, self.terminal_state.screen_cursor,
-            old_global, self.terminal_state.global_cursor,
-            old_home, self.terminal_state.global_cursor_home,
-            down
-        );
     }
 
     fn activate_alternate_screen_buffer(&mut self) {
         self.saved_terminal_state = self.terminal_state.clone();
         self.terminal_state = Default::default();
 
-        // Reset default margins
-        self.terminal_state.margin = Margin::get_from_screen_size(
-            self.screen_width as u32,
-            self.screen_height as u32
-        );
+        self.terminal_state.grid.resize(self.screen_width, self.screen_height, false, true);
 
         self.terminal_state.alt_screen_buffer_state = BufferState::Active;
 
@@ -853,48 +547,8 @@ impl Performer {
         let moved_state = std::mem::replace(&mut self.saved_terminal_state, Default::default());
         self.terminal_state = moved_state;
 
-        // Reset default margins
-        self.terminal_state.margin = Margin::get_from_screen_size(
-            self.screen_width as u32,
-            self.screen_height as u32
-        );
-
         log::debug!("[deactivate_alternate_screen_buffer]");
     }
-
-    fn put_char_at_cursor(&mut self, c: char, overwrite: bool) {
-        let state = &mut self.terminal_state;
-
-        while state.global_cursor[1] >= state.screen_buffer.len() {
-            state.screen_buffer.push(vec![]);
-        }
-        let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
-        while state.global_cursor[0] >= buffer_line.len() {
-            buffer_line.push(Default::default());
-        }
-
-        if buffer_line[state.global_cursor[0]].elem != '\0' && !overwrite {
-            return;
-        }
-
-        buffer_line[state.global_cursor[0]] = ScreenBufferElement {
-            elem: c,
-            style: state.style_state
-        };
-    }
-
-    fn remove_characters_at_cursor(&mut self, amount: u32) {
-        let state = &mut self.terminal_state;
-        if state.global_cursor[1] >= state.screen_buffer.len() {
-            return;
-        }
-
-        let offset = state.global_cursor[0];
-        let buffer_line = &mut state.screen_buffer[state.global_cursor[1]];
-        let range = offset..((offset + amount as usize).min(buffer_line.len()));
-        buffer_line.drain(range);
-    }
-
 }
 
 // TO ADD:
@@ -902,6 +556,7 @@ impl Performer {
 // - Cursor modes
 // - Mouse modes (1000-1034)
 // - Origin mode
+// - Insert/replace mode
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
@@ -911,97 +566,41 @@ impl Perform for Performer {
 
         self.action_performed = true;
 
-        // Handle wrapping only when we place a character
-        if self.terminal_state.wants_wrap {
-            self.terminal_state.screen_cursor[0] = 0;
-            self.terminal_state.global_cursor[0] += 1;
-            self.terminal_state.wants_wrap = false;
-            self.advance_screen_cursor_with_scroll(true);
-        }
-
-        self.put_char_at_cursor(c, true);
-
-        // Check for wrap. If we want to wrap, update the state accordingly. Otherwise,
-        // update the cursor directly
-        let state = &mut self.terminal_state;
-        let wrap = state.screen_cursor[0] + 1 >= self.screen_width;
-        if wrap {
-            state.wants_wrap = true;
-        } else {
-            // Advance the cursor
-            state.global_cursor[0] += 1;
-            state.screen_cursor[0] += 1;
-        }
+        self.terminal_state.grid.print_char(c, &self.terminal_state.style_state);
 
         if !c.is_whitespace() {
             self.is_empty = false;
         }
-
-        log::trace!(
-            "Print {:?} {}",
-            c,
-            match wrap {
-                true => "<NEXT WRAP>",
-                false => ""
-            }
-        );
     }
 
     fn execute(&mut self, byte: u8) {
         self.action_performed = true;
 
+        log::trace!("Execute [{:?}]", byte as char);
+
+        let state = &mut self.terminal_state;
         match byte {
             b'\n' => {
-                let old_global = self.terminal_state.global_cursor;
-
-                self.terminal_state.wants_wrap = false;
-                self.terminal_state.global_cursor = self.get_cursor_pos_next_line(
-                    &self.terminal_state.global_cursor
-                );
-
-                self.advance_screen_cursor_with_scroll(true);
-
-                /*
-                log::debug!(
-                    "[\\n] Global: {:?} -> {:?}",
-                    old_global,
-                    self.terminal_state.global_cursor
-                );
-                */
+                state.grid.push_cursor_vertically(true);
             },
             b'\r' => {
-                let old_global = self.terminal_state.global_cursor;
-
-                self.terminal_state.wants_wrap = false;
-                self.terminal_state.global_cursor = self.get_cursor_pos_sol();
-                self.terminal_state.screen_cursor[0] = 0;
-
-                /*
-                log::debug!(
-                    "[\\r] Global: {:?} -> {:?}",
-                    old_global,
-                    self.terminal_state.global_cursor
+                state.grid.set_cursor(
+                    state.grid.get_cursor_sol(state.grid.cursor)
                 );
-                */
+            },
+            b'\t' => {
+                state.grid.set_cursor(
+                    state.grid.get_cursor_next_tab_stop(state.grid.cursor)
+                );
             },
             0x07 => { // Bell
                 log::debug!("Bell!!!");
-            }
+            },
             0x08 => { // Backspace
-                // Move cursor back by one with back-wrapping
-                let state = &mut self.terminal_state;
-                if state.global_cursor[0] > 0 {
-                    state.global_cursor[0] -= 1;
-                    if state.screen_cursor[0] > 0 {
-                        state.screen_cursor[0] -= 1;
-                    } else if state.screen_cursor[1] > 0 {
-                        state.screen_cursor[0] = self.screen_width - 1;
-                        state.screen_cursor[1] -= 1;
-                    }
-                }
+                state.grid.move_backward();
             },
             _ => {
-                log::debug!("[execute] {:02x}", byte);
+                log::debug!("<Unhandled> [execute] {:02x}", byte);
             }
         }
     }
@@ -1030,7 +629,7 @@ impl Perform for Performer {
 
         // TODO: investigate the bell, seems like it is relevant for many commands
 
-        let command = self.parse_osc_command(all_params[0]);
+        let command = self.parse_ascii_integer(all_params[0]);
         let params = match all_params.len() {
             1 => vec![],
             _ => all_params[1].to_vec()
@@ -1049,8 +648,37 @@ impl Perform for Performer {
                 }
             },
             */
+            1337 => { // Update prompt id
+                if params.len() == 0 {
+                    return;
+                }
+
+                self.prompt_id = self.parse_ascii_integer(&params) as u32;
+            },
+            1338 => { // Update current dir
+                if params.len() == 0 {
+                    return;
+                }
+
+                self.current_dir = self.parse_ascii_string(&params);
+            },
+            1339 => { // Update exit code
+                if params.len() == 0 {
+                    return;
+                }
+
+                self.exit_code = Some(self.parse_ascii_integer(&params) as u32);
+            },
+            1340 => { // Set clear-on-resize status
+                if params.len() == 0 {
+                    return;
+                }
+
+                let state = self.parse_ascii_integer(&params) as u32;
+                self.terminal_state.clear_on_resize = state == 1;
+            },
             _ => {
-                log::debug!("[osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
+                log::debug!("<Unhandled> [osc_dispatch] params={:?} bell_terminated={}", all_params, bell_terminated);
             }
         }
 
@@ -1060,69 +688,93 @@ impl Perform for Performer {
         self.action_performed = true;
 
         let params = self.parse_params(params);
+        //log::warn!("Handling CSI '{:?}' {:?}", c, params);
         match c {
+            '@' => { // Insert characters
+                let state = &mut self.terminal_state;
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as u32;
+                log::debug!("Insert chars [{:?}]", amount);
+                state.grid.insert_or_remove_cells(state.grid.cursor, amount, false);
+            },
             'A' => {
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
                 log::debug!("Cursor up [{:?}]", amount);
-                self.set_cursor_pos_relative(&[0, -amount as isize])
+                state.grid.set_cursor(
+                    state.grid.get_cursor_relative(state.grid.cursor, [0, -amount])
+                );
             },
             'B' => {
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
                 log::debug!("Cursor down [{:?}]", amount);
-                self.set_cursor_pos_relative(&[0, amount])
+                state.grid.set_cursor(
+                    state.grid.get_cursor_relative(state.grid.cursor, [0, amount])
+                );
             },
             'C' => {
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
                 log::debug!("Cursor right [{:?}]", amount);
-                self.set_cursor_pos_relative(&[amount, 0])
+                state.grid.set_cursor(
+                    state.grid.get_cursor_relative(state.grid.cursor, [amount, 0])
+                );
             },
             'D' => {
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
                 log::debug!("Cursor left [{:?}]", amount);
-                self.set_cursor_pos_relative(&[-amount, 0])
+                state.grid.set_cursor(
+                    state.grid.get_cursor_relative(state.grid.cursor, [-amount, 0])
+                );
             },
             'E' => {
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
                 log::debug!("Cursor next line [{:?}]", amount);
-                let mut new_screen = self.get_relative_screen_cursor(&[0, amount]);
-                new_screen[0] = 0;
-                self.set_cursor_pos_absolute(&new_screen);
+                state.grid.set_cursor(state.grid.get_cursor_next_line(state.grid.cursor));
+                state.grid.cursor[0] = 0;
             },
             'F' => {
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as isize;
                 log::debug!("Cursor preceding line [{:?}]", amount);
-                let mut new_screen = self.get_relative_screen_cursor(&[0, -amount]);
-                new_screen[0] = 0;
-                self.set_cursor_pos_absolute(&new_screen);
+                state.grid.set_cursor(state.grid.get_cursor_prev_line(state.grid.cursor));
+                state.grid.cursor[0] = 0;
             },
             'G' => { // Place cursor in row
+                let state = &mut self.terminal_state;
                 let col = match params.len() {
                     0 | 1 if params[0] == 0 => 0,
                     _ => params[0] as usize - 1
                 };
                 log::debug!("Cursor set col [{}]", col);
-                self.set_cursor_pos_absolute(&[col, self.terminal_state.screen_cursor[1]]);
+                state.grid.set_cursor([col, state.grid.cursor[1]]);
             },
-            'H' => { // Place cursor
+            'H' | 'f' => { // Place cursor
                 // Params have row, col format
+                let state = &mut self.terminal_state;
                 let row = match params.len() {
                     1..=2 if params[0] > 0 => params[0] as usize - 1,
                     _ => 0
@@ -1132,53 +784,52 @@ impl Perform for Performer {
                     _ => 0
                 };
                 log::debug!("Cursor set position [{}, {}]", col, row);
-                self.set_cursor_pos_absolute(&[col, row]);
+                state.grid.set_cursor([col, row]);
             },
             'J' => { // Erase in display
                 //log::debug!("Erase in display");
-                let min_cursor = self.terminal_state.global_cursor_home;
-                let max_cursor = self.get_cursor_pos_absolute(
-                    &self.get_max_screen_cursor()
-                );
+                let state = &mut self.terminal_state;
+                let min_cursor = [0, 0];
+                let max_cursor = state.grid.get_cursor_max();
                 let code = match params.len() {
                     1 => params[0],
                     _ => 0
                 };
                 match code {
-                    0 => self.erase(self.terminal_state.global_cursor, max_cursor),
-                    1 => self.erase(self.terminal_state.global_cursor, min_cursor),
+                    0 => state.grid.erase(state.grid.cursor, max_cursor),
+                    1 => state.grid.erase(state.grid.cursor, min_cursor),
                     2 => {
-                        self.erase(min_cursor, max_cursor);
-                        self.terminal_state.global_cursor = min_cursor;
-                        self.terminal_state.screen_cursor = [0, 0];
+                        state.grid.erase(min_cursor, max_cursor);
+                        state.grid.set_cursor(min_cursor);
                     },
-                    3 => {}
                     _ => {}
                 }
             },
             'K' => { // Erase in line
                 //log::debug!("Erase in line");
+                let state = &mut self.terminal_state;
                 let code = match params.len() {
                     1 => params[0],
                     _ => 0
                 };
                 match code {
-                    0 => self.erase(
-                        self.terminal_state.global_cursor,
-                        self.get_cursor_pos_eol()
+                    0 => state.grid.erase(
+                        state.grid.cursor,
+                        state.grid.get_cursor_eol(state.grid.cursor)
                     ),
-                    1 => self.erase(
-                        self.terminal_state.global_cursor,
-                        self.get_cursor_pos_sol()
+                    1 => state.grid.erase(
+                        state.grid.cursor,
+                        state.grid.get_cursor_sol(state.grid.cursor)
                     ),
-                    2 => self.erase(
-                        self.get_cursor_pos_sol(),
-                        self.get_cursor_pos_eol()
+                    2 => state.grid.erase(
+                        state.grid.get_cursor_sol(state.grid.cursor),
+                        state.grid.get_cursor_eol(state.grid.cursor)
                     ),
                     _ => {}
                 }
             },
             'L' | 'M' => { // Insert/Remove lines
+                let state = &mut self.terminal_state;
                 let remove = c == 'M';
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
@@ -1192,15 +843,43 @@ impl Perform for Performer {
                     },
                     amount
                 );
-                self.insert_or_remove_lines(remove, amount);
+                state.grid.insert_or_remove_lines(state.grid.cursor, amount, remove);
             },
             'P' => { // Delete characters
+                let state = &mut self.terminal_state;
                 let amount = match params.len() {
                     0 | 1 if params[0] == 0 => 1,
                     _ => params[0]
                 } as u32;
                 log::debug!("Delete chars [{:?}]", amount);
-                self.remove_characters_at_cursor(amount);
+                state.grid.insert_or_remove_cells(state.grid.cursor, amount, true);
+            },
+            'S' | 'T' => { // Scroll region
+                let state = &mut self.terminal_state;
+                if intermediates.len() != 0 {
+                    return;
+                }
+                let amount = match params.len() {
+                    1 if params[0] > 0 => params[0] as usize,
+                    _ => 1
+                };
+                let up = c == 'S';
+                log::debug!("Scroll {} by {}", if up { "up" } else { "down" }, amount);
+                for _ in 0..amount {
+                    // TODO: improve perf
+                    state.grid.scroll(up);
+                }
+            },
+            'X' => { // 'Erase' characters
+                let state = &mut self.terminal_state;
+                let amount = match params.len() {
+                    0 | 1 if params[0] == 0 => 1,
+                    _ => params[0]
+                } as isize;
+                log::debug!("Erase chars [{:?}]", amount);
+                let start = state.grid.cursor;
+                let end = state.grid.get_cursor_relative(start, [amount, 0]);
+                state.grid.erase(start, end);
             },
             'c' => { // Send device attributes
                 if !params.is_empty() && params[0] != 0 {
@@ -1221,6 +900,26 @@ impl Perform for Performer {
                     _ => {}
                 }
             },
+            'd' => { // Set line position absolute
+                let state = &mut self.terminal_state;
+                let row = match params.len() {
+                    1 if params[0] > 0 => params[0] as usize - 1,
+                    _ => 0
+                };
+                log::debug!("Set line position abs [_, {}]", row);
+                state.grid.set_cursor([state.grid.cursor[0], row]);
+            },
+            'e' => { // Set line position relative
+                let state = &mut self.terminal_state;
+                let row = match params.len() {
+                    1 if params[0] > 0 => params[0] as isize - 1,
+                    _ => 0
+                };
+                log::debug!("Set line position relative [_, +{}]", row);
+                state.grid.set_cursor(
+                    state.grid.get_cursor_relative(state.grid.cursor, [0, row])
+                );
+            },
             'h' | 'l' => {
                 if params.len() != 1 {
                     return;
@@ -1236,6 +935,8 @@ impl Perform for Performer {
                     true => {},
                     false => {
                         match params[0] {
+                            1 => self.terminal_state.application_cursor_keys = enabled,
+                            7 => self.terminal_state.grid.autowrap = enabled,
                             25 => self.terminal_state.cursor_state.visible = enabled,
                             1000 => self.terminal_state.mouse_tracking_mode = match enabled {
                                 true => MouseTrackingMode::Default,
@@ -1270,7 +971,7 @@ impl Perform for Performer {
                                     BufferState::Enabled => self.terminal_state.alt_screen_buffer_state = BufferState::Disabled,
                                     BufferState::Disabled => {}
                                 }
-                            }
+                            },
                             // These should technically do different things, but this implementation  
                             // always saves & restores the cursor so we can just treat them as the same
                             1047 | 1049 => match self.terminal_state.alt_screen_buffer_state {
@@ -1282,8 +983,9 @@ impl Perform for Performer {
                                 }
                                 BufferState::Disabled => {}
                                 _ => {}
-                            }
-                            _ => {}
+                            },
+                            2004 => self.terminal_state.bracketed_paste_enabled = enabled,
+                            _ => log::debug!("<Unhandled> Mode {} = {}", params[0], enabled)
                         }
                     }
                 }
@@ -1314,8 +1016,8 @@ impl Perform for Performer {
                     6 => { // Report cursor position
                         let esc_str = format!(
                             "\x1b[{};{}R",
-                            state.screen_cursor[1] + 1,
-                            state.screen_cursor[0] + 1
+                            state.grid.cursor[1] + 1,
+                            state.grid.cursor[0] + 1
                         );
                         self.output_stream.extend_from_slice(esc_str.as_bytes());
                     },
@@ -1364,9 +1066,8 @@ impl Perform for Performer {
                     return;
                 }
 
-                self.terminal_state.margin.top = top;
-                self.terminal_state.margin.bottom = bottom;
-                self.set_cursor_pos_absolute(&[0, 0]);
+                self.terminal_state.grid.set_vertical_margin(top, bottom);
+                self.terminal_state.grid.set_cursor([0, 0]);
 
                 log::debug!("Scroll margin Y: [{:?}, {:?}]", top, bottom);
             },
@@ -1384,15 +1085,14 @@ impl Perform for Performer {
                     return;
                 }
 
-                self.terminal_state.margin.left = left;
-                self.terminal_state.margin.right = right;
-                self.set_cursor_pos_absolute(&[0, 0]);
+                self.terminal_state.grid.set_horizontal_margin(left, right);
+                self.terminal_state.grid.set_cursor([0, 0]);
 
                 log::debug!("Scroll margin X: [{:?}, {:?}]", left, right);
             },
             _ => {
                 log::debug!(
-                    "[csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
+                    "<Unhandled> [csi_dispatch] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
                     params, intermediates, ignore, c
                 );
             }
@@ -1401,24 +1101,20 @@ impl Perform for Performer {
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
         self.action_performed = true;
-        //log::debug!("Esc [{:?}]", byte as char);
+
+        log::trace!("Esc [{:?}]", byte as char);
 
         match byte {
             b'B' => {},
             b'M' => { // Reverse index
-                let old_global = self.terminal_state.global_cursor;
+                let old_cursor = self.terminal_state.grid.cursor;
 
-                self.terminal_state.wants_wrap = false;
-                self.terminal_state.global_cursor = self.get_cursor_pos_prev_line(
-                    &self.terminal_state.global_cursor
-                );
-
-                self.advance_screen_cursor_with_scroll(false);
+                self.terminal_state.grid.push_cursor_vertically(false);
 
                 log::debug!(
-                    "[reverse_index] Global: {:?} -> {:?}",
-                    old_global,
-                    self.terminal_state.global_cursor
+                    "[reverse_index] Cursor: {:?} -> {:?}",
+                    old_cursor,
+                    self.terminal_state.grid.cursor
                 );
             },
             // Special sequences generated by the screen-256color term we are claiming
@@ -1427,7 +1123,7 @@ impl Perform for Performer {
             0x5c => self.ignore_print = false,
             _ => {
                 log::debug!(
-                    "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
+                    "<Unhandled> [esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
                     intermediates, ignore, byte
                 );
             }
@@ -1456,7 +1152,7 @@ impl fmt::Debug for ScreenBufferElement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SBufElem: ")?;
         write!(f, "C: {:?}, ", self.elem)?;
-        write!(f, "STY: {:?}, ", self.style)?;
+        //write!(f, "STY: {:?}, ", self.style)?;
         Ok(())
     }
 }

@@ -32,6 +32,8 @@ impl<T: Default + Copy> Texture<T> {
         unsafe {
             gl::GenTextures(1, &mut tex_id);
             gl::BindTexture(gl::TEXTURE_2D, tex_id);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
             gl::TexStorage2D(gl::TEXTURE_2D, 1, internal_format.unwrap(), width as i32, height as i32);
             gl::TexSubImage2D(
                 gl::TEXTURE_2D, 
